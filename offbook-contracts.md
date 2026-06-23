@@ -6,7 +6,7 @@
 
 **Purpose:** freeze the seams so a team of agents can build v1 modules in parallel without colliding. These types and endpoints are the contract; everything else is implementation.
 
-**Vocabulary (locked):** the connecting party under development = **`client`** (this adopter's client is the SPA — docs still say "the SPA"). The tool's own emissions = **`mock`**. Channel/flow direction = **`toClient` / `fromClient`**. MQTT terms (`topic`, `qos`, `retain`, bindings) stay concrete — we de-SPA-ify, we do **not** de-MQTT-ify (transport abstraction is the n=2 fork, §3).
+**Vocabulary (locked):** the connecting party under development = **`client`** (this adopter's client is a browser application). The tool's own emissions = **`mock`**. Channel/flow direction = **`toClient` / `fromClient`**. MQTT terms (`topic`, `qos`, `retain`, bindings) stay concrete — we generalize the **client** vocabulary, **not** the MQTT transport (transport abstraction is the n=2 fork, §3).
 
 ---
 

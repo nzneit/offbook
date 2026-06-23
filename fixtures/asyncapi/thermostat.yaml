@@ -4,7 +4,7 @@ info:
   version: 1.4.0
   description: >-
     Controls and reports thermostat device state. The documented application is
-    the SERVICE; the SPA is the client. The running example across the docs.
+    the SERVICE; the browser application is the client. The running example across the docs.
 servers:
   mosquitto:
     host: localhost:1883

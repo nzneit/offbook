@@ -4,7 +4,7 @@
 
 **Companion to:** `offbook-design.md` — the canonical doc for *all* decisions and rationale. This handoff is **what to do, in what order**. Every "why" lives in the design doc; section refs (e.g. §5) point there.
 
-**One-line goal:** a self-contained dev service that mocks the SPA's MQTT backends from their AsyncAPI specs, validates the SPA's traffic against the contract at dev-time, and reproduces real MQTT timing — moving contract-break and async-bug detection from deploy-time to dev-time. (§1)
+**One-line goal:** a self-contained dev service that mocks the browser application's MQTT backends from their AsyncAPI specs, validates the browser application's traffic against the contract at dev-time, and reproduces real MQTT timing — moving contract-break and async-bug detection from deploy-time to dev-time. (§1)
 
 **Decision rule:** when anything is ambiguous, choose what best kills the three pains — contract drift undetected until deploy, no async realism, manual mock rot. (§1–2)
 
@@ -13,11 +13,11 @@
 ## Sequence (do in this order)
 
 ### Step 1 — De-risk before building (cheap, may change scope)
-1. **WS-fidelity spike.** Point the real SPA's MQTT client at a bare Aedes ws listener; confirm connect + subscribe + retained-message receipt using the **same protocol level, WS path, subprotocol, and auth shape as prod**. This probes the one suspected fork divergence (WebSocket transport). (§3, §12.1)
-2. **Capture the SPA's actual `connect()` call** — auth fields, ws URL/path, subprotocol, exact protocol level (3.1.1 vs 3.1). Feeds Step 1 and settles auth. (§8, §12.2)
-3. **Adopt-vs-build check — RESOLVED: build is justified.** Verified via research + Microcks/Specmatic source-code reading: neither tool covers the gap (*embedded broker + MQTT-over-WS for a browser SPA + loud bidirectional dev-time validation + stateful scenarios + MQTT-semantic timing faults*) off-the-shelf. Microcks is a provider-side mock-emitter (native MQTT/TCP; its WS binding is raw Jakarta WS, not MQTT-over-WS; no client-publish validation); Specmatic is a CI contract-test runner (native MQTT tcp/ssl, Kafka-only in-memory broker, stateless, Enterprise). Reuse their schema-validation + conformance patterns rather than rebuild. Residual: confirm ergonomic/coverage fit against the real specs and re-verify capability boundaries (both tools move fast) before committing. (§12.6)
+1. **WS-fidelity spike.** Point the real browser application's MQTT client at a bare Aedes ws listener; confirm connect + subscribe + retained-message receipt using the **same protocol level, WS path, subprotocol, and auth shape as prod**. This probes the one suspected fork divergence (WebSocket transport). (§3, §12.1)
+2. **Capture the browser application's actual `connect()` call** — auth fields, ws URL/path, subprotocol, exact protocol level (3.1.1 vs 3.1). Feeds Step 1 and settles auth. (§8, §12.2)
+3. **Adopt-vs-build check — RESOLVED: build is justified.** Verified via research + Microcks/Specmatic source-code reading: neither tool covers the gap (*embedded broker + MQTT-over-WS for a browser application + loud bidirectional dev-time validation + stateful scenarios + MQTT-semantic timing faults*) off-the-shelf. Microcks is a provider-side mock-emitter (native MQTT/TCP; its WS binding is raw Jakarta WS, not MQTT-over-WS; no client-publish validation); Specmatic is a CI contract-test runner (native MQTT tcp/ssl, Kafka-only in-memory broker, stateless, Enterprise). Reuse their schema-validation + conformance patterns rather than rebuild. Residual: confirm ergonomic/coverage fit against the real specs and re-verify capability boundaries (both tools move fast) before committing. (§12.6)
 
-**Gate:** items 1–2 still gate Step 2 (the WS-fidelity spike + capturing the SPA's `connect()`). Item 3 (adopt-vs-build) is **resolved in favor of building** (§12.6); only an ergonomic/coverage confirmation against the real specs remains, and it no longer threatens to flip the decision.
+**Gate:** items 1–2 still gate Step 2 (the WS-fidelity spike + capturing the browser application's `connect()`). Item 3 (adopt-vs-build) is **resolved in favor of building** (§12.6); only an ergonomic/coverage confirmation against the real specs remains, and it no longer threatens to flip the decision.
 
 ### Step 2 — Build the v1 core (only if build is confirmed)
 Scaffold the separate repo and implement, roughly in this order:

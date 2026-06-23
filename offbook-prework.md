@@ -51,7 +51,7 @@ Parallel **autonomous agents** specifically need: **frozen seams** (so they don'
 - **Refs:** §5, §4, §12.4.
 
 ### P4 — Specify the two prerequisite spikes as deliverables
-- [x] **Specified** in `offbook-build-plan.md` §5 (pass/fail + output artifacts). **Execution is empirical** — needs the real SPA / repos — so it remains for the build team to *run*; the spec is done.
+- [x] **Specified** in `offbook-build-plan.md` §5 (pass/fail + output artifacts). **Execution is empirical** — needs the real browser application / repos — so it remains for the build team to *run*; the spec is done.
 - **Why:** §12.1 (WS-fidelity) and §12.2 (capture `connect()`) are blocking but underspecified as *deliverables*. Each needs a concrete pass/fail and a named **output artifact** agents consume: the `connect()` capture → a config fixture; the WS spike → a go/no-go + any Aedes listener config. Both can run **immediately, in parallel**, and may adjust the broker module before it's built.
 - **Refs:** §12.1, §12.2, §8, §3 ("Broker fidelity").
 

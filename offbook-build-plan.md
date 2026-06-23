@@ -56,7 +56,7 @@ offbook/
 ### Port map (all configurable; defaults)
 | Listener | Default | Notes |
 |---|---|---|
-| Broker **ws** (SPA connects) | `9001` | **must match the SPA's connect URL** — confirm in the §12.2 spike |
+| Broker **ws** (browser app connects) | `9001` | **must match the browser application's connect URL** — confirm in the §12.2 spike |
 | Broker **tcp** | `1883` | standard MQTT |
 | Control plane (side port) | `9080` | HTTP `/v1/*`; localhost only |
 
@@ -95,8 +95,8 @@ All of the handoff's v1 checklist, each with a passing test. The **non-negotiabl
 
 ## 5. The de-risking spikes (P4 — runnable in parallel now)
 These gate/scope the build and are **not** on the module critical path — run them first/alongside (§12.1–2, §12.6):
-1. **WS-fidelity spike** — point the real SPA's `mqtt.js` at a bare Aedes ws listener; confirm connect+subscribe+retained receipt at the SPA's actual protocol level/path/subprotocol/auth. *Artifact:* go/no-go + any Aedes listener config; feeds `broker/`.
-2. **Capture the SPA's `connect()`** — auth fields, ws URL/path, subprotocol, protocol level; note any **QoS 2** use. *Artifact:* a config fixture + the broker ws port default.
+1. **WS-fidelity spike** — point the real browser application's `mqtt.js` at a bare Aedes ws listener; confirm connect+subscribe+retained receipt at the browser application's actual protocol level/path/subprotocol/auth. *Artifact:* go/no-go + any Aedes listener config; feeds `broker/`.
+2. **Capture the browser application's `connect()`** — auth fields, ws URL/path, subprotocol, protocol level; note any **QoS 2** use. *Artifact:* a config fixture + the broker ws port default.
 3. **Adopt-vs-build** — already resolved (build justified, §12.6); the residual is an ergonomic fit check against the real specs, not a blocker.
 
 ---

@@ -31,7 +31,7 @@ L2 scenarios are **declarative YAML data** — never code. The escape to code is
           target:    "{{payload.target}}"
           status:    accepted
           updatedAt: "{{now}}"           # virtual seeded clock (not wall-clock)
-        delay: 150-300ms                 # seeded jitter, measured from the SPA publish
+        delay: 150-300ms                 # seeded jitter, measured from the browser application publish
     - emit:
         topic: state/{{deviceId}}
         payload: { deviceId: "{{deviceId}}", status: heating }
@@ -61,7 +61,7 @@ A scenario has three top-level fields:
 | Field | Required | Meaning |
 |---|---|---|
 | `name` | yes | Globally unique. Used by `POST /trigger/{name}`, the validation log, and reset. |
-| `when` | no | Present ⇒ **reactive** (fires on a matching SPA publish). Absent ⇒ **on-demand only**. Either way, the `name` makes it triggerable. |
+| `when` | no | Present ⇒ **reactive** (fires on a matching browser application publish). Absent ⇒ **on-demand only**. Either way, the `name` makes it triggerable. |
 | `then` | yes | An **ordered list of steps** (≥1). One-shot is the degenerate single-element list. |
 
 - The only step kind in v1 is `emit`. (v2 fault steps are additive — see §6.)
@@ -77,7 +77,7 @@ A scenario has three top-level fields:
 
 ## 4. Matching (D3)
 
-`when` only matches messages the **SPA publishes** (`direction: fromClient` in the §5 normalized model).
+`when` only matches messages the **browser application publishes** (`direction: fromClient` in the §5 normalized model).
 
 ### Topic pattern + parameter binding
 - `{param}` — matches exactly one level **and captures** it (a "named `+`"); available to templating as `{{param}}`. Verbatim the AsyncAPI channel-address form, so authors copy channels straight from the spec.

@@ -3,18 +3,18 @@
 *Knows every line. Needs no cast.*
 
 **Status:** Draft / brainstorm consolidation (revised after a state-of-the-art comparison pass and broker/protocol investigation)
-**Scope:** Local development tooling for a React SPA that communicates with backend services over MQTT-via-WebSockets.
+**Scope:** Local development tooling for a browser application that communicates with backend services over MQTT-via-WebSockets.
 **Settled headline:** MQTT 3.1.1; mock the services, not the broker; Aedes as dev stand-in. Details and rationale in §3.
 
 ---
 
 ## 1. Problem & Motivation
 
-A React SPA communicates with several backend services using MQTT messages carried over WebSockets. Those backend services each publish an **AsyncAPI specification** in their repositories describing the topics and message payloads they use.
+A browser application communicates with several backend services using MQTT messages carried over WebSockets. Those backend services each publish an **AsyncAPI specification** in their repositories describing the topics and message payloads they use.
 
-Today, the SPA mocks these communications internally using hardcoded strings/objects. This approach has three concrete failures:
+Today, the browser application mocks these communications internally using hardcoded strings/objects. This approach has three concrete failures:
 
-1. **Contract drift goes undetected until deploy.** The hardcoded mocks do not reliably match the specs the real services dictate. Mismatches aren't noticed until the SPA is deployed to a real environment, making breakage late and expensive to diagnose.
+1. **Contract drift goes undetected until deploy.** The hardcoded mocks do not reliably match the specs the real services dictate. Mismatches aren't noticed until the browser application is deployed to a real environment, making breakage late and expensive to diagnose.
 2. **No emulation of real responsiveness.** The fixed mocks respond instantly/synchronously and do not reproduce the async character of real MQTT communication. This has caused async bugs (ordering/timing/race issues) that only appear against real latency.
 3. **Manual upkeep / rot.** The hardcoded mocks must be updated by hand and silently fall out of date.
 
@@ -24,14 +24,14 @@ The current mocks fail specifically where they diverge from real protocol behavi
 
 > **Move contract-break and async-bug detection from deploy-time to dev-time.**
 
-A secondary but significant benefit: the tool becomes the canonical **discovery surface** for "what topics and message shapes exist," replacing the SPA's copy-pasted constants.
+A secondary but significant benefit: the tool becomes the canonical **discovery surface** for "what topics and message shapes exist," replacing the browser application's copy-pasted constants.
 
 ---
 
 ## 2. Goals & Non-Goals
 
 ### Goals
-- Self-contained, runnable locally in a container, to support local development of the SPA.
+- Self-contained, runnable locally in a container, to support local development of the browser application.
 - Consume each service's AsyncAPI spec as the source of truth for topics and payload shapes.
 - **Bidirectional contract validation**, surfaced loudly and locally.
 - Faithful emulation of MQTT async behavior (timing) sufficient to catch real async bugs.
@@ -39,7 +39,7 @@ A secondary but significant benefit: the tool becomes the canonical **discovery 
 - Good developer ergonomics across the distinct moments the tool is used (see §9).
 
 ### Non-Goals (at least initially)
-- **Not** emitting TypeScript types or other artifacts for external consumers. Any schemas generated are internal to the mocking/faking stack only. (We are deliberately *not* solving the SPA's copy-paste habit by emitting types; we build around the SPA as-is.)
+- **Not** emitting TypeScript types or other artifacts for external consumers. Any schemas generated are internal to the mocking/faking stack only. (We are deliberately *not* solving the browser application's copy-paste habit by emitting types; we build around the browser application as-is.)
 - **Not** validating real authentication. Accept-all auth for now (revisit later — see §8).
 - **Not** a production broker or a prod-parity ops tool. It is a dev appliance.
 
@@ -50,7 +50,7 @@ A secondary but significant benefit: the tool becomes the canonical **discovery 
 ```
                     ┌──────────────────────────────────────┐
                     │            Mock Process (TS)          │
-   SPA ──ws+mqtt3.1.1─►│  Aedes broker (ws + tcp listeners)    │
+browser ──ws+mqtt3.1.1─►│  Aedes broker (ws + tcp listeners)    │
                     │            │                          │
                     │   ┌────────▼─────────┐                │
                     │   │  Spec Registry   │ ◄── AsyncAPI   │
@@ -77,23 +77,23 @@ A secondary but significant benefit: the tool becomes the canonical **discovery 
 
 ### Key decisions
 
-- **Embedded Aedes broker (one TypeScript process).** Aedes is embedded directly so the broker and the behavior engine share state and lifecycle. This is required for the layered behavior model and for validating/intercepting in-flight messages at the broker boundary. The broker exposes both a **WebSocket listener** (so the SPA connects exactly as in prod) and a TCP listener.
+- **Embedded Aedes broker (one TypeScript process).** Aedes is embedded directly so the broker and the behavior engine share state and lifecycle. This is required for the layered behavior model and for validating/intercepting in-flight messages at the broker boundary. The broker exposes both a **WebSocket listener** (so the browser application connects exactly as in prod) and a TCP listener.
   - Rejected alternatives: standalone Mosquitto (the engine becomes just another client reaching into the broker — awkward for stateful fakes and in-flight observation; and it is not the prod broker either, so it buys no real parity) and EMQX (heavy ops features irrelevant to a throwaway local fake). Running the *real* prod broker in dev is also off the table: it is a proprietary, hardware-optimized fork unlikely to be distributable or laptop-runnable. Hence a near-standard stand-in (Aedes) plus "mock the services, not the broker."
-- **TypeScript**, chosen because the AsyncAPI tooling ecosystem is strongest in JS/TS (`@asyncapi/parser` is the reference parser) and Aedes is native. (Sharing types with the SPA is explicitly *not* a goal.)
+- **TypeScript**, chosen because the AsyncAPI tooling ecosystem is strongest in JS/TS (`@asyncapi/parser` is the reference parser) and Aedes is native. (Sharing types with the browser application is explicitly *not* a goal.)
 - **HTTP control plane as the substrate**, with a **Bun CLI** as the human front-end over it. HTTP is the substrate because CI/other consumers will drive it programmatically and shouldn't have to shell out to the CLI; the CLI is a thin client so humans and machines drive the same surface.
 - **Protocol: MQTT 3.1.1** (confirmed — the prod broker negotiates 3.1.1; see "Broker fidelity" below). **QoS 1** (at-least-once) and **retained last message** are the defaults, configurable per-topic (per-service default + per-topic override). Aedes supports MQTT 3.1/3.1.1 fully, so this is unblocked. **MQTT 5 is explicitly out of scope** — prod does not use it, so emulating it would be *anti*-fidelity.
 - **Mock the services, not the broker.** The prod broker is a proprietary, hardware-optimized fork derived from ActiveMQ (assumed ActiveMQ Classic, given MQTT 3.1.1). We deliberately do **not** attempt to run or reproduce that broker. Aedes is a near-standard MQTT 3.1.1 stand-in for the *transport*; the tool's job is to fake the **services** that sit behind the broker, which is what the AsyncAPI specs actually describe. This keeps the conceptual boundary clean and means the proprietary fork's existence mostly does not burden the design.
-- **Separate repository.** The tool lives in its own repo (it may be used by more than just the SPA). Consumers use it by *running it and querying it*, not by importing from it.
+- **Separate repository.** The tool lives in its own repo (it may be used by more than just the browser application). Consumers use it by *running it and querying it*, not by importing from it.
 
 ### Broker fidelity (the one suspected divergence: WebSockets)
 
 The prod fork is *assumed* near-standard MQTT 3.1.1, so Aedes reproduces its QoS, retained-message, and topic behavior. There is no readily-available documentation for the fork — only some scattered docs and tribal knowledge — so this assumption is **unverified and characterized empirically**, not from any spec (AsyncAPI specs describe service payloads, never broker behavior).
 
-The **highest-risk seam is the WebSocket transport layer**, because that is exactly where a proprietary fork is most likely to have customized (subprotocol name, path, framing, handshake headers, TLS termination) *and* it is the layer the SPA's connect code is tuned to. If the fork's WS handshake differs from Aedes's defaults, the SPA could connect cleanly to the mock and fail against prod (or vice versa) — the precise "works in dev, breaks in prod" failure this project exists to kill. This is the load-bearing thing the verification spike (§12) probes. Posture: *try Aedes's defaults, iterate; if the SPA does not connect unchanged, bend Aedes (its hooks/listener config exist for this) to match the fork.* Deeper characterization of the fork's non-WS divergences is deferred unless the spike or later bugs reveal a problem.
+The **highest-risk seam is the WebSocket transport layer**, because that is exactly where a proprietary fork is most likely to have customized (subprotocol name, path, framing, handshake headers, TLS termination) *and* it is the layer the browser application's connect code is tuned to. If the fork's WS handshake differs from Aedes's defaults, the browser application could connect cleanly to the mock and fail against prod (or vice versa) — the precise "works in dev, breaks in prod" failure this project exists to kill. This is the load-bearing thing the verification spike (§12) probes. Posture: *try Aedes's defaults, iterate; if the browser application does not connect unchanged, bend Aedes (its hooks/listener config exist for this) to match the fork.* Deeper characterization of the fork's non-WS divergences is deferred unless the spike or later bugs reveal a problem.
 
 ### Generalizability & layering boundaries
 
-~70% of this design is a general service-mocking engine (AsyncAPI ingestion, the L3/L2/L1 behavior model, bidirectional validation, the control plane, the v2 resolution/lockfile machinery) — none of it specific to MQTT or to the SPA. The genuinely coupled parts are narrow: the **MQTT-over-WebSockets transport** (Aedes), the **broker-mediated topology**, the **ActiveMQ-fork specifics**, and **browser-SPA ergonomics**. A future team on Kafka/AMQP/etc. would reuse the upper layers and replace only the transport — a fork point, not a config knob.
+~70% of this design is a general service-mocking engine (AsyncAPI ingestion, the L3/L2/L1 behavior model, bidirectional validation, the control plane, the v2 resolution/lockfile machinery) — none of it specific to MQTT or to the browser application. The genuinely coupled parts are narrow: the **MQTT-over-WebSockets transport** (Aedes), the **broker-mediated topology**, the **ActiveMQ-fork specifics**, and **browser-application ergonomics**. A future team on Kafka/AMQP/etc. would reuse the upper layers and replace only the transport — a fork point, not a config knob.
 
 **Do NOT build a transport-pluggable platform now.** At n=1, an abstraction encodes the one known case and gets refactored at n=2 anyway. The trigger to extract a real `TransportAdapter` interface is an actual second adopter.
 
@@ -110,7 +110,7 @@ Behavior is resolved with **first-match-wins, in order L3 → L2 → L1**. This 
 
 > **Refinement (P1.D3 — see `offbook-contracts.md` §3):** the layers participate by *trigger path*, not as one flat stack. **Reactive** (the client publishes) resolves **L3 → L2** (L1 has no reactive role — unmatched publishes simply get no scripted reply). **Proactive** (subscribe / autonomous tick) resolves **L3 → L1** — L1 is the floor that renders the UI on day one. **Explicit** (`POST /trigger/{name}`) fires a named L2 scenario. So **L1 = proactive floor, L2 = reactive/triggered, L3 = both.**
 
-- **L1 — Schema-valid fake (the floor).** Generate spec-valid payloads from the channel's JSON Schema using **`json-schema-faker`** (the long-standing standard; its 2025–2026 **0.6.x rewrite** is TypeScript/Bun-first with zero prod deps, a `seed` option using a Mulberry32 PRNG, and JSON-Schema-2020-12 composition support — aligning with both the seeded-determinism goal and the Bun choice). **Caveat: the 0.6.x rewrite is recent (v0.6.2 published 2026-05-25) with a thin track record — the "de-facto standard" reputation belongs to the mature 0.5.x line — so pin the exact version and lean on the Ajv recheck below.** **Pin the version, use the `seed` option, and run every generated payload back through Ajv before emitting** — the faker has known weak spots on complex `allOf`/`oneOf`/`anyOf`, external `$ref`, and unusual `format`, so the Ajv recheck makes any non-conforming output fail loudly instead of silently emitting invalid mock data. Any topic the SPA subscribes to that the spec marks as "SPA-receives" can emit spec-valid filler. Zero config; instantly unblocks the UI. Spec-valid **by construction**, which directly addresses contract drift on the service→SPA direction.
+- **L1 — Schema-valid fake (the floor).** Generate spec-valid payloads from the channel's JSON Schema using **`json-schema-faker`** (the long-standing standard; its 2025–2026 **0.6.x rewrite** is TypeScript/Bun-first with zero prod deps, a `seed` option using a Mulberry32 PRNG, and JSON-Schema-2020-12 composition support — aligning with both the seeded-determinism goal and the Bun choice). **Caveat: the 0.6.x rewrite is recent (v0.6.2 published 2026-05-25) with a thin track record — the "de-facto standard" reputation belongs to the mature 0.5.x line — so pin the exact version and lean on the Ajv recheck below.** **Pin the version, use the `seed` option, and run every generated payload back through Ajv before emitting** — the faker has known weak spots on complex `allOf`/`oneOf`/`anyOf`, external `$ref`, and unusual `format`, so the Ajv recheck makes any non-conforming output fail loudly instead of silently emitting invalid mock data. Any topic the browser application subscribes to that the spec marks `toClient` (browser-receives) can emit spec-valid filler. Zero config; instantly unblocks the UI. Spec-valid **by construction**, which directly addresses contract drift on the service→browser-application direction.
 - **L2 — Scenarios (authored).** The primary authored layer: scripted request→response behavior with **timing** (see §6). This is where developers express the interesting, causal behavior the spec cannot describe. **Authoring format is TBD — see §10.**
 - **L3 — Stateful handlers.** Small TS modules registered per topic prefix, holding state (e.g. a fake device tracking on/off and ramping a value), with `publish()` injected.
 
@@ -124,9 +124,9 @@ AsyncAPI specs describe **shape, not causality**. The spec yields L1 (structure 
 
 This is the primary purpose, directly targeting "drift undetected until deploy."
 
-- **SPA → service:** messages the SPA publishes are validated against the spec's receive-side schemas. The engine **observes and surfaces violations immediately and loudly** (control plane + validation log), so the SPA learns it is off-contract *now*, locally, instead of at deploy time. Note: even with embedded Aedes, the model is **observe-and-surface, not block-at-broker** — real MQTT brokers (ActiveMQ included) are payload-agnostic and deliver off-spec bytes without complaint, so broker-level rejection would be *anti*-fidelity. Surfacing loudly (not blocking delivery) is both sufficient and more prod-faithful. (This also keeps the design portable if the broker ever moves out-of-process and the engine becomes a privileged client.)
-- **Service → SPA:** the mock's emissions are spec-valid by construction (L1) or validated at scenario-load time (L2), so the SPA is developed against contract-true responses.
-- The control plane exposes a **validation log** (`GET /validation`) of every violation seen. This can become something **CI asserts on**: "did the SPA send anything off-contract during this run?"
+- **Browser application → service:** messages the browser application publishes are validated against the spec's receive-side schemas. The engine **observes and surfaces violations immediately and loudly** (control plane + validation log), so the browser application learns it is off-contract *now*, locally, instead of at deploy time. Note: even with embedded Aedes, the model is **observe-and-surface, not block-at-broker** — real MQTT brokers (ActiveMQ included) are payload-agnostic and deliver off-spec bytes without complaint, so broker-level rejection would be *anti*-fidelity. Surfacing loudly (not blocking delivery) is both sufficient and more prod-faithful. (This also keeps the design portable if the broker ever moves out-of-process and the engine becomes a privileged client.)
+- **Service → browser application:** the mock's emissions are spec-valid by construction (L1) or validated at scenario-load time (L2), so the browser application is developed against contract-true responses.
+- The control plane exposes a **validation log** (`GET /validation`) of every violation seen. This can become something **CI asserts on**: "did the browser application send anything off-contract during this run?"
 
 ### Validation correctness is a quality bar the tool lives or dies on
 
@@ -141,7 +141,7 @@ Mitigations:
 
 ### The perspective-inversion trap (normalize once)
 
-In AsyncAPI, operation direction is described from the **documented service's** point of view: the spec's `send` is something the **SPA (the client) receives**, and the spec's `receive` is what the **client publishes**. Normalize this **once at parse time** onto the `Channel` record — `direction: 'toClient' | 'fromClient'` — so no downstream code reasons about the inversion. (Direction lives on the channel, **not** on each message; see `offbook-contracts.md` §1.)
+In AsyncAPI, operation direction is described from the **documented service's** point of view: the spec's `send` is something the **browser application (the client) receives**, and the spec's `receive` is what the **client publishes**. Normalize this **once at parse time** onto the `Channel` record — `direction: 'toClient' | 'fromClient'` — so no downstream code reasons about the inversion. (Direction lives on the channel, **not** on each message; see `offbook-contracts.md` §1.)
 
 ---
 
@@ -149,11 +149,11 @@ In AsyncAPI, operation direction is described from the **documented service's** 
 
 The current mocks are **instant and too polite**; real MQTT is neither. Reproducing real async behavior is where the past bugs live, so timing is a **v1 requirement**, not polish.
 
-**Framing:** this approach is **Deterministic Simulation Testing (DST)-inspired** — seeded, replayable fault/timing injection so failures reproduce by replaying the seed (the technique behind FoundationDB's `BUGGIFY`, Antithesis, TigerBeetle, etc.). Borrow the name and prior art for credibility, but state honestly that it is *DST-inspired*, not full DST: the tool controls message timing/faults, not the SPA's or runtime's entire execution (clock, scheduling, IO).
+**Framing:** this approach is **Deterministic Simulation Testing (DST)-inspired** — seeded, replayable fault/timing injection so failures reproduce by replaying the seed (the technique behind FoundationDB's `BUGGIFY`, Antithesis, TigerBeetle, etc.). Borrow the name and prior art for credibility, but state honestly that it is *DST-inspired*, not full DST: the tool controls message timing/faults, not the browser application's or runtime's entire execution (clock, scheduling, IO).
 
 ### v1 scope: `delay` only
 
-`delay` covers the highest-frequency failure: the SPA assuming synchronous-feeling ordering because old mocks answered instantly. Introducing non-zero time forces the SPA's async code to actually run as async (promises resolve off the synchronous tick, loading states render, etc.), surfacing a large share of "worked in the mock, broke with real latency" bugs.
+`delay` covers the highest-frequency failure: the browser application assuming synchronous-feeling ordering because old mocks answered instantly. Introducing non-zero time forces the browser application's async code to actually run as async (promises resolve off the synchronous tick, loading states render, etc.), surfacing a large share of "worked in the mock, broke with real latency" bugs.
 
 **Design details:**
 - A delay is a **property of a scenario step** (a step says "emit this payload, after this delay"). Keeping the step as the unit means v2 primitives are added as *more properties on the same step model*, not a restructuring.
@@ -163,7 +163,7 @@ The current mocks are **instant and too polite**; real MQTT is neither. Reproduc
 
 ### Deferred to v2 (adversarial timing)
 
-Ordering control, QoS1 **duplicates** (at-least-once genuinely means the SPA can receive a message twice), **out-of-order** delivery, **drop-then-redeliver**, connection blips. These catch rarer/nastier bugs and are where the mock can be *better than real* for development (deterministic, on-demand reproduction). They are additive properties on the same step model, so deferring them costs no rework.
+Ordering control, QoS1 **duplicates** (at-least-once genuinely means the browser application can receive a message twice), **out-of-order** delivery, **drop-then-redeliver**, connection blips. These catch rarer/nastier bugs and are where the mock can be *better than real* for development (deterministic, on-demand reproduction). They are additive properties on the same step model, so deferring them costs no rework.
 
 **Build the split right:** implement **MQTT-semantic faults in-process** (duplicate/out-of-order/redelivery — these require MQTT-packet awareness the transport layer doesn't have), and **reuse Toxiproxy for transport-level faults** (latency, bandwidth, connection resets/blips). Toxiproxy is the standard deterministic *transport*-fault tool (HTTP-controllable, official Testcontainers module, and the most-referenced **open-source** chaos tool on GitHub — 243/971 repos — per the 2025 "Chaos Engineering in the Wild" survey; that survey's scope is the top-10 OSS tools on GitHub, so it excludes commercial/non-GitHub tools like Gremlin, AWS FIS, tc/netem, and Istio — don't read it as unqualified industry dominance), but it operates at raw TCP and is protocol-unaware — so it *cannot* do MQTT-semantic faults, which is precisely why those belong in the in-process engine. Don't reimplement transport chaos; don't expect Toxiproxy to do MQTT duplicates.
 
@@ -262,8 +262,8 @@ Even though v1 only implements the simplest path, design these interfaces now so
 ## 8. Connection Auth
 
 - **v1: accept-all.** Aedes's `authenticate` hook accepts any credentials but still **receives and logs** them (so connections can be attributed in debugging).
-- **Principle for later:** when real auth is understood, *mirror the handshake, not the validation* — the SPA's connect code path should run unchanged (same fields populated, same URL shape) so the real connection logic is exercised, but the mock should not actually validate tokens. The failure mode to avoid is a *different* dev connect path, which makes dev "work" while prod auth breaks late.
-- **Action item:** capture exactly what the SPA passes to its MQTT client's `connect()` today (auth fields, ws URL shape). This single fact resolves the auth design and confirms the ws/QoS/retain test path.
+- **Principle for later:** when real auth is understood, *mirror the handshake, not the validation* — the browser application's connect code path should run unchanged (same fields populated, same URL shape) so the real connection logic is exercised, but the mock should not actually validate tokens. The failure mode to avoid is a *different* dev connect path, which makes dev "work" while prod auth breaks late.
+- **Action item:** capture exactly what the browser application passes to its MQTT client's `connect()` today (auth fields, ws URL shape). This single fact resolves the auth design and confirms the ws/QoS/retain test path.
 
 ---
 
@@ -271,7 +271,7 @@ Even though v1 only implements the simplest path, design these interfaces now so
 
 The tool is reached for at four distinct moments with different demands:
 
-1. **Onboarding ("just cloned the SPA, want it to run").** Value = zero-to-running with one command, no MQTT knowledge required. Needs **good defaults + retained initial state**. Failure mode: a blank UI and a dev who can't tell what's broken.
+1. **Onboarding ("just cloned the browser application, want it to run").** Value = zero-to-running with one command, no MQTT knowledge required. Needs **good defaults + retained initial state**. Failure mode: a blank UI and a dev who can't tell what's broken.
 2. **Daily driver ("building against a service that isn't running locally").** Needs **fast iteration on behavior** (hot-reload of scenarios/handlers) and a **manual publish** affordance to drive the UI by hand.
 3. **Debugging ("reproduce a specific situation").** Needs **named scenarios fired on demand** and **reset to known state**; ideally record/replay later.
 4. **Automated tests (CI / Playwright).** Needs a **scriptable, synchronous, deterministic** control plane: reset → publish → wait → assert → teardown, with no random intervals firing mid-assertion.
@@ -280,7 +280,7 @@ The tool is reached for at four distinct moments with different demands:
 
 ### Discoverability is the make-or-break for daily use
 
-The biggest ergonomic risk is a dev not knowing **what topics exist, what they may send, and what they'll get back** — exactly the knowledge currently trapped in copy-pasted constants. The tool should *become* the discovery surface: list every topic, its direction (SPA-receives vs SPA-sends), its payload shape, and its source service; and offer one-click "send a valid example" for SPA-sends topics. If the mock answers "what can I talk to and how" better than grepping the codebase, devs will use it as living documentation.
+The biggest ergonomic risk is a dev not knowing **what topics exist, what they may send, and what they'll get back** — exactly the knowledge currently trapped in copy-pasted constants. The tool should *become* the discovery surface: list every topic, its direction (browser-receives vs browser-sends — i.e. toClient vs fromClient), its payload shape, and its source service; and offer one-click "send a valid example" for browser-sends (fromClient) topics. If the mock answers "what can I talk to and how" better than grepping the codebase, devs will use it as living documentation.
 
 ### CLI surface (Bun)
 
@@ -289,7 +289,7 @@ Bun chosen for fast startup (a CLI invoked constantly), native TS, built-in shel
 - `offbook up` / `offbook down` — lifecycle
 - `offbook topics` — discovery (the documentation-replacement win)
 - `offbook publish <topic> [--example]` — hand-drive the UI; `--example` generates a schema-valid payload
-- `offbook state` — show retained values (see what the SPA sees)
+- `offbook state` — show retained values (see what the browser application sees)
 - `offbook scenario <name>` / `offbook reset` — debugging / test control
 - `offbook mode <autonomous|passive>` — the emission toggle (`passive` = no self-initiated emission; both modes are seeded-deterministic, so "passive", not "deterministic")
 - `offbook validation` — view contract-violation log
@@ -348,15 +348,15 @@ Questions to resolve:
 
 ## 12. Outstanding Action Items / Risks
 
-1. **Verify the transport/WS-fidelity spike (highest priority de-risk).** Point the real SPA's MQTT client at a bare Aedes ws listener and confirm it connects, subscribes, and receives a retained message **using the same protocol level (MQTT 3.1.1), WS path, subprotocol, and auth shape it uses against the prod fork**. This is now specifically the probe for the one suspected divergence (the fork's WebSocket transport, §3). If the SPA connects unchanged, the fork's WS behavior is close enough and you're clear; if not, you've found the divergence cheaply on day one and can bend Aedes's listener/hooks to match.
-2. **Capture the SPA's actual `connect()` call** (auth fields, ws URL/path, subprotocol, exact protocol level — confirm 3.1.1 vs the older 3.1) — resolves auth design (§8) and feeds the spike above. Also note whether the SPA/services use **QoS 2** anywhere (the contract allows 0/1/2 per `offbook-contracts.md` §1; QoS 2 is latent capacity until confirmed), and capture each topic's **QoS/retain** so the spec-binding-vs-observed divergence warn-log (P1.D4 tier-3) has a baseline.
+1. **Verify the transport/WS-fidelity spike (highest priority de-risk).** Point the real browser application's MQTT client at a bare Aedes ws listener and confirm it connects, subscribes, and receives a retained message **using the same protocol level (MQTT 3.1.1), WS path, subprotocol, and auth shape it uses against the prod fork**. This is now specifically the probe for the one suspected divergence (the fork's WebSocket transport, §3). If the browser application connects unchanged, the fork's WS behavior is close enough and you're clear; if not, you've found the divergence cheaply on day one and can bend Aedes's listener/hooks to match.
+2. **Capture the browser application's actual `connect()` call** (auth fields, ws URL/path, subprotocol, exact protocol level — confirm 3.1.1 vs the older 3.1) — resolves auth design (§8) and feeds the spike above. Also note whether the browser application/services use **QoS 2** anywhere (the contract allows 0/1/2 per `offbook-contracts.md` §1; QoS 2 is latent capacity until confirmed), and capture each topic's **QoS/retain** so the spec-binding-vs-observed divergence warn-log (P1.D4 tier-3) has a baseline.
 3. **Understand the release-management tooling** that maps environment → deployed semver, and decide the boundary: does the mock *call* it or *consume its output*? (§7) — gates v2 resolution.
 4. **Validation correctness** is the tool's credibility (§5). Concentrate engineering care on the AsyncAPI-parser + Ajv path; do not hand-roll schema interpretation; test against external-`$ref`/`$id` specs.
 5. **L2 authoring format** (§10) — the open thread most determining whether v1 *feels* right; take as a dedicated next pass.
 6. **Stage-0 adopt-vs-build check.** **Resolved — verified via external research + Microcks/Specmatic source-code reading (2026-06): the build is justified, scoped to the gap below.** Neither tool covers the combination off-the-shelf:
    - **Microcks** (CNCF-incubating since 2026-05-07) is a provider-side **mock *emitter*** + on-demand conformance tester. Source confirms its MQTT producer speaks native MQTT/**TCP** via Paho (`tcp://`, no `ws`/`wss`) to an *external* broker (tested against ActiveMQ Artemis + Mosquitto, MQTT 3.1.1); its standalone "WebSocket" binding is **raw Jakarta WebSocket, not MQTT-over-WS** (a browser `mqtt.js` client cannot use it); and its producers are **emit-only** (the WS `OnMessage` handler is a no-op). The only inbound check is a **bounded, on-demand provider-conformance test** — not loud, continuous validation of what a *client* publishes.
-   - **Specmatic** does bidirectional AsyncAPI contract testing, but as a **CI runner** over native MQTT **tcp/ssl** only (no MQTT-over-WS; its in-memory broker is **Kafka-only**, so MQTT needs an external Mosquitto), it is **stateless** schema/correlation-id conformance (no stateful templated scenarios, no timing/fault injection), and MQTT-AsyncAPI is a **commercial Enterprise** feature — not a live local mock a browser SPA connects to.
-   - **Unserved core (confirmed not covered by either):** *embedded in-process broker · MQTT-over-WS for a browser SPA · loud continuous SPA→service validation · stateful templated request/response scenarios · MQTT-semantic timing/fault injection.* This is exactly Offbook's scope, so building is justified.
+   - **Specmatic** does bidirectional AsyncAPI contract testing, but as a **CI runner** over native MQTT **tcp/ssl** only (no MQTT-over-WS; its in-memory broker is **Kafka-only**, so MQTT needs an external Mosquitto), it is **stateless** schema/correlation-id conformance (no stateful templated scenarios, no timing/fault injection), and MQTT-AsyncAPI is a **commercial Enterprise** feature — not a live local mock a browser application connects to.
+   - **Unserved core (confirmed not covered by either):** *embedded in-process broker · MQTT-over-WS for a browser application · loud continuous browser-app→service validation · stateful templated request/response scenarios · MQTT-semantic timing/fault injection.* This is exactly Offbook's scope, so building is justified.
    - **Reuse rather than rebuild:** AsyncAPI schema validation (already adopted via `@asyncapi/parser` + Ajv, §5) and the provider-conformance pattern (maps onto the "CI asserts on the `/validation` log" idea, §5). Note too that Microcks' own MQTT path depends on an *external* standard broker's WS listener for browser reach — precisely the role Aedes plays here (§3), so even the off-the-shelf tool implicitly needs the component we're building.
    - **Residual action / caveat:** both tools move fast (Specmatic added MQTT-AsyncAPI ~Q1 2026; its Kafka-only in-memory-broker limit is hedged "currently"). The remaining spike is *ergonomic/coverage fit against the real specs*; re-verify these capability boundaries before committing to build.
 7. **Shrink-or-defer the v2 version-resolution layer.** **Resolved — verified via external research (2026-06): keep `specs.lock`; use a registry or per-commit pinning for *storage*; the environment→deployed-version *binding* is the genuinely novel part and is NOT redundant with a registry.** Findings:

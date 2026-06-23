@@ -6,7 +6,7 @@
 
 **Status:** ✅ **All of P1 (D1–D6) decided and compiled into `offbook-contracts.md`** (now the authoritative spec; this file is the dialog/rationale record). Doc-debts cleared across the design + L2 docs. D6 added `GitRefResolver` (ref-agnostic; v1 selects `ref = branch`, default `main`), `resolved-ref` + full `resolved-sha` in `specs.lock`, and seam-complete config (both `services.yaml` + `environments.yaml` in v1).
 
-**Vocabulary lock (applies throughout):** the connecting party under development = **`client`** (this adopter's client is the SPA; docs keep saying "the SPA"). The tool's own emissions = **`mock`**. Channel/flow direction = **`toClient` / `fromClient`**. MQTT terms (`topic`, `qos`, `retain`, bindings) stay concrete — de-SPA-ify, do **not** de-MQTT-ify (transport abstraction is the n=2 fork, §3).
+**Vocabulary lock (applies throughout):** the connecting party under development = **`client`** (this adopter's client is a browser application). The tool's own emissions = **`mock`**. Channel/flow direction = **`toClient` / `fromClient`**. MQTT terms (`topic`, `qos`, `retain`, bindings) stay concrete — generalize the **client** vocabulary, **not** the MQTT transport (transport abstraction is the n=2 fork, §3).
 
 ---
 
@@ -143,7 +143,7 @@ interface Violation {
 - **§6** — scheduler lives in the engine; `broker.emit` = publish-now.
 - **L2 doc (D6)** — scenario-load errors surface in `/diagnostics`, not `/validation`.
 - **§9** — emission modes are `autonomous | passive` (not "deterministic").
-- **§12.2 spike** — add: does the SPA/services use QoS 2 anywhere? (latent capacity) + qos/retain-mismatch warn-log.
+- **§12.2 spike** — add: does the browser application/services use QoS 2 anywhere? (latent capacity) + qos/retain-mismatch warn-log.
 - **§5** — parser → Spectral → Ajv wording (already applied to the design doc).
 
 ---
