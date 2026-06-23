@@ -1,0 +1,78 @@
+asyncapi: 3.0.0
+info:
+  title: Composition Edge Cases
+  version: 1.0.0
+  description: >-
+    Exercises allOf / oneOf / anyOf — json-schema-faker's documented weak spots.
+    The L1 Ajv-recheck (§4) MUST catch any non-conforming generated payload (e.g.
+    a oneOf that populated more than one branch) and fail loud rather than emit it.
+servers:
+  mosquitto:
+    host: localhost:9001
+    protocol: mqtt
+    protocolVersion: '3.1.1'
+channels:
+  events:
+    address: events/{kind}
+    parameters:
+      kind:
+        description: Event kind segment
+    messages:
+      Event:
+        $ref: '#/components/messages/Event'
+operations:
+  publishEvent:
+    action: send             # toClient
+    channel:
+      $ref: '#/channels/events'
+components:
+  messages:
+    Event:
+      name: Event
+      payload:
+        $ref: '#/components/schemas/Event'
+  schemas:
+    Base:
+      type: object
+      required: [id, ts]
+      properties:
+        id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+    Event:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          required: [detail]
+          properties:
+            detail:
+              oneOf:                       # mutually-exclusive by `kind` const — classic faker oneOf trap
+                - $ref: '#/components/schemas/SensorReading'
+                - $ref: '#/components/schemas/Alarm'
+            tags:
+              anyOf:
+                - type: array
+                  items:
+                    type: string
+                - type: 'null'
+    SensorReading:
+      type: object
+      required: [kind, value]
+      additionalProperties: false
+      properties:
+        kind:
+          const: sensor
+        value:
+          type: number
+    Alarm:
+      type: object
+      required: [kind, severity]
+      additionalProperties: false
+      properties:
+        kind:
+          const: alarm
+        severity:
+          type: string
+          enum: [low, high]

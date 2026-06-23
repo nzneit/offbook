@@ -122,7 +122,7 @@ interface Violation {
 - `GET /v1/topics` → `{ topics: TopicInfo[] }`. `TopicInfo { topic, direction, service, title?, description?, schema, example?, qos?, retain? }` — dereferenced **schema + seeded example inline**; `?direction=`/`?service=` filters; `?schema=false` slim mode.
 - `GET /v1/state` → `{ state: StateEntry[] }`. `StateEntry { topic, payload, qos?, retain: true }` — lean, **concrete** topics; optional `?topic=` prefix. (No `updatedAt` in v1.)
 - `GET /v1/validation` → `{ violations: Violation[]; summary }`. `summary { errors, warnings, byOrigin{client,mock}, byKind }`. Filters `?sinceSeq=` / `?origin=` / `?severity=` / `?kind=`. Ordered by `(seq, insertion)`. Violations-only.
-- `GET /v1/specs` → `{ specs: SpecInfo[]; resolutionMode: 'main-branch' | 'pinned'; warnings? }`. `SpecInfo { service, version?, source, contentHash, channelCount }`. **`resolutionMode` honesty flag** per §7 (v1 reports `main-branch`, "version pinning unavailable").
+- `GET /v1/specs` → `{ specs: SpecInfo[]; resolutionMode: 'branch' | 'pinned'; warnings? }`. `SpecInfo { service, declaredVersion?, source, contentHash, channelCount }`. **`resolutionMode` honesty flag** per §7 (v1 reports `branch`, naming the branch). *(Superseded by D6: `GitRefResolver`/`branch` replaced the earlier `main-branch` value.)*
 
 **Actions:**
 - `POST /v1/publish` `{ topic, payload?, example?, qos?, retain? }` → `202 { topic, direction, injected, seq }`. **Direction inferred from the channel** (toClient → drives UI; fromClient → simulates client + runs validation/dispatch); response reports resolved `direction`. Unknown topic → raw publish + flag; `example:true` on unknown → `400`.
@@ -148,10 +148,10 @@ interface Violation {
 
 ---
 
-## P1.D6 — PENDING (resume here)
+## P1.D6 — RESOLVED (compiled into `offbook-contracts.md` §6)
 
-Config-file schemas + resolution interfaces:
+Config-file schemas + resolution seams, as decided:
 - `environments.yaml` (v1 `StaticManifestSource`: `environment → { service: version }`)
-- `specs.lock` (formalize the §7 shape — content-hashed, the reproducibility + debug surface)
-- `services.yaml` (v2 per-service strategy config — **stub only** in v1)
-- `Resolver (service, version) → spec content` (v1 = `MainBranchResolver`) and `VersionSource (environment) → { service: version }` (v1 = `StaticManifestSource`) — the §7 forward-compatible seams.
+- `specs.lock` (formalized — content-hashed, full `resolved-sha` + `resolved-ref`; the reproducibility + debug surface)
+- `services.yaml` (v1: `repo` + `specPath` + optional `branch`; per-service strategy machinery is v2)
+- `Resolver.resolve(repo, ref, specPath) → ResolvedSpec` — **`GitRefResolver` in both v1 and v2** (v1 selects `ref = branch ?? 'main'`); `VersionSource (environment) → { service: version }` (v1 = `StaticManifestSource`) — the §7 forward-compatible seams.

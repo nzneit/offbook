@@ -1,0 +1,58 @@
+asyncapi: 2.6.0
+info:
+  title: Legacy Notifications (v2)
+  version: 1.2.0
+  description: >-
+    AsyncAPI 2.x using publish/subscribe — exercises the perspective inversion on
+    the OLDER major. The documented application is the SERVICE, so: `publish` = a
+    client publishes and the service receives (fromClient); `subscribe` = the
+    service publishes and the client receives (toClient). Opposite-feeling to v3.
+servers:
+  mosquitto:
+    url: localhost:9001
+    protocol: mqtt
+    protocolVersion: '3.1.1'
+channels:
+  user/{userId}/ack:
+    parameters:
+      userId:
+        schema:
+          type: string
+    publish:                       # client publishes ⇒ service receives ⇒ fromClient
+      operationId: receiveAck
+      message:
+        $ref: '#/components/messages/Ack'
+  user/{userId}/notification:
+    parameters:
+      userId:
+        schema:
+          type: string
+    subscribe:                     # service publishes ⇒ client receives ⇒ toClient
+      operationId: sendNotification
+      message:
+        $ref: '#/components/messages/Notification'
+components:
+  messages:
+    Ack:
+      name: Ack
+      payload:
+        type: object
+        required: [notificationId]
+        additionalProperties: false
+        properties:
+          notificationId:
+            type: string
+    Notification:
+      name: Notification
+      payload:
+        type: object
+        required: [notificationId, title, level]
+        additionalProperties: false
+        properties:
+          notificationId:
+            type: string
+          title:
+            type: string
+          level:
+            type: string
+            enum: [info, warning, error]

@@ -1,0 +1,12 @@
+$id: https://offbook.test/schemas/common.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+description: >-
+  Shared schema definitions referenced across specs via external $ref. Carries its
+  own $id base URI deliberately, to exercise the parser's base-URI handling (§12.4).
+$defs:
+  Identifier:
+    type: string
+    pattern: '^[a-z0-9-]+$'
+  Timestamp:
+    type: string
+    format: date-time

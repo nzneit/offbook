@@ -27,7 +27,7 @@ interface NormalizedMessage {
 
 interface InboundEvent {
   message: NormalizedMessage;                                    // flow ⇒ fromClient
-  meta: { clientId: string; seq: number; receivedAt: number };  // packetId reserved for v2
+  meta: { clientId: string; seq: number; receivedAt: number; decodeError?: string };  // decodeError set when the payload failed to decode (§2); packetId reserved for v2
 }
 
 interface Channel {     // produced by the Spec Registry
@@ -38,9 +38,9 @@ interface Channel {     // produced by the Spec Registry
 ```
 
 - **Direction is derived, not stored on messages:** flow position (`onInbound` vs `emit`) gives inbound/outbound; the topic→`Channel` lookup gives the spec-declared direction. In v1 it's a clean bijection (the client only publishes `fromClient`; the mock only emits `toClient`).
-- **`delayMs`** is resolved in the engine (seeded Mulberry32 draw, see §3) and consumed by the engine scheduler; the broker ignores it.
+- **`delayMs`** is resolved in the engine (seeded Mulberry32 draw — see §3 Behavior engine, this doc) and consumed by the engine scheduler; the broker ignores it.
 - **Clocks:** the **virtual seeded clock** is the *emission* timeline only (drives `{{now}}` and `delayMs`) — reproducible. **Inbound** is externally driven, so `meta.receivedAt` is **wall-clock** (human) and `meta.seq` is a **logical counter** (reproducible ordering).
-- A decode failure is surfaced as `payload: undefined` + `meta.decodeError` (never dropped — see §2).
+- A decode failure is surfaced as `payload: undefined` + `meta.decodeError` (never dropped — see §2 Broker module, this doc).
 
 ## 2. Broker module interface
 
@@ -153,7 +153,7 @@ interface Violation {
 interface TopicInfo { topic: string; direction: Direction; service: string;
   title?: string; description?: string; schema: object; example?: unknown; qos?: 0|1|2; retain?: boolean; }
 interface StateEntry { topic: string; payload: unknown; qos?: 0|1|2; retain: true; }
-interface SpecInfo { service: string; version?: string; source: string; contentHash: string; channelCount: number; }
+interface SpecInfo { service: string; declaredVersion?: string; source: string; contentHash: string; channelCount: number; }  // declaredVersion = info.version from the parsed spec — NOT the requested version (they differ in v1 branch mode)
 interface Diagnostic { kind: 'scenario-load' | 'overlap' | 'spec-load';
   severity: 'error' | 'warning' | 'info'; detail: string; source?: string; scenarioName?: string; }
 ```
@@ -214,11 +214,33 @@ environments:
 ```
 
 ### `specs.lock` (v1)
+
+Typed shape (closes the gap where the lockfile YAML had no model):
+```ts
+interface Lockfile {
+  lockfileVersion: number;
+  environment: string;
+  resolutionMode: 'branch' | 'pinned';
+  generatedAt: string;                 // ISO8601
+  services: Record<string, LockEntry>;
+}
+interface LockEntry {
+  requestedVersion: string;            // from environments.yaml — recorded, UNHONORED in v1
+  resolutionStrategy: 'branch';        // v2 adds git-tag | release-branch | manual | …
+  resolvedRef: string;
+  resolvedSha: string;                 // FULL canonical commit sha — never abbreviated
+  specPath: string;
+  specDeclaredVersion?: string;        // info.version
+  contentHash: string;                 // "sha256:…"
+  fetchedAt: string;                   // ISO8601
+  resolvedVersion?: string;            // v2 only — semver after range policy
+}
+```
 ```yaml
-lockfileVersion: 1
+lockfile-version: 1
 environment: default
-resolutionMode: branch              # 'branch' | 'pinned' — the warning names the branch (§7 "never lie about fidelity")
-generatedAt: 2026-06-23T…
+resolution-mode: branch             # 'branch' | 'pinned' — the warning names the branch (§7 "never lie about fidelity")
+generated-at: 2026-06-23T…
 services:
   serviceB:
     requested-version: 2.0.1        # from environments.yaml — recorded, UNHONORED in v1
@@ -231,6 +253,8 @@ services:
     fetched-at: 2026-06-23T…
     # resolved-version:  (v2 only — semver after range policy)
 ```
+
+> **Key-casing convention:** hand-authored config (`services.yaml`, `environments.yaml`) uses **camelCase** keys mirroring the TS fields (`specPath`, `branch`); the generated **lockfile uses kebab-case** throughout (`lockfile-version`, `resolution-mode`, `spec-path`, …). A `LockEntry`↔YAML serializer maps camelCase fields → kebab keys uniformly. *(The `resolutionMode` field on the `GET /v1/specs` JSON response stays camelCase — HTTP/JSON DTOs are camelCase; only the on-disk YAML is kebab.)*
 
 - Recording **`resolved-ref` + full `resolved-sha` + `content-hash`** gives v1 the **full reproducibility guarantee** immediately (rebuild the exact mock even after the branch moves).
 - The declared-vs-requested **drift-check is v2** (v1 always fetches a branch tip, so there's no resolved semver to check).

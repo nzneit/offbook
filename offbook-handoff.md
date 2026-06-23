@@ -26,7 +26,7 @@ Scaffold the separate repo and implement, roughly in this order:
 3. **L1 — schema-valid fake** — `json-schema-faker` (pinned, seeded) + **Ajv recheck before emit**. This is the floor; the tool works once this lands. (§4)
 4. **Bidirectional validation** — observe-and-surface (not block-at-broker) + a `GET /validation` log CI can assert on. (§5)
 5. **Control plane (HTTP) + Bun CLI** thin client over it. (§9)
-6. **`specs.lock`** + **main-branch resolver** behind the resolver/version-source interfaces. (§7)
+6. **`specs.lock`** + **`GitRefResolver`** (branch-selecting; v1 default `main`) behind the resolver/version-source interfaces. (§7; `offbook-contracts.md` §6)
 7. **Initial-state retained** + **seeded autonomous-emission mode** (toggleable). (§7)
 8. **L2 scenarios with seeded `delay`** — but resolve the authoring-format thread first (see Open Threads). (§4, §6)
 
@@ -44,7 +44,7 @@ Scaffold the separate repo and implement, roughly in this order:
 - [ ] L1 fake: json-schema-faker (pinned, seeded) + Ajv recheck
 - [ ] Bidirectional validation, observe-and-surface, `/validation` log
 - [ ] Control plane + Bun CLI
-- [ ] `specs.lock` + main-branch resolver behind interfaces
+- [ ] `specs.lock` + `GitRefResolver` (branch-selecting, v1 default `main`) behind interfaces
 - [ ] Retained initial state + seeded toggleable autonomous emission
 - [ ] L2 scenarios with seeded `delay` (after authoring format decided)
 

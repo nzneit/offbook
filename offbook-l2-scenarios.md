@@ -133,7 +133,7 @@ The author templates **only the causal fields**; omitted required schema fields 
   - *Skeleton schema check* — substitute each `{{…}}` with a type-appropriate / L1-faked stand-in and run Ajv; wrong-typed literals, unknown fields, structurally impossible payloads fail now.
   - *Topic/direction check* — `when.topic` must match a `fromClient` channel and `emit.topic` a `toClient` channel in some consumed spec (§5 normalized direction). A `when` on a toClient topic is a direction error.
   - *Reference resolvability* — `{{param}}` must be captured by `when.topic`; `{{payload.x}}` checked against the inbound channel schema; unknown helpers rejected (closed set).
-  - *Structural* — name uniqueness (§2), terminal `#` (§4), delay syntax (§6).
+  - *Structural* — name uniqueness (§2 Scenario anatomy), terminal `#` (§4 Matching), delay syntax (§6 Timing). *(Named §N here = this doc's own sections, not the design doc.)*
 - **Emit-time (runtime backstop):** the §4 L1 Ajv recheck of the *actual* produced payload — catches anything load-time couldn't (e.g. an inbound value that pushed a templated field off-spec).
 
 **Failure handling — lenient-but-loud in dev, strict in CI** (mirrors the §7/§9 emission-mode split): a broken scenario is **skipped loudly** (logged + surfaced in `GET /diagnostics` — the static config/load surface, *not* the runtime `/validation` log; P1.D4 — and not loaded) so one typo doesn't blank the UI (onboarding, §9 moment 1). A **strict mode** fails fast on any scenario error for CI.

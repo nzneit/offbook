@@ -1,0 +1,52 @@
+asyncapi: 3.0.0
+info:
+  title: QoS / Retain Bindings
+  version: 1.0.0
+  description: >-
+    Declares MQTT qos/retain via operation bindings. Tests the binding-precedence
+    resolution (spec MQTT binding is authoritative → offbook override → per-service
+    default → global qos 1; P1.D2, offbook-contracts.md §2). The registry must
+    resolve presence emissions to qos 1 + retain true from the binding below.
+servers:
+  mosquitto:
+    host: localhost:9001
+    protocol: mqtt
+    protocolVersion: '3.1.1'
+    bindings:
+      mqtt:
+        bindingVersion: 0.2.0
+channels:
+  presence:
+    address: presence/{deviceId}
+    parameters:
+      deviceId:
+        description: Device identifier
+    messages:
+      Presence:
+        $ref: '#/components/messages/Presence'
+operations:
+  publishPresence:
+    action: send             # toClient
+    channel:
+      $ref: '#/channels/presence'
+    bindings:
+      mqtt:
+        qos: 1
+        retain: true
+        bindingVersion: 0.2.0
+components:
+  messages:
+    Presence:
+      name: Presence
+      payload:
+        type: object
+        required: [deviceId, online]
+        additionalProperties: false
+        properties:
+          deviceId:
+            type: string
+          online:
+            type: boolean
+          lastSeen:
+            type: string
+            format: date-time

@@ -36,7 +36,7 @@ A secondary but significant benefit: the tool becomes the canonical **discovery 
 - **Bidirectional contract validation**, surfaced loudly and locally.
 - Faithful emulation of MQTT async behavior (timing) sufficient to catch real async bugs.
 - Eliminate manual mock rot by deriving behavior from consumed specs.
-- Good developer ergonomics across the distinct moments the tool is used (see §5).
+- Good developer ergonomics across the distinct moments the tool is used (see §9).
 
 ### Non-Goals (at least initially)
 - **Not** emitting TypeScript types or other artifacts for external consumers. Any schemas generated are internal to the mocking/faking stack only. (We are deliberately *not* solving the SPA's copy-paste habit by emitting types; we build around the SPA as-is.)
@@ -183,7 +183,7 @@ Specs are consumed from the service repositories. Deriving behavior from consume
 
 ### The resolution chain (v2): semver → SHA → spec file
 
-> **v1 readers can skip to §8.** Everything from here to the end of §7 is the v2 resolution layer (deferred). v1 uses only the main-branch stopgap and `specs.lock`, behind the interfaces noted at the end of this section. Also note the open question in §12 (item 7) of whether this layer should be replaced by a schema registry.
+> **v1 readers can skip to §8.** Everything from here to the end of §7 is the v2 resolution layer (deferred). v1 uses only the branch stopgap (fetch the configured branch, default `main`) and `specs.lock`, behind the interfaces noted at the end of this section. Also note the open question in §12 (item 7) of whether this layer should be replaced by a schema registry.
 
 The ideal resolution path is:
 
@@ -246,12 +246,12 @@ Benefits: reproducibility (rebuild the exact mock even if main moved), debuggabi
 ### Invariants & honesty
 
 - **One running mock = one lockfile = one coherent environment snapshot.** A single instance is pinned to one resolved set; a Frankenstein of dev-serviceA + stage-serviceB is disallowed unless explicitly constructed. Two environments side-by-side = two processes/ports.
-- **The tool must never lie about its own fidelity.** When running the v1 main-branch stopgap (no version pinning), the CLI must warn (e.g. "version pinning unavailable; using main for all services") rather than pretend `--env` was honored.
+- **The tool must never lie about its own fidelity.** When running the v1 branch stopgap (no version pinning), the CLI must warn (e.g. "version pinning unavailable; using branch `main` for all services") rather than pretend `--env` was honored.
 
 ### Forward-compatible seams (build into v1)
 
 Even though v1 only implements the simplest path, design these interfaces now so v2 slots in behind them with no downstream change:
-- **Resolver interface:** `(service, version) → spec content`, implemented in v1 as `MainBranchResolver` (ignores version, fetches main); v2 adds `GitRefResolver` etc.
+- **Resolver interface:** `resolve(repo, ref, specPath) → spec content`, implemented as `GitRefResolver` in **both** v1 and v2 (fetching a spec at a git ref is identical regardless of ref kind). The v1↔v2 difference is *ref selection*: v1 uses the per-service `branch` (default `main`); v2 resolves a requested semver → a pinned tag/sha. See `offbook-contracts.md` §6.
 - **Version source:** `(environment) → {service: version}`, implemented in v1 as `StaticManifestSource` (reads a committed `environments.yaml`); v2 adds `ReleaseToolingSource`.
 - Write `specs.lock` with fields that won't need restructuring later.
 
@@ -298,7 +298,7 @@ Bun chosen for fast startup (a CLI invoked constantly), native TS, built-in shel
 
 ### Control plane (HTTP, side port)
 
-Indicative endpoints (substrate the CLI wraps): `GET /topics`, `GET /state`, `POST /publish`, `POST /trigger/{name}`, `POST /reset`, `POST /mode`, `GET /validation`, `GET /specs`, `GET /diagnostics`. **Now pinned — request/response shapes, the `/v1` prefix, and conventions — in `offbook-contracts.md` §5.** A `resolve` dry-run surface lands in v2.
+Indicative endpoints (substrate the CLI wraps): `GET /topics`, `GET /state`, `POST /publish`, `POST /trigger/{name}`, `POST /reset`, `POST /mode`, `GET /mode`, `GET /validation`, `GET /specs`, `GET /diagnostics`. **Now pinned — request/response shapes, the `/v1` prefix, and conventions — in `offbook-contracts.md` §5.** A `resolve` dry-run surface lands in v2.
 
 ---
 
@@ -326,7 +326,7 @@ Questions to resolve:
 - Aedes (ws + tcp, MQTT 3.1.1, QoS1 + retain) — §3.
 - Layered behavior L3→L2→L1: L1 spec-valid floor, L2 scenarios with seeded `delay` — §4, §6.
 - Bidirectional contract validation, surfaced loudly — §5.
-- Spec ingestion via the **main-branch stopgap only**, built behind the resolver/version-source interfaces — §7.
+- Spec ingestion via the **branch stopgap only** (configured branch, default `main`), built behind the resolver/version-source interfaces — §7.
 - `specs.lock` from day one — §7.
 - HTTP control plane + Bun CLI — §9.
 - Initial state always retained; seeded autonomous-emission mode — §7.

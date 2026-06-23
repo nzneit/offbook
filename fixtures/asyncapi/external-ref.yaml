@@ -1,0 +1,48 @@
+asyncapi: 3.0.0
+info:
+  title: External Ref + $id
+  version: 2.0.1
+  description: >-
+    Payloads reference an external file (shared/common.yaml) that carries its own
+    $id base URI. Tests that the parser bundles/dereferences before validating and
+    handles $ref sibling keywords + $id base resolution correctly — the silent-
+    wrongness the validation pipeline must be tested against (§5, §12.4).
+servers:
+  mosquitto:
+    host: localhost:9001
+    protocol: mqtt
+    protocolVersion: '3.1.1'
+channels:
+  telemetry:
+    address: telemetry/{nodeId}
+    parameters:
+      nodeId:
+        description: Node identifier
+    messages:
+      Telemetry:
+        $ref: '#/components/messages/Telemetry'
+operations:
+  publishTelemetry:
+    action: send             # toClient
+    channel:
+      $ref: '#/channels/telemetry'
+components:
+  messages:
+    Telemetry:
+      name: Telemetry
+      # external file uses 2020-12 $defs/$id — declare the dialect so base-URI resolution is actually exercised (§12.4)
+      schemaFormat: application/schema+yaml;version=draft/2020-12
+      payload:
+        $ref: '#/components/schemas/Telemetry'
+  schemas:
+    Telemetry:
+      type: object
+      required: [nodeId, recordedAt, value]
+      additionalProperties: false
+      properties:
+        nodeId:
+          $ref: 'shared/common.yaml#/$defs/Identifier'
+        recordedAt:
+          $ref: 'shared/common.yaml#/$defs/Timestamp'
+        value:
+          type: number
