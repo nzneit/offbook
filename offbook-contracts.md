@@ -144,7 +144,7 @@ interface Violation {
 |---|---|---|
 | `GET /v1/topics` | `{ topics: TopicInfo[] }` | dereferenced **schema + seeded example inline**; `?direction=` / `?service=` filters; `?schema=false` slim mode |
 | `GET /v1/state` | `{ state: StateEntry[] }` | lean, **concrete** topics; `?topic=` prefix filter |
-| `GET /v1/validation` | `{ violations: Violation[]; summary }` | `summary { errors, warnings, byOrigin{client,mock}, byKind }`; `?sinceSeq=` `?origin=` `?severity=` `?kind=`; ordered by `(seq, insertion)`; violations-only |
+| `GET /v1/validation` | `{ violations: Violation[]; summary }` | `summary { errors, warnings, byOrigin{client,mock}, byKind, oldestSeq }`; `?sinceSeq=` `?origin=` `?severity=` `?kind=`; ordered by `(seq, insertion)`; violations-only. **Bounded ring buffer** — see note below |
 | `GET /v1/specs` | `{ specs: SpecInfo[]; resolutionMode; warnings? }` | `resolutionMode: 'branch' \| 'pinned'` honesty flag (§7) |
 | `GET /v1/diagnostics` | `{ diagnostics: Diagnostic[]; summary }` | load/hot-reload-populated; dev-time surface |
 | `GET /v1/mode` | `{ mode, seed }` | |
@@ -158,7 +158,7 @@ interface Diagnostic { kind: 'scenario-load' | 'overlap' | 'spec-load';
   severity: 'error' | 'warning' | 'info'; detail: string; source?: string; scenarioName?: string; }
 ```
 
-### Actions
+> **Violation-log retention.** The log is a **bounded ring buffer** capped at `config.maxViolations` (FIFO eviction), so a left-running dev instance has a **memory ceiling, not unbounded growth**. (It is the only unbounded log in v1 — `/state` is the retained store, bounded by topic count; `config.maxEvents` is reserved should inbound-event history ever be retained.) `seq` is process-monotonic and **never reused**, so `?sinceSeq=` stays correct for recent queries; `summary.oldestSeq` is the lowest still-retained `seq`, so a caller whose `sinceSeq < oldestSeq` knows older violations were evicted. **The CI loop is unaffected** — its `reset`-checkpoint → poll window holds far fewer than `maxViolations` entries, so nothing it cares about is ever evicted. (`reset` does not clear the log — eviction is by capacity only.)
 | Endpoint | Body | Result | Notes |
 |---|---|---|---|
 | `POST /v1/publish` | `{ topic, payload?, example?, qos?, retain? }` | `202 { topic, direction, injected, seq }` | **direction inferred from the channel** (toClient drives UI / fromClient simulates client + validates); reports resolved `direction`; unknown topic → raw publish + flag; `example:true` on unknown → `400` |

@@ -47,7 +47,7 @@ offbook/
     validation/   # Violation production, three-tier surfacing (/validation, /diagnostics, warn logs)
     control-plane/# Hono app: /v1/* endpoints, error envelope
     cli/          # thin client over the control plane
-    config/       # seed, ports, mode defaults, file paths
+    config/       # seed, ports, mode defaults, file paths, violation-log cap (maxViolations; maxEvents reserved if event history is ever retained)
   fixtures/asyncapi/   # P3 sample specs (test material)
   scenarios/           # example L2 scenarios (sample, hot-reloaded)
   test/                # or co-located *.test.ts
@@ -74,7 +74,7 @@ Behind the frozen contracts, work fans out in tiers. Each task lists its **depen
 
 ### Tier 2 — depend on Tier 1
 - **`engine/`** — deterministic scheduler (single virtual-clock event loop, awaits `broker.emit` for ordered delivery), seeded Mulberry32 PRNG, two-trigger-path dispatch (§3), L1 faker (json-schema-faker seeded + Ajv-recheck), L3 factory registry. *Accept:* same seed ⇒ byte-identical emission stream + timings; L1 output always Ajv-valid (oneOf edge caught by recheck → `mock` violation, never silent); `reset` restores known state + re-seeds + re-instantiates L3.
-- **`validation/`** — produce `Violation` records (kinds, `client`/`mock` origin, structured `SchemaError`); three-tier surfacing. *Accept:* a client off-contract publish → a `schema`/`client` `Violation` with correct `errors[]` while **delivery is not blocked** (observe-and-surface); a malformed payload → `decode` violation; a wrong-direction publish → `direction` violation.
+- **`validation/`** — produce `Violation` records (kinds, `client`/`mock` origin, structured `SchemaError`); three-tier surfacing; the violation log is a **bounded ring buffer** (`config.maxViolations`, FIFO eviction, `seq` stays process-monotonic — never reused). *Accept:* a client off-contract publish → a `schema`/`client` `Violation` with correct `errors[]` while **delivery is not blocked** (observe-and-surface); a malformed payload → `decode` violation; a wrong-direction publish → `direction` violation; past the cap, the **oldest** violations evict while `seq` keeps climbing and `summary.oldestSeq` advances (a left-running session has a memory ceiling, not unbounded growth).
 
 ### Tier 3 — depend on Tier 2
 - **`scenarios/`** (L2) — per `offbook-l2-scenarios.md`: glob+sorted-path dispatch table, `{param}` matcher + `payloadMatch`, `{{…}}` templating + seeded helpers + L1 autofill, author-time validation → `/diagnostics`, hot-reload. *Accept:* the running-example scenario matches, binds params, templates a response with a seeded ranged delay reproducibly; an overlapping scenario emits a `/diagnostics` overlap warning; a malformed scenario is skipped-loud in dev / fatal in strict.
