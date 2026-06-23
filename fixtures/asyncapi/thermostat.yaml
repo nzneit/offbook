@@ -7,7 +7,7 @@ info:
     the SERVICE; the SPA is the client. The running example across the docs.
 servers:
   mosquitto:
-    host: localhost:9001
+    host: localhost:1883
     protocol: mqtt
     protocolVersion: '3.1.1'
 channels:

@@ -5,8 +5,8 @@ Representative specs for developing and testing `registry/`, `validation/`, and 
 | File | AsyncAPI | Exercises |
 |---|---|---|
 | `thermostat.yaml` | 3.0.0 | Both directions (`fromClient` command + `toClient` state), topic params, enums — the running example |
-| `composition.yaml` | 3.0.0 | `allOf` / `oneOf` (const-discriminated) / `anyOf` — json-schema-faker weak spots; the Ajv recheck must catch non-conforming output (§4) |
-| `external-ref.yaml` + `shared/common.yaml` | 3.0.0 | External `$ref` across files + `$id` base URI — the parser bundling/dereference correctness bar (§5, §12.4) |
+| `composition.yaml` | 3.0.0 | `allOf` / `oneOf` (const-discriminated) / `anyOf` — json-schema-faker weak spots; the Ajv recheck must catch non-conforming output (§4). The oneOf sits on **both** a `send` (toClient) and a `receive` (fromClient) operation, so the hard schema is validated on the client-publish path too |
+| `external-ref.yaml` + `shared/common.yaml` | 3.0.0 | External `$ref` across files + `$id` base URI + a `$ref` **sibling keyword** (`minLength`) under the declared 2020-12 dialect — the parser bundling/dereference correctness bar (§5, §12.4) |
 | `v2-pubsub.yaml` | 2.6.0 | `publish`/`subscribe` — the perspective inversion on the **older** major |
 | `qos-retain.yaml` | 3.0.0 | MQTT operation bindings declaring qos/retain — binding-precedence resolution (P1.D2) |
 

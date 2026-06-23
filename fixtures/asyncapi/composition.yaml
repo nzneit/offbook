@@ -6,9 +6,11 @@ info:
     Exercises allOf / oneOf / anyOf — json-schema-faker's documented weak spots.
     The L1 Ajv-recheck (§4) MUST catch any non-conforming generated payload (e.g.
     a oneOf that populated more than one branch) and fail loud rather than emit it.
+    The same oneOf schema sits on BOTH a send (toClient) and a receive (fromClient)
+    operation, so hard-schema validation is exercised on the client-publish path too.
 servers:
   mosquitto:
-    host: localhost:9001
+    host: localhost:1883
     protocol: mqtt
     protocolVersion: '3.1.1'
 channels:
@@ -20,11 +22,23 @@ channels:
     messages:
       Event:
         $ref: '#/components/messages/Event'
+  submissions:
+    address: submit/{kind}
+    parameters:
+      kind:
+        description: Event kind segment
+    messages:
+      Event:
+        $ref: '#/components/messages/Event'
 operations:
   publishEvent:
     action: send             # toClient
     channel:
       $ref: '#/channels/events'
+  receiveSubmission:
+    action: receive          # fromClient — client publishes a oneOf-discriminated Event; exercises HARD-schema validation on the client→service path (not just mock-side L1)
+    channel:
+      $ref: '#/channels/submissions'
 components:
   messages:
     Event:

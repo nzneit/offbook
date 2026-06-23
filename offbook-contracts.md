@@ -32,7 +32,7 @@ interface InboundEvent {
 
 interface Channel {     // produced by the Spec Registry
   topic: string;        // address / pattern (may contain {params})
-  direction: Direction; // normalized ONCE here from AsyncAPI send/receive (§5)
+  direction: Direction; // normalized ONCE here (§5): v3 send→toClient · receive→fromClient; v2 subscribe→toClient · publish→fromClient
   validate: (payload: unknown) => SchemaError[];  // compiled from the channel schema
 }
 ```

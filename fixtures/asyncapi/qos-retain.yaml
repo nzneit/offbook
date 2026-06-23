@@ -6,10 +6,12 @@ info:
     Declares MQTT qos/retain via operation bindings. Tests the binding-precedence
     resolution (spec MQTT binding is authoritative → offbook override → per-service
     default → global qos 1; P1.D2, offbook-contracts.md §2). The registry must
-    resolve presence emissions to qos 1 + retain true from the binding below.
+    resolve presence emissions to qos 2 + retain true from the binding below — qos 2 and
+    retain true BOTH differ from the global defaults (qos 1, retain false), so binding
+    precedence is actually observable here (qos 1 would be vacuous — equal to the default).
 servers:
   mosquitto:
-    host: localhost:9001
+    host: localhost:1883
     protocol: mqtt
     protocolVersion: '3.1.1'
     bindings:
@@ -31,8 +33,8 @@ operations:
       $ref: '#/channels/presence'
     bindings:
       mqtt:
-        qos: 1
-        retain: true
+        qos: 2          # ≠ global default 1 — makes qos-precedence observable; also exercises the 0|1|2 widening
+        retain: true    # ≠ global default false
         bindingVersion: 0.2.0
 components:
   messages:
