@@ -159,7 +159,8 @@ The current mocks are **instant and too polite**; real MQTT is neither. Reproduc
 - A delay is a **property of a scenario step** (a step says "emit this payload, after this delay"). Keeping the step as the unit means v2 primitives are added as *more properties on the same step model*, not a restructuring.
 - A delay should be a **reproducible duration, optionally ranged** (e.g. `delay: 150-300ms`), not strictly a constant. Fixed delay is the degenerate zero-width case.
 - **Seeded jitter:** ranged delays use a fixed RNG seed so timing is **real-feeling but reproducible run-to-run**. This is important because a fixed delay can always land on the "safe" side of a race and hide a bug, whereas seeded jitter explores the timing window while staying deterministic for CI. The elegant consequence: **seeded timing turns async bugs from un-reproducible heisenbugs into deterministic test fixtures** ("reproduce the bug where the ack lands after the timeout" becomes a repeatable scenario).
-- **The scheduler lives in the engine, not the transport** (P1.D2/D3). The engine owns the virtual clock, resolves each step's seeded `delayMs`, applies it, and guarantees deterministic ordered delivery (`broker.emit` is publish-now, awaited). This is precisely *why* the v2 MQTT-semantic faults below must be in-process: they are scheduling manipulations the protocol-unaware transport cannot perform. See `offbook-contracts.md` §3.
+- **The scheduler lives in the engine, not the transport** (P1.D2/D3). The engine owns the **logical** clock (`now()` = `fixedEpoch + Σ` seeded delays — not wall-clock), resolves each step's seeded `delayMs`, applies it, and guarantees deterministic ordered delivery (`broker.emit` is publish-now, awaited; dispatch is **run-to-completion per event**). This is precisely *why* the v2 MQTT-semantic faults below must be in-process: they are scheduling manipulations the protocol-unaware transport cannot perform. See `offbook-contracts.md` §3.
+- **Async-forcing without paying wall time (the virtual/wall split).** The default scheduler advances logical `now()` by the **full** seeded delay but delivers each emit on the **next event-loop task** — a *single* yield boundary, which is all it takes to push the browser application's promises off the synchronous tick (loading states render, ordering bugs surface) while a 1000-step seeded suite still finishes in well under the wall-sum of its delays. Delivering after a **real wall delay equal to `delayMs`** is an **opt-in interactive mode** for human-perceptible/UX timing, not the CI/replay default. See `offbook-contracts.md` §3.
 
 ### Deferred to v2 (adversarial timing)
 
@@ -174,8 +175,13 @@ Ordering control, QoS1 **duplicates** (at-least-once genuinely means the browser
 ### Liveliness, cleanly separated
 
 Two behaviors that were initially conflated, now decided independently:
-- **(a) Initial state on connect — always on.** On subscribe, a **retained** message must already exist so the UI renders populated immediately (otherwise a freshly-started mock shows a blank UI until the next tick). L1/L3 publish initial state with `retain: true` at startup/first-subscribe.
-- **(b) Autonomous emission over time — a toggleable, seeded mode.** Whether the mock keeps generating new messages on its own (e.g. telemetry ticking) is a **mode**, on by default for normal startup (onboarding/daily-driver benefit) and off/forced-off under test (to avoid CI flake). When on, emission is **seeded** for run-to-run reproducibility.
+- **(a · §7a) Initial state on connect — always on.** On subscribe, a **retained** message must already exist so the UI renders populated immediately (otherwise a freshly-started mock shows a blank UI until the next tick). L1/L3 publish initial state with `retain: true`. **When** that publish happens splits by whether the `toClient` channel address is parametrized — this is the materialization policy (the engine owns it; the **normative rules are in `offbook-contracts.md` §2** — this elaborates them with examples + rationale):
+  - **Non-parametrized `toClient` channels** (e.g. `status/all`): retained initial state is published **eagerly at startup**. There is exactly one concrete topic, so there is nothing to de-wildcard.
+  - **Parametrized `toClient` channels** (e.g. `state/{deviceId}`): a concrete instance has no value until one is bound — the spec declares the param, never enumerates ids — so an instance is **materialized lazily** when either (i) a **concrete** subscribe binds its params (`SUBSCRIBE state/thermostat-1`), or (ii) a `fromClient` command **first references** a concrete param (`command/thermostat-1/set` → the reactive path publishes `state/thermostat-1`). The engine keeps a **materialized-instance set** (the recorded concrete ids).
+  - **Wildcard subscribe** (`SUBSCRIBE state/+` or `state/#`): emit the retained message for every **already-materialized** instance matching the filter, and **never invent** a param value. A wildcard carries no binding to de-wildcard, so it can only replay what already exists. *(MQTT `+`/`#` are subscribe-side filters here, distinct from the channel-address `{param}` the registry matcher resolves — `offbook-contracts.md` §1.)*
+  - **Optional `seedInstances`** — a per-channel config list (e.g. `state/{deviceId}: seedInstances: [thermostat-1, thermostat-2]`) pre-materializes a deterministic demo set at startup, so onboarding isn't a blank UI even before any subscribe or command.
+  - **`reset`** re-materializes **exactly the recorded set** (any `seedInstances` plus instances materialized since the last reset), re-seeded — so post-`reset` `/state` is deterministic, not empty (the moment-4 CI primitive holds).
+- **(b · §7b) Autonomous emission over time — a toggleable, seeded mode.** Whether the mock keeps generating new messages on its own (e.g. telemetry ticking) is a **mode**, on by default for normal startup (onboarding/daily-driver benefit) and off/forced-off under test (to avoid CI flake). When on, emission is **seeded** for run-to-run reproducibility.
 
 ### Source of truth: consumed AsyncAPI specs
 
@@ -227,14 +233,14 @@ serviceC:
 
 ### `specs.lock` (build in v1, enrich in v2)
 
-The result of resolution is always written down. The lockfile is both the **reproducibility guarantee** and the **debug surface for the resolution layer itself**. Per-service entry (v2-rich form):
+The result of resolution is always written down. The lockfile is both the **reproducibility guarantee** and the **debug surface for the resolution layer itself**. The per-service entry below is a **v2-rich illustration** — the **canonical v1 on-disk shape is `offbook-contracts.md` §6** (kebab-case, `resolution-strategy: branch`, the **full** `resolved-sha`, and no `resolved-version`); the extra fields shown here (`resolution-strategy: git-tag`, `resolved-version`) are **v2-only**:
 
 ```yaml
 serviceA:
   requested-version: 1.4.7        # from environment (release tooling)
   resolution-strategy: git-tag    # which strategy ran
   resolved-version: 1.4.0         # after range policy (highest-lte)
-  resolved-sha: a1b2c3d           # the universal pivot
+  resolved-sha: a1b2c3d…          # the universal pivot — illustrative; v1 stores the FULL 40/64-hex sha, never abbreviated (contracts §6)
   spec-path: asyncapi.yaml        # where it was found
   spec-declared-version: 1.4.0    # info.version, for the drift check
   content-hash: sha256:...        # exact bytes
@@ -251,7 +257,7 @@ Benefits: reproducibility (rebuild the exact mock even if main moved), debuggabi
 ### Forward-compatible seams (build into v1)
 
 Even though v1 only implements the simplest path, design these interfaces now so v2 slots in behind them with no downstream change:
-- **Resolver interface:** `resolve(repo, ref, specPath) → spec content`, implemented as `GitRefResolver` in **both** v1 and v2 (fetching a spec at a git ref is identical regardless of ref kind). The v1↔v2 difference is *ref selection*: v1 uses the per-service `branch` (default `main`); v2 resolves a requested semver → a pinned tag/sha. See `offbook-contracts.md` §6.
+- **Resolver interface:** `resolve(repo, ref, specPath) → Promise<ResolvedSpec>`, implemented as `GitRefResolver` in **both** v1 and v2 (fetching a spec at a git ref is identical regardless of ref kind). The v1↔v2 difference is *ref selection*: v1 uses the per-service `branch` (default `main`); v2 resolves a requested semver → a pinned tag/sha. See `offbook-contracts.md` §6.
 - **Version source:** `(environment) → {service: version}`, implemented in v1 as `StaticManifestSource` (reads a committed `environments.yaml`); v2 adds `ReleaseToolingSource`.
 - Write `specs.lock` with fields that won't need restructuring later.
 

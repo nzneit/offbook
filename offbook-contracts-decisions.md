@@ -6,6 +6,8 @@
 
 **Status:** ✅ **All of P1 (D1–D6) decided and compiled into `offbook-contracts.md`** (now the authoritative spec; this file is the dialog/rationale record). Doc-debts cleared across the design + L2 docs. D6 added `GitRefResolver` (ref-agnostic; v1 selects `ref = branch`, default `main`), `resolved-ref` + full `resolved-sha` in `specs.lock`, and seam-complete config (both `services.yaml` + `environments.yaml` in v1).
 
+> **Superseded in specifics (2026-06-23):** the **G1–G25 build-gap resolution** (`offbook-build-gaps.md`) refined several interfaces this log quotes from their P1-frozen form — e.g. `Violation.seq` is now a **unique per-entry cursor** (not "engine-wide … NOT unique"), `Channel` gained `service`/`schema`/`qos`/`retain`/…, qos/retain is **registry-resolved**, and `Resolver.resolve → Promise<ResolvedSpec>`. The TypeScript snippets below preserve the **P1 dialog** verbatim as provenance; for the current contract always read `offbook-contracts.md` (canonical).
+
 **Vocabulary lock (applies throughout):** the connecting party under development = **`client`** (this adopter's client is a browser application). The tool's own emissions = **`mock`**. Channel/flow direction = **`toClient` / `fromClient`**. MQTT terms (`topic`, `qos`, `retain`, bindings) stay concrete — generalize the **client** vocabulary, **not** the MQTT transport (transport abstraction is the n=2 fork, §3).
 
 ---

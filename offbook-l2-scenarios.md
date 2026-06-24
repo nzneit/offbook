@@ -110,7 +110,7 @@ A scenario has three top-level fields:
 - A **closed helper set**, all deterministic/seeded:
   - `{{uuid}}` — seeded deterministic UUID (run seed + counter), not random v4.
   - `{{seq}}` — monotonic per-scenario counter.
-  - `{{now}}` — **virtual seeded clock**, *not* wall-clock (a real `Date.now()` would break replayability). Starts at a fixed epoch, advances by the seeded delays.
+  - `{{now}}` — the **logical seeded clock** (`offbook-contracts.md` §3): `now()` = `fixedEpoch + Σ(seeded delays)`, *not* wall-clock (a real `Date.now()` would break replayability). It advances by the **full** seeded delay of each step even though, in the default scheduler, the emit is delivered on the next event-loop task rather than after real wall time elapses (contracts §3, design §6).
 
 ### Auto-fill
 The author templates **only the causal fields**; omitted required schema fields are **seed-faked by L1** and the whole payload is **Ajv-rechecked before emit** (§4). Scenarios stay minimal and spec-valid by construction.
@@ -123,6 +123,7 @@ The author templates **only the causal fields**; omitted required schema fields 
 - **`delay` is a per-step property.** Syntax: constant `<n><unit>` (`150ms`, `2s`) or ranged `<min>-<max><unit>` (`150-300ms`). **Unit required** (`ms` | `s`); no bare numbers. Omitted ⇒ `0` (immediate). A constant is the degenerate zero-width range.
 - **Multi-step timing is relative/cumulative:** each step's delay is measured from the **previous emit**, so step N's absolute time = sum of delays 1..N. Natural "wait, emit, wait, emit" scripting.
 - **Seeded, order-independent draws:** each ranged delay = `mulberry32(hash(runSeed + scenarioName + stepIndex))` — the same Mulberry32 PRNG as L1 (§4), keyed by a stable identity (not a shared stream cursor). Same run seed ⇒ byte-identical timings; independent of evaluation order; steps independent. This makes §6's headline real: "reproduce the bug where the ack lands after the timeout" is a repeatable fixture.
+- **A resolved delay advances the logical clock, not wall time (default scheduler).** The drawn `delayMs` is added to the logical `now()` (`offbook-contracts.md` §3) and the emit is delivered on the **next event-loop task** — enough to force the client's async code to suspend/resume (design §6) without CI paying the real seconds. Real wall delay is an **opt-in interactive mode** for human-perceptible timing, never the CI/replay path.
 - **v2 (deferred, additive on the step model):** adversarial timing — `duplicate`, `reorder`, `drop`, `redeliver` — are added as more step properties, no restructuring (§6).
 
 ## 7. Author-time validation (D6)
@@ -141,8 +142,9 @@ The author templates **only the causal fields**; omitted required schema fields 
 ## 8. Loading, hot-reload & control plane (D7)
 
 - **Loading:** glob → sorted load (§3) → load-time validation (§7) → build the ordered scenario table.
-- **Hot-reload (dev affordance):** watch the tree; on change re-glob/re-sort/re-validate and **atomically swap** the table; surface what changed + any new errors loudly. **Swaps definitions only — does not reset runtime state** (counters/virtual clock continue); returning to t0 is `reset`.
-- **Trigger:** `POST /trigger/{name}` fires a named scenario on demand (§9 debugging moment). Optional request body supplies params/inbound payload for a reactive scenario fired by hand (`{ "deviceId": "t1", "payload": { … } }`); anything omitted is seed-faked.
+- **Hot-reload (dev affordance, `autonomous` mode only):** watch the tree; on change re-glob/re-sort/re-validate and **atomically swap** the table; surface what changed + any new errors loudly. **Swaps definitions only — does not reset runtime state** (counters/virtual clock continue); returning to t0 is `reset`.
+- **`passive` mode freezes the scenario set:** mirroring the way `passive` fires no autonomous ticks (`offbook-contracts.md` §5), `passive` loads the scenario set **once at startup with no watcher** — hot-reload is disabled. So editing a scenario file between `reset` and an assertion cannot change the matched scenario; the dispatch table is as deterministic across a CI window as the emission stream. Hot-reload is therefore a dev-only affordance.
+- **Trigger:** `POST /trigger/{name}` fires a named scenario on demand (§9 debugging moment). Optional request body supplies params/inbound payload for a reactive scenario fired by hand — params are **nested** under `params` (canonical, per `offbook-contracts.md` §5): `{ "params": { "deviceId": "t1" }, "payload": { … } }`. Each `params` entry binds the scenario's `{{param}}` captures (here `{{deviceId}}`); anything omitted is seed-faked.
 - **Reset:** `POST /reset` returns to known state — re-seed PRNGs to the run seed, reset counters + virtual clock, republish retained initial state, halt autonomous emission. The CI `reset → publish → wait → assert → teardown` primitive (§9 moment 4).
 - **Seeding:** the run seed is startup config; `reset` re-seeds to that same seed (reproducible); the control plane can set a fresh seed for a new deterministic run. L1 (§4), ranged delays (§6), and helpers (§5) all draw from it.
 

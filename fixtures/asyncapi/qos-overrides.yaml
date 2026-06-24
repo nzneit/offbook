@@ -1,0 +1,77 @@
+asyncapi: 3.0.0
+info:
+  title: QoS / Retain Config Overrides
+  version: 1.0.0
+  description: >-
+    Two toClient channels that declare NO MQTT operation binding, so the spec-binding
+    tier (tier 1) is silent and resolution falls to the offbook config tiers (P1.D2,
+    offbook-contracts.md §2/§6, gap G13). With services.yaml setting qosDefault: 2 +
+    retainDefault: true for this service, `alerts` must resolve to the per-service
+    default (qos 2, retain true) while `telemetry/{deviceId}` is pinned to qos 0 +
+    retain false by a topicOverrides entry — qos 0 differs from BOTH the global default
+    (qos 1) AND the per-service default (qos 2), so the per-topic override tier is
+    unambiguously observable (not vacuous). The `alerts` contrast proves the per-service
+    default tier is reached; the `telemetry` override proves tier 2 beats tier 3. Pairs
+    with qos-retain.yaml (which covers the binding tier); here there is deliberately no
+    binding, so the config tiers are the only thing that can resolve qos/retain.
+servers:
+  mosquitto:
+    host: localhost:1883
+    protocol: mqtt
+    protocolVersion: '3.1.1'
+channels:
+  alerts:
+    address: alerts/{deviceId}
+    parameters:
+      deviceId:
+        description: Device identifier
+    messages:
+      Alert:
+        $ref: '#/components/messages/Alert'
+  telemetry:
+    address: telemetry/{deviceId}
+    parameters:
+      deviceId:
+        description: Device identifier
+    messages:
+      Telemetry:
+        $ref: '#/components/messages/Telemetry'
+operations:
+  publishAlerts:
+    action: send             # toClient — no mqtt binding, so qos/retain come from the per-service config default
+    channel:
+      $ref: '#/channels/alerts'
+  publishTelemetry:
+    action: send             # toClient — no mqtt binding; services.yaml topicOverrides pins it to qos 0
+    channel:
+      $ref: '#/channels/telemetry'
+components:
+  messages:
+    Alert:
+      name: Alert
+      payload:
+        type: object
+        required: [deviceId, level, message]
+        additionalProperties: false
+        properties:
+          deviceId:
+            type: string
+          level:
+            type: string
+            enum: [info, warning, critical]
+          message:
+            type: string
+    Telemetry:
+      name: Telemetry
+      payload:
+        type: object
+        required: [deviceId, value]
+        additionalProperties: false
+        properties:
+          deviceId:
+            type: string
+          value:
+            type: number
+          sampledAt:
+            type: string
+            format: date-time
