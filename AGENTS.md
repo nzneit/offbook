@@ -37,4 +37,3 @@ Pre-work **P0–P4 complete** (L2 format, frozen contracts, build plan, fixtures
 
 ## Working notes
 - **Git identity is the user's to set** — don't run `git config user.*` on their behalf. Commit/push **only when asked**.
-- Conventional commit trailer for this repo: `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`.
