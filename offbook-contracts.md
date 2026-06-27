@@ -44,19 +44,55 @@ interface Channel {     // produced by the Spec Registry
 
 interface SpecRegistry {  // the ONE concrete-topic → Channel matcher; lives in `registry/`, imported everywhere
   match(topic: string): { channel: Channel; params: Record<string, string> } | undefined;
+  matchesFilter(filter: string, topic: string): boolean;  // MQTT +/# SUBSCRIBE-side filter test (F6); shared by engine (wildcard replay, §2) + scenarios (when.topic, §3a)
   channels(): readonly Channel[];
 }
 ```
 
-- **One matcher, owned by `registry/`.** Every consumer that turns a concrete `NormalizedMessage.topic` into its `Channel` — `/publish` direction inference, `unknown-topic`/`schema` validation, `Violation.channel` stamping, the `onSubscribe` initial-state path, L3 `register` routing (§3) — imports this single `match`. Hand-rolling a second matcher is forbidden (divergent semantics make the CI gate non-deterministic).
-- **Match is over the channel ADDRESS.** `{param}` is a **single-segment** AsyncAPI capture on the channel address (`state/{deviceId}` ↦ `{ deviceId: 'thermostat-1' }`). MQTT `+`/`#` are **SUBSCRIBE-side filters** (a different operation, handled by the §7a wildcard policy) — they are **not** channel patterns and `match` never interprets them.
+- **One matcher, owned by `registry/`.** Every consumer that turns a concrete `NormalizedMessage.topic` into its `Channel` — `/publish` direction inference, `unknown-topic`/`schema` validation, `Violation.channel` stamping, the `onSubscribe` initial-state path, L3 `register` routing (§3) — imports this single `match`. Hand-rolling a second matcher is forbidden (divergent semantics make the CI gate non-deterministic). **Both `match` and `matchesFilter` delegate to [`mqtt-pattern`](https://www.npmjs.com/package/mqtt-pattern)** (`exec` for the `{param}` capture, `matches` for the `+`/`#` filter; R2) — one tested library, no hand-rolled segment-splitting — while offbook's precedence (below) stays our sort on top. A build-time parity spike confirms `mqtt-pattern`'s `{param}` == AsyncAPI single-segment capture before we rely on it.
+- **Match is over the channel ADDRESS.** `{param}` is a **single-segment** AsyncAPI capture on the channel address (`state/{deviceId}` ↦ `{ deviceId: 'thermostat-1' }`). MQTT `+`/`#` are **SUBSCRIBE-side filters** (a different operation, tested by `matchesFilter` above per the §7a wildcard policy) — they are **not** channel patterns and `match` never interprets them.
 - **Precedence when more than one channel matches:** most-specific first — a literal segment beats a `{param}` segment at the same position — then declaration order in the spec. Two channels matching the same concrete topic resolve to the same winner on every run.
-- **`Channel.schema` is fully bundled** so it is hand-able to Ajv and the L1 faker with no parser/registry present: the `external-ref.yaml` + `shared/common.yaml` fixture (the §5/§12.4 bundling bar) must, taken as `channel.schema` alone, compile under Ajv standalone.
+- **`Channel.schema` is fully bundled** so it is hand-able to Ajv and the L1 faker with no parser/registry present: the `external-ref.yaml` + `shared/common.yaml` fixture (the §5/§12.4 bundling bar) must, taken as `channel.schema` alone, compile under Ajv standalone. The bundling comes from the **parser stack** — `@asyncapi/parser`'s resolved output (it depends on `@apidevtools/json-schema-ref-parser`, whose `$RefParser.bundle()` produces the self-contained internal-`$ref` form, dedup'd not blown-up) — **not** hand-rolled `$ref`-walking in `registry/`; we only stamp `$schema: 2020-12` (R1).
 
 - **Direction is derived, not stored on messages:** flow position (`onInbound` vs `emit`) gives inbound/outbound; the topic→`Channel` lookup gives the spec-declared direction. In v1 it's a clean bijection (the client only publishes `fromClient`; the mock only emits `toClient`).
 - **`delayMs`** is resolved in the engine (seeded Mulberry32 draw — see §3 Behavior engine, this doc) and consumed by the engine scheduler; the broker ignores it.
 - **Clocks (G5):** the **logical seeded clock** (`now()` = `fixedEpoch + Σ` seeded delays; §3 — also called the *virtual clock* / *virtual time* elsewhere in these docs, the same construct) is the *emission* timeline only (drives `{{now}}` and `delayMs`) — reproducible, not wall time. **Inbound** is externally driven, so `meta.receivedAt` is **wall-clock** (human) and `meta.seq` is a **logical inbound-arrival ordering counter** (distinct from the unique per-entry `Violation.seq` log cursor, §4) giving reproducible inbound ordering.
 - A decode failure is surfaced as `payload: undefined` + `meta.decodeError` (never dropped — see §2 Broker module, this doc).
+
+## 1a. Runtime config — `Config` (model/)
+
+The single global runtime config every module reads; declared in `model/` (Tier 0) so no module invents its own shape (F2). Fields are grouped by lifecycle: only `seed` is varied by `reset` (via `POST /reset {seed?}`); every other field is **process-scoped** — bound once at startup, never touched by `reset`.
+
+```ts
+interface Config {
+  // — determinism (reset re-seeds to `seed`, or the `POST /reset {seed?}` override) —
+  seed: number;            // default run seed; base of the keyed PRNG (§3, F7)
+  fixedEpoch: number;      // fixed logical-clock base: now() = fixedEpoch + Σ(seeded delays) (§3, G5)
+  // — scheduler —
+  tickIntervalMs: number;  // autonomous tick cadence (§3)
+  // — limits (bounded buffers; process-scoped) —
+  maxViolations: number;   // /validation ring-buffer cap (§5)
+  maxEvents: number;       // reserved — inbound-event history (unused in v1)
+  // — identity / network (bound once at startup; reset never touches) —
+  injectedClientId: string;    // meta.clientId for HTTP-injected publishes (§5, G9)
+  brokerWsPort: number;        // MQTT-over-WebSockets listener
+  brokerTcpPort: number;       // MQTT-over-TCP listener
+  controlPlanePort: number;    // control-plane HTTP API
+}
+
+// Committed defaults — pinned so a golden snapshot is machine-independent (two checkouts ⇒ identical {{now}} + draws).
+const DEFAULT_CONFIG: Config = {
+  seed: 1,
+  fixedEpoch: 1_700_000_000_000,   // 2023-11-14T22:13:20Z — arbitrary but fixed
+  tickIntervalMs: 1000,
+  maxViolations: 10_000,
+  maxEvents: 0,
+  injectedClientId: 'control-plane',
+  brokerWsPort: 9001,
+  brokerTcpPort: 1883,
+  controlPlanePort: 9080,
+};
+```
 
 ## 2. Broker module interface
 
@@ -74,14 +110,25 @@ interface BrokerModule {
 ```
 
 - **`emit` is `Promise<void>` for deterministic ordered delivery:** the engine awaits sequential emits so enqueue order = intent. The engine *owns* this guarantee rather than assuming Aedes internals.
-- **One outbound primitive.** `retain` is a PUBLISH flag; **clear retained = a zero-byte retained publish** (`emit` with `payload: undefined`, `retain: true`), which **evicts** the key from the retained store — the broker does **not** keep a tombstone, so `getState()` never returns an entry with an empty/`undefined` payload and `StateEntry.retain` is therefore always `true` (§5). There is no `setRetained` (un-MQTT). `getState` is an out-of-band control-plane read.
+- **One outbound primitive.** `retain` is a PUBLISH flag; **clear retained = a zero-byte retained publish** (`emit` with `payload: undefined`, `retain: true`), which **evicts** the key from the retained store — the broker does **not** keep a tombstone, so `getState()` never returns an entry with an empty/`undefined` payload and `StateEntry.retain` is therefore always `true` (§5). There is no `setRetained` (un-MQTT). `getState` is an out-of-band control-plane read — it reads **Aedes' own retained store** (`persistence.createRetainedStream`), not a parallel `ReadonlyMap`: Aedes already implements the MQTT clear-on-empty rule, so a second store can't diverge from what a late subscriber actually receives (R3).
 - **Payload-agnostic:** a malformed payload is **never dropped or blocked** — the broker delivers raw bytes and surfaces the event with `payload: undefined` + `meta.decodeError`; the validation engine logs a `decode` violation (observe-and-surface, §5). A decode failure is surfaced **only** via `meta.decodeError` (+ the violation) and is **never written to the retained store**, so a non-decodable retained publish creates no `StateEntry` — this is the other `payload: undefined` case, kept distinct from the clear-retained eviction above.
-- **`onSubscribe` & the initial-state materialization policy (G3).** Retained initial state for `toClient` channels is published by the **engine**; **when** depends on whether the channel address is parametrized — these are the **normative rules** (`offbook-design.md` §7a elaborates them with examples + rationale):
+- **`onSubscribe` & the initial-state materialization policy (G3).** Retained initial state for `toClient` channels is published by the **engine**, which owns materialization end-to-end: it consumes `broker.onSubscribe` and, on a **concrete** subscribe, calls `InstanceRegistry.materialize` then republishes — the broker only *reports* the subscribe, it never materializes (F6). **When** the publish happens depends on whether the channel address is parametrized — these are the **normative rules** (`offbook-design.md` §7a elaborates them with examples + rationale):
   - **Non-parametrized** `toClient` channels → published **eagerly at startup** (one concrete topic, nothing to de-wildcard).
-  - **Parametrized** `toClient` channels → an instance is **materialized lazily** when a concrete subscribe binds its params **or** a `fromClient` command first references a concrete param; the engine keeps a **materialized-instance set**.
-  - A **wildcard subscribe** (`+`/`#`) replays retained state for **already-materialized** instances only and **never invents** params.
-  - Optional per-channel **`seedInstances`** pre-materializes a deterministic demo set at startup (so onboarding isn't a blank UI).
-  - **`reset`** re-materializes **exactly the recorded set** (seed instances + those materialized since the last reset), re-seeded — so post-`reset` `/state` is deterministic, not empty.
+  - **Parametrized** `toClient` channels → an instance is **materialized lazily** when a concrete subscribe binds its params **or** a `fromClient` command first references a concrete param; the engine keeps a **materialized-instance set** — the engine-owned `InstanceRegistry` (F1), the single owner of all five rules in this policy.
+  - A **wildcard subscribe** (`+`/`#`) replays retained state for **already-materialized** instances only (`InstanceRegistry.list(filter)`, the filter matched per F6) and **never invents** params.
+  - Optional **`seedInstances`** (typed on `ServiceConfig`, §6 — channel address → list of param-maps) pre-materializes a deterministic demo set at startup (so onboarding isn't a blank UI).
+  - **`reset`** re-materializes via `InstanceRegistry.restore(snapshot())` — **exactly the recorded set** (seed instances + those materialized since the last reset), re-seeded — so post-`reset` `/state` is deterministic **by construction**, not empty.
+
+```ts
+// Engine-owned instance lifecycle (F1) — the ONE owner of the materialization policy above; declared in model/, driven by the engine.
+interface InstanceRegistry {
+  materialize(channelAddress: string, params: Record<string, string>): void;   // idempotent; records the concrete instance
+  list(filter?: string): { topic: string; params: Record<string, string> }[];  // filter = +/# subscribe pattern (F6); omitted ⇒ all materialized
+  snapshot(): InstanceSnapshot;          // captured at reset
+  restore(s: InstanceSnapshot): void;    // re-materializes EXACTLY the snapshot set, re-seeded — post-reset /state deterministic
+}
+interface InstanceSnapshot { instances: { channelAddress: string; params: Record<string, string> }[]; }
+```
 - **qos/retain resolution precedence** (**registry-resolved** — the registry already holds the spec binding; config injected at construction; result stored on the `Channel` (§1); the broker just carries the flags): **spec MQTT binding → offbook per-topic override → per-service default → global (qos 1)**. The middle tiers live in `ServiceConfig` (`topicOverrides` / `retainDefault` / `qosDefault`, §6).
 
 ## 3. Behavior engine — registration, dispatch, scheduling
@@ -92,9 +139,11 @@ interface BrokerModule {
 - **`now()` is logical**, not wall-clock: `fixedEpoch + Σ(resolved seeded delays applied on the emission timeline)`. This is what `{{now}}` stamps (l2 §5) and what emission ordering uses; it is a pure function of the seed, so it replays byte-identically.
 - **Default scheduler = virtual time + a single event-loop yield, NOT real wall delay.** Forcing the client's async code to actually suspend/resume (design §6) needs only *one* yield boundary (`queueMicrotask`/`setImmediate`/`await`), not the literal `delayMs` elapsed in wall time. So the scheduler delivers each emit on the **next task** while advancing logical `now()` by the **full** seeded delay — async-forcing **and** deterministic **and** fast (CI never pays real seconds for a 300 ms step, and no wall-scheduler jitter can reorder anything). This is the DST-faithful default.
 - **Real-wall latency is an opt-in interactive mode** (`delayMs` of actual elapsed wall time) for human-perceptible/UX timing — never the CI path.
-- **Autonomous `tick`** fires on a config `tickIntervalMs` (default `1000`) with optional seeded jitter; "reproducible autonomous" = same seed ⇒ same sequence of tick emissions and their logical timestamps, independent of wall scheduling. **`passive` mode fires no ticks** (§5) — and, per G24, also freezes the scenario set (no watcher).
+- **Autonomous `tick`** fires every `tickIntervalMs` of **virtual** time (default `1000`) with optional seeded jitter — scheduled on the virtual clock, **not** a wall `setInterval`, so a determinism run over a **fixed virtual-time horizon** sees the same tick *count* and logical timestamps regardless of host load (F10). "Reproducible autonomous" = same seed + same virtual horizon ⇒ identical tick emissions and timestamps. **`passive` mode fires no ticks** (§5) — and, per G24, also freezes the scenario set (no watcher). **The determinism gate runs in `passive`:** CI boots `passive` via the startup flag and the determinism test **asserts `GET /mode` is `passive`** before running, refusing (failing loud) otherwise — it never relies on out-racing autonomous ticks (F10).
 
 **Dispatch atomicity (G23 — run-to-completion per event).** The engine processes one event — an inbound publish, a `tick`, or a scheduled `emit` — and the synchronous handler work it triggers, **to completion before dequeuing the next**. Externally-driven inbound and virtual-clock emissions never interleave mid-event. Concurrent arrivals queue in arrival order: inbound by `meta.seq` assignment, emissions by the seeded timeline. This is what keeps `(seq, ordering)` host-load-independent under a fixed seed — without it, the determinism G6 establishes for the *counter* would be reintroduced as a *concurrency* race one layer down.
+
+**Determinism invariant (F7) — no process-global PRNG cursor.** Every seeded draw is reproducible by construction: it is either **(i) keyed by a stable identity** — `mulberry32(hash(seed + <id>))`, where `<id>` is `(scenarioName, stepIndex)` for ranged delays (l2 §6), `(channelAddress[, instanceParams])` for the L1 faker, `(tickIndex)` for tick jitter — **or (ii) a local counter scoped to a single run-to-completion dispatch unit** (G23): `ctx.random()` advances a per-handler-invocation counter, `{{seq}}` a per-scenario monotonic counter, `{{uuid}}` a per-scenario counter. **No draw reads a long-lived module-global `let rng`** shared across independent events, so an identical seed + inbound script reproduces a byte-identical stream regardless of host load or inbound interleaving. The L1 faker is driven via **json-schema-faker's native `seed` option** (set to `hash(seed + channelAddress)`), never a second Mulberry32 wrapping it (R4).
 
 **Two trigger paths** (refines §4's flat ordering):
 
@@ -121,21 +170,22 @@ interface HandlerContext {
   now(): number;      // LOGICAL clock: fixedEpoch + Σ(seeded delays) — NOT wall-clock (G5)
 }
 
-declare function register(topicPrefix: string, factory: HandlerFactory): void;
+declare function register(pattern: string, factory: HandlerFactory): void;   // pattern = AsyncAPI channel address w/ {param}; resolved by SpecRegistry.match at DISPATCH (lazy, F19)
 ```
 
 - L3 **publishes through the engine scheduler**, never `broker.emit` directly (§3 layering).
-- L1 is not registered — it's the built-in floor: `fake(channel, seed) → payload`, seeded and Ajv-rechecked before emit.
+- **Emit completion (F13).** Before `broker.emit`, the engine completes every emit through one choke-point `resolveEmit(partial, channel) → NormalizedMessage`: parse `EmitStep.delay` (`"150-300ms"`, §3a) into a **keyed** `delayMs` (F7), fill `qos`/`retain` from the resolved `Channel`, default `delayMs` to 0. Both `HandlerContext.publish` (L3) and the L2 scenario runner pass through it, so an authored `{topic, payload}` always reaches the broker at the channel-resolved QoS/retain.
+- L1 is not registered — it's the built-in floor: the canonical **`Faker`** (`type Faker = (channel: Channel) => unknown`), keyed-seeded (F7: `hash(seed + channelAddress)` via json-schema-faker's native seed, R4) and Ajv-rechecked before emit (drop-and-surface on failure, F5/§4). The engine provides the one implementation; **control-plane receives it by injection** (not a direct import), so `GET /topics` examples and `POST /publish {example:true}` call the *same* faker (F11) — the composition root (`offbook up`) wires it in. Because the faker is a pure keyed function (no shared cursor, F7), it injects as a plain `Faker` with no lifecycle/state to manage.
 - L2 scenarios are loaded per `offbook-l2-scenarios.md` (sorted-path → in-file dispatch order).
 - *(Deferred: AsyncAPI-3.0 reply-channel auto-response as a future L1 reactive enhancement.)*
 
-**L3 discovery & `register` semantics (G11).** L3 modules are discovered by the glob `handlers/**/*.ts` (mirroring L2's `scenarios/**/*.yaml`); each module calls `register(...)` on import. The first argument is a **channel pattern** — the full AsyncAPI channel address with single-segment `{param}` captures (e.g. `command/{deviceId}/set`), **not** a bare literal prefix and **not** an MQTT `+`/`#` subscribe filter. It is resolved by the **same matcher the registry owns** (the `SpecRegistry.match(topic)` of §1/§2), so a concrete inbound topic routes to the same channel for L3 as for validation and `/publish`. When more than one registered pattern matches a topic, precedence is **identical to that matcher's**: most-specific (a literal segment beats a `{param}`), then sorted module path → registration order — so reordering files never changes the winner. *(The frozen declaration still names the parameter `topicPrefix`; read it as `pattern`. Renaming the identifier is a one-token edit the engine/registry owner applies when wiring the matcher import.)*
+**L3 discovery & `register` semantics (G11).** L3 modules are discovered by the glob `handlers/**/*.ts` (mirroring L2's `scenarios/**/*.yaml`); each module calls `register(...)` on import. The first argument is a **channel pattern** — the full AsyncAPI channel address with single-segment `{param}` captures (e.g. `command/{deviceId}/set`), **not** a bare literal prefix and **not** an MQTT `+`/`#` subscribe filter. It is resolved by the **same matcher the registry owns** (the `SpecRegistry.match(topic)` of §1/§2), so a concrete inbound topic routes to the same channel for L3 as for validation and `/publish`. When more than one registered pattern matches a topic, precedence is **identical to that matcher's**: most-specific (a literal segment beats a `{param}`), then sorted module path → registration order — so reordering files never changes the winner. **Resolution timing (F19) is lazy:** `register(pattern, factory)` stores the *raw pattern* and resolves it against `SpecRegistry.match` **at dispatch, against the *current* registry** — so a handler needs no specs loaded at import time and survives a `POST /specs/refresh` hot-swap (§5) without rebinding to a stale channel set.
 
 **`emitSource` provenance (G10).** `broker.emit` is content-only (§2) and carries no layer/scenario/step identity; the **engine** owns emit and therefore knows which layer produced each message. The engine attaches the in-scope `EmitSource` (§4) to any `mock` `Violation` raised by that emit's Ajv recheck: the **L1** floor sets `{ layer: 'L1' }`; the **L2** scenario runner sets `{ layer: 'L2', scenarioName, stepIndex }` (`scenarioName` = the matched `Scenario.name`, `stepIndex` = the 0-based index into its `then[]` — §3a); the **L3** `register` wrapper tags its `ctx.publish` calls `{ layer: 'L3', … }`. So a mock violation is never shipped with `emitSource` permanently `undefined`.
 
 ## 3a. Scenario model (L2)
 
-The normalized, parsed shape of an L2 scenario — the type `scenarios/` (dispatch table, matcher, templating) and `control-plane` (`POST /trigger/{name}` → `{ scenario, fired, seq }`) both import. Transcribed from `offbook-l2-scenarios.md` §9 (the authoring format; this is the canonical *type*).
+The normalized, parsed shape of an L2 scenario — the type `scenarios/` (dispatch table, matcher, templating) and `control-plane` (`POST /trigger/{name}` → `{ scenario, fired, sinceSeq }`) both import. Transcribed from `offbook-l2-scenarios.md` §9 (the authoring format; this is the canonical *type*).
 
 ```ts
 interface Scenario {
@@ -167,7 +217,7 @@ interface EmitStep {
 ```ts
 type ViolationKind = 'schema' | 'direction' | 'unknown-topic' | 'decode';  // qos-mismatch deferred → tier-3 warn log
 
-interface SchemaError {            // OUR shape — not Ajv's — since it crosses the HTTP boundary
+interface SchemaError {            // a structural PICK from Ajv 8's ErrorObject — Omit<ErrorObject, 'data' | 'schema'> (strip the two non-serializable fields), NOT a hand-rewrite, so it never drifts from Ajv (R5); crosses the HTTP boundary
   instancePath: string;
   schemaPath: string;
   keyword: string;
@@ -195,8 +245,9 @@ interface Violation {
 
 - Single record with optionals (not a discriminated union) for v1.
 - **`emitSource` is engine-populated (G10):** `broker.emit` is content-only, so the **engine** (which owns emit) stamps the active layer onto any `mock` violation raised by that emit's recheck — `L1` for the faker floor, `L2` with `scenarioName` (= `Scenario.name`, §3a) + `stepIndex` (the `then[]` index) for the scenario runner, `L3` for `register`ed handler `ctx.publish` calls. It is therefore never permanently `undefined` for a `mock` violation.
+- **Failed pre-emit recheck = drop-and-surface (F5).** A `mock` payload that fails its pre-emit Ajv recheck is **not emitted**; the engine raises an engine-stamped `mock` `Violation` and **never re-draws on the live cursor or emits the invalid payload**. The proactive L1 floor for that channel stays empty on failure — the loud `mock` violation flags it. Whether to add a **keyed** fallback re-draw (F7-safe) to keep the floor populated is gated on the F8 faker-fidelity spike; "`L1 output always Ajv-valid`" (build-plan) describes the *emitted* stream (invalid drops out), not a guarantee the faker never errs.
 - **`seq` is unique per log entry (G6).** It is a strictly-increasing cursor minted as the violation is logged — *not* shared across a group of violations. `/validation` orders by `seq` **alone** (a total order; no `insertion` tiebreak), `?sinceSeq=` is **strictly-greater**, and the `reset` baseline is the last assigned `seq` (so the first post-reset entry is `baseline + 1`). This is exactly what makes `fce44fa`'s `summary.oldestSeq` (lowest still-retained `seq`), FIFO ring-buffer eviction, and the `sinceSeq` boundary mutually coherent: under a non-unique `seq`, a group sharing one value could be split by eviction or dropped/double-counted at the boundary. The two `seq` notions are **separate counters**, never one overloaded field: `Violation.seq` here is the unique per-entry log cursor; `InboundEvent.meta.seq` (§1) is the engine's inbound-arrival ordering counter.
-- **Determinism guarantee (precise).** Given a fixed inbound script + seed, the emission/violation stream and its `seq` ordering are byte-identical across runs. The CI harness drives inbound deterministically (`reset` → `publish`/`trigger` → poll), and run-to-completion dispatch (§3) plus the logical clock (§3) make the ordering independent of wall scheduling and host load.
+- **Determinism guarantee (precise).** Given a fixed inbound script + seed, the emission/violation stream and its `seq` ordering are byte-identical across runs. The CI harness drives inbound deterministically (`reset` → `publish`/`trigger` → poll), and run-to-completion dispatch (§3) plus the logical clock (§3) make the ordering independent of wall scheduling and host load. **The comparison is over a canonical projection (F9):** `Violation` **minus** `observedAt` (wall-clock) and `clientId` (arbitrary for real ws clients) — i.e. `{ seq, origin, kind, severity, topic, channel, detail, errors, emitSource, payload }`. The harness applies this field-mask before diffing two `/validation` responses, so the wall-clock fields are excluded **by contract**, not by accident.
 - **Three-tier surfacing:**
   1. **`/validation`** — structured runtime contract violations (CI-grade; the §5 headline).
   2. **`/diagnostics`** — static config/load issues (scenario-load errors, overlap/shadow warnings).
@@ -209,11 +260,11 @@ interface Violation {
 ### Reads
 | Endpoint | Returns | Notes |
 |---|---|---|
-| `GET /v1/topics` | `{ topics: TopicInfo[] }` | dereferenced **schema + seeded example inline**; `?direction=` / `?service=` filters; `?schema=false` slim mode |
+| `GET /v1/topics` | `{ topics: TopicInfo[] }` | dereferenced **schema + seeded example inline** (via the injected `Faker`, F11); `?direction=` / `?service=` filters; `?schema=false` slim mode |
 | `GET /v1/state` | `{ state: StateEntry[] }` | lean, **concrete** topics; `?topic=` prefix filter |
 | `GET /v1/validation` | `{ violations: Violation[]; summary: ValidationSummary }` | `?sinceSeq=` (strictly-greater) `?origin=` `?severity=` `?kind=`; ordered by `seq` alone (now a total order — G6); violations-only. **Bounded ring buffer** — see note below |
 | `GET /v1/specs` | `{ specs: SpecInfo[]; resolutionMode; warnings? }` | `resolutionMode: 'branch' \| 'pinned'` honesty flag (§7) |
-| `GET /v1/diagnostics` | `{ diagnostics: Diagnostic[]; summary }` | load/hot-reload-populated; dev-time surface |
+| `GET /v1/diagnostics` | `{ diagnostics: Diagnostic[]; summary: DiagnosticSummary }` | load/hot-reload-populated; dev-time surface |
 | `GET /v1/mode` | `{ mode, seed }` | |
 
 ```ts
@@ -232,6 +283,11 @@ interface ValidationSummary {    // the CI-facing payload of GET /v1/validation
   oldestSeq: number;             // lowest still-retained seq (bounded ring buffer); 0 when the log is empty
 }
 
+interface DiagnosticSummary {    // mirrors ValidationSummary for GET /v1/diagnostics (F15)
+  errors: number; warnings: number; info: number;
+  byKind: Record<'scenario-load' | 'overlap' | 'spec-load', number>;   // all three keys always present, zero-filled
+}
+
 // Closed set of error-envelope codes (every non-2xx path returns one); the CLI/CI branch on this union, no ad-hoc strings.
 type ErrorCode =
   | 'unknown-topic'              // a referenced topic matches no channel
@@ -241,21 +297,21 @@ type ErrorCode =
   | 'example-and-payload';       // POST /publish with BOTH payload and example present
 ```
 
-> **Violation-log retention.** The log is a **bounded ring buffer** capped at `config.maxViolations` (FIFO eviction), so a left-running dev instance has a **memory ceiling, not unbounded growth**. (It is the only unbounded log in v1 — `/state` is the retained store, bounded by topic count; `config.maxEvents` is reserved should inbound-event history ever be retained.) `seq` is **unique per entry**, process-monotonic, and **never reused** (G6), so `?sinceSeq=` (strictly-greater) stays correct even across eviction; `summary.oldestSeq` is the lowest still-retained `seq`, so a caller whose `sinceSeq < oldestSeq` knows older violations were evicted. **The CI loop is unaffected** — its `reset`-checkpoint → poll window holds far fewer than `maxViolations` entries, so nothing it cares about is ever evicted. (`reset` does not clear the log — eviction is by capacity only.)
+> **Violation-log retention.** The log is a **bounded ring buffer** capped at `config.maxViolations` — a fixed-size **circular buffer with head/tail indices** (O(1) insert + evict, never `push`/`shift`; `seq`/`oldestSeq`/`sinceSeq` map onto ring indices — F21) — so a left-running dev instance has a **memory ceiling, not unbounded growth**. (It is the only unbounded log in v1 — `/state` is the retained store, bounded by topic count; `config.maxEvents` is reserved should inbound-event history ever be retained.) `seq` is **unique per entry**, process-monotonic, and **never reused** (G6), so `?sinceSeq=` (strictly-greater) stays correct even across eviction; `summary.oldestSeq` is the lowest still-retained `seq`, so a caller whose `sinceSeq < oldestSeq` knows older violations were evicted. **The CI loop is unaffected** — its `reset`-checkpoint → poll window holds far fewer than `maxViolations` entries, so nothing it cares about is ever evicted. (`reset` does not clear the log — eviction is by capacity only.)
 | Endpoint | Body | Result | Notes |
 |---|---|---|---|
-| `POST /v1/publish` | `{ topic, payload?, example?, qos?, retain? }` — **`payload` XOR `example`** | `202 { topic, direction, injected, seq }` | **direction inferred from the channel** (toClient drives UI / fromClient simulates client + validates); reports resolved `direction`; unknown topic → raw publish + flag. `payload?: unknown` is an explicit value; `example?: boolean` (`true`) generates a seeded schema-valid payload; **both present → `400 example-and-payload`**; `example: true` on an unknown topic → `400 example-on-unknown-topic` |
-| `POST /v1/trigger/{name}` | `{ params?, payload? }` (omitted → seed-faked) | `202 { scenario, fired, seq }` | `params` entries bind the scenario's `{{param}}` captures (e.g. `params.deviceId` → `{{deviceId}}`); `payload` supplies the inbound payload for a reactive scenario fired by hand. `404 unknown-scenario` |
-| `POST /v1/reset` | `{ seed? }` | `200 { reset, seed, seq }` | returns **active seed + `seq` baseline** (feeds `?sinceSeq=`); **non-destructive** — re-seeds PRNG, resets virtual clock, re-instantiates L3 handlers, republishes initial state, halts autonomous; `seq` is process-monotonic, log not cleared |
+| `POST /v1/publish` | `{ topic, payload?, example?, qos?, retain? }` — **`payload` XOR `example`** | `202 { topic, direction, injected, meta: { seq } }` | **direction inferred from the channel** (toClient drives UI / fromClient simulates client + validates); reports resolved `direction`; unknown topic → raw publish + flag. `payload?: unknown` is an explicit value; `example?: boolean` (`true`) generates a seeded schema-valid payload; **both present → `400 example-and-payload`**; `example: true` on an unknown topic → `400 example-on-unknown-topic` |
+| `POST /v1/trigger/{name}` | `{ params?, payload? }` (omitted → seed-faked) | `202 { scenario, fired, sinceSeq }` | `params` entries bind the scenario's `{{param}}` captures (e.g. `params.deviceId` → `{{deviceId}}`); `payload` supplies the inbound payload for a reactive scenario fired by hand; `sinceSeq` is the **log baseline before firing** — poll `/validation?sinceSeq=` for the violations this trigger produced (F3; universally defined, unlike an inbound `meta.seq` which an on-demand scenario has no source for). `404 unknown-scenario` |
+| `POST /v1/reset` | `{ seed? }` | `200 { reset, seed, sinceSeq }` | returns **active seed + the `sinceSeq` log baseline** (feeds `?sinceSeq=`, F3); **non-destructive** — re-seeds PRNG, resets virtual clock, re-instantiates L3 handlers, republishes initial state, halts autonomous; the log cursor is process-monotonic, log not cleared |
 | `POST /v1/mode` | `{ mode: 'autonomous' \| 'passive' }` | `200 { mode, seed }` | default `autonomous` (§7b); startup flag/env boots `passive` for CI; mode-set ≠ reset |
-| `POST /v1/specs/refresh` | — | `200 { specs: SpecInfo[] }` | re-resolves each service, rewrites `specs.lock`, hot-swaps the running registry, returns the new `SpecInfo[]` — no restart; `offbook specs update` calls this (the running server's registry would otherwise go stale). `up`/`down` are **not** endpoints — see the process-management note below (G14) |
+| `POST /v1/specs/refresh` | — | `200 { specs: SpecInfo[] }` | re-resolves each service but **skips parse + Ajv-recompile + swap for any service whose `content-hash` is unchanged** (short-circuits the entire swap when all hashes match — F21), rewrites `specs.lock`, hot-swaps the running registry, returns the new `SpecInfo[]` — no restart; `offbook specs update` calls this (the running server's registry would otherwise go stale). `up`/`down` are **not** endpoints — see the process-management note below (G14) |
 
 > **`passive` quiesces both the clock *and* the scenario set (G24).** Just as `passive` fires no autonomous ticks (§3), it also **freezes the L2 scenario set**: scenarios are loaded once at startup and the file watcher / hot-reload is **off**, so editing a scenario file between `reset` and an assertion cannot change which scenario matches. Hot-reload (l2 §8) is a dev-only, `autonomous`-mode affordance. This makes the dispatch table as deterministic across a CI window as the emission stream.
 
 - **A `fromClient` `/publish` re-enters the broker's inbound path (G9).** An HTTP-injected publish has no ws client to mint `meta`, so the control-plane synthesizes an `InboundEvent` and feeds it through the **same `onInbound` path the broker uses for real client publishes** — `meta.clientId = 'control-plane'` (configurable via `config.injectedClientId`), `meta.receivedAt = wall now`, `meta.seq` assigned by the engine — so it is validated identically to a real publish and tagged **`origin: 'client'`**. A contract break therefore lands in `byOrigin.client` (never silently in `byOrigin.mock`), so the headline gate below can't false-negative on injected traffic.
 - **`up` / `down` are NOT HTTP endpoints — they are process management (G14).** No request can start the server that would serve it; `offbook up` **spawns the server detached, writes a PID + port runfile, and probes the control-plane port for readiness**, and `offbook down` reads the runfile and signals the process. (`offbook specs update` *is* HTTP — it hits `POST /v1/specs/refresh` above so the running registry doesn't go stale.)
 
-The CI loop reads cleanly: `reset` (checkpoint `seq`) → `publish`/`trigger` → poll `GET /validation?sinceSeq=<checkpoint>` → assert `summary.byOrigin.client === 0`.
+The CI loop reads cleanly: `reset` (checkpoint `sinceSeq`) → `publish`/`trigger` → poll `GET /validation?sinceSeq=<checkpoint>` → assert `summary.byOrigin.client === 0`.
 
 ## 6. Spec ingestion & config (the §7 seams, v1)
 
@@ -270,7 +326,8 @@ interface ServiceConfig {
   branch?: string;         // v1 ref selection; default 'main'
   qosDefault?: 0 | 1 | 2;  // per-service default qos — tier 3 of the §2 precedence chain (above the global qos 1 fallback; the last config tier, consulted just before global) (G13)
   retainDefault?: boolean; // per-service default retain — tier 3
-  topicOverrides?: Record<string, { qos?: 0 | 1 | 2; retain?: boolean }>;  // per-topic override — tier 2 (above the per-service default, below the spec binding); key = channel address
+  topicOverrides?: Record<string, { qos?: 0 | 1 | 2; retain?: boolean }>;  // per-topic override — tier 2 (above the per-service default, below the spec binding); key = channel address, matched by STRING-EQUALITY against channel.topic (the {param} form) — not routed through SpecRegistry.match, not concrete topics (F14)
+  seedInstances?: Record<string, Record<string, string>[]>;  // channel address → list of param-maps; pre-materializes a deterministic demo set at startup (F1; §2 InstanceRegistry). Each map binds ALL of a channel's {params}, so multi-param channels work
   // v2: versionToSha strategy, specPath glob strategy, range policy, manual override
 }
 
@@ -290,7 +347,7 @@ interface VersionSource { versions(environment: string | null): Promise<Record<s
 ```
 
 - **`GitRefResolver` is the only resolver, v1 and v2** — fetching a spec at a git ref is identical regardless of ref kind. The v1↔v2 difference is purely *ref selection*: v1 uses `ref = serviceConfig.branch ?? 'main'` (a moving branch tip, unpinned); v2 resolves a requested semver → a pinned tag/sha via the `versionToSha` strategies. **v1 hands it a branch tip on `up`, and the lockfile's `resolvedSha` on `up --frozen`** (frozen mode passes `ref = lockEntry.resolvedSha`; the signature is unchanged — a SHA is just another ref).
-- **Atomic SHA acquisition (writer side, G4).** `GitRefResolver` resolves the branch to a full SHA **once** via `git ls-remote <repoUrl> <branch>`, then fetches **that SHA** — so a tip advancing between the resolve and the fetch cannot desync the fetched bytes from the recorded `resolvedSha`. Branch-tip mode shallow-fetches the branch ref; by-SHA mode uses `git fetch <repoUrl> <sha>` (relying on the host's `uploadpack.allowAnySHA1InWant`) + reads the file out — **not** `git archive --remote <sha>`, which GitHub and most hosts refuse for an unadvertised SHA. `<repoUrl>` is `serviceConfig.repo` when it is a full URL, else the `org/name` slug resolved against `gitHost` (G20).
+- **Atomic SHA acquisition (writer side, G4).** `GitRefResolver` resolves the branch to a full SHA **once** via `git ls-remote <repoUrl> <branch>`, then fetches **that SHA** — so a tip advancing between the resolve and the fetch cannot desync the fetched bytes from the recorded `resolvedSha`. Branch-tip mode shallow-fetches the branch ref; by-SHA mode uses `git fetch <repoUrl> <sha>` (relying on the host's `uploadpack.allowAnySHA1InWant`) + reads the file out — **not** `git archive --remote <sha>`, which GitHub and most hosts refuse for an unadvertised SHA. **Fallback (F17):** if the host refuses the unadvertised-SHA fetch (`allowAnySHA1InWant` off — common on GitHub Enterprise / internal hosts), `GitRefResolver` shallow-fetches the **branch ref** (always advertised) and walks history to the locked SHA (re-fetching at increasing depth until present); a hard error only if the locked SHA is no longer an ancestor of the branch tip (history rewritten). Both paths yield byte-identical specs at the pin. `<repoUrl>` is `serviceConfig.repo` when it is a full URL, else the `org/name` slug resolved against `gitHost` (G20).
 - **Lockfile reader (`up --frozen`, G4).** Default `offbook up` re-fetches each service's branch tip (branch mode = liveness, honestly warned). `offbook up --frozen` (alias `--locked`) loads `specs.lock` and re-resolves **each service by its `resolvedSha`**, writing `resolution-mode: pinned`; this is what makes the stored SHA load-bearing and the §6 reproducibility guarantee real. **v1 only ever hands it a branch tip.**
 - **`resolvedRef` vs `resolvedSha`:** `resolvedRef` = what we asked git for (branch/tag/sha — provenance, disambiguated by `resolution-strategy`); `resolvedSha` = the full canonical commit it dereferenced to (the pin). When the ref *is* a sha they may be identical. **Always store the full sha** — git auto-expands abbreviations as repos grow, so a short sha is not a stable identifier and would break reproducibility.
 
@@ -336,7 +393,7 @@ interface LockEntry {
   resolvedRef: string;
   resolvedSha: string;                 // FULL canonical commit sha — never abbreviated
   specPath: string;
-  specDeclaredVersion?: string;        // info.version
+  declaredVersion?: string;        // info.version
   contentHash: string;                 // "sha256:…"
   fetchedAt: string;                   // ISO8601
   resolvedVersion?: string;            // v2 only — semver after range policy
@@ -354,7 +411,7 @@ services:
     resolved-ref: dev               # selection input
     resolved-sha: 9f2c3a1b4d5e6f70819a2b3c4d5e6f7081929a3b   # FULL commit sha
     spec-path: asyncapi.yaml
-    spec-declared-version: 2.0.0    # info.version
+    declared-version: 2.0.0    # info.version
     content-hash: sha256:c1d2…      # byte fingerprint
     fetched-at: 2026-06-23T…
     # resolved-version:  (v2 only — semver after range policy)
@@ -363,9 +420,9 @@ services:
 > **Key-casing convention:** hand-authored config (`services.yaml`, `environments.yaml`) uses **camelCase** keys mirroring the TS fields (`specPath`, `branch`); the generated **lockfile uses kebab-case** throughout (`lockfile-version`, `resolution-mode`, `spec-path`, …). A `LockEntry`↔YAML serializer maps camelCase fields → kebab keys uniformly. *(The `resolutionMode` field on the `GET /v1/specs` JSON response stays camelCase — HTTP/JSON DTOs are camelCase; only the on-disk YAML is kebab.)*
 
 - Recording **`resolved-ref` + full `resolved-sha` + `content-hash`** gives v1 the **full reproducibility guarantee**, *made real by the `up --frozen` reader (§6 GitRefResolver bullet)*: rebuild the exact mock even after the branch moves by re-resolving each service at its `resolved-sha`. The byte-identical acceptance test runs against a **pinned SHA**, not a live tip (a mutable tip has no operationally-definable byte-identity).
-- **`spec-declared-version` is written by `ingestion/`, parser-free (G12).** Ingestion does a **shallow `info.version` read with the `yaml` lib** (already a dependency) on the fetched bytes — **no `@asyncapi/parser` import** — so the lockfile `spec-declared-version` and `SpecInfo.declaredVersion` are populated without serializing ingestion behind `registry/`'s full parse. It is best-effort: absent `info.version` ⇒ the field stays `undefined` (optional on both `ResolvedSpec` and `LockEntry`).
+- **`declared-version` is written by `ingestion/`, parser-free (G12).** Ingestion does a **shallow `info.version` read with the `yaml` lib** (already a dependency) on the fetched bytes — **no `@asyncapi/parser` import** — so the lockfile `declared-version` and `SpecInfo.declaredVersion` are populated without serializing ingestion behind `registry/`'s full parse. It is best-effort: absent `info.version` ⇒ the field stays `undefined` (optional on both `ResolvedSpec` and `LockEntry`).
 - The declared-vs-requested **drift-check is v2** (v1 always fetches a branch tip, so there's no resolved semver to check).
-- **Seam-complete:** `environments.yaml` exists in v1 so `requested-version` is real and the requested-vs-resolved gap is *honestly visible*; v2 swaps `StaticManifestSource → ReleaseToolingSource` with no restructure.
+- **Seam-complete:** `environments.yaml` exists in v1 so `requested-version` is real and the requested-vs-resolved gap is *honestly visible*; v2 swaps `StaticManifestSource → ReleaseToolingSource` with no restructure. *(F20: kept deliberately — the honest requested-vs-resolved provenance is judged worth the v1 carry, over deferring the unused machinery to v2.)*
 
 ## 7. v1 / v2 boundary (what these contracts stub)
 
