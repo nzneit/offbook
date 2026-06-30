@@ -88,7 +88,7 @@ A scenario has three top-level fields:
 ### Topic pattern + parameter binding
 - `{param}` — matches exactly one level **and captures** it (a "named `+`"); available to templating as `{{param}}`. Verbatim the AsyncAPI channel-address form, so authors copy channels straight from the spec.
 - `+` — matches one level, no capture.
-- `#` — matches one-or-more trailing levels, no capture; **must be terminal** (MQTT rule, enforced at load).
+- `#` — matches **zero-or-more** trailing levels, no capture; **must be terminal** (MQTT 3.1.1 rule — `a/#` also matches `a`; enforced at load).
 - Algorithm: split on `/`, level-by-level — literals must equal, `{param}` binds, `+` matches any one, `#` swallows the rest.
 
 ### Payload predicate — `payloadMatch` (subset equality)

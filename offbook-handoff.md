@@ -34,10 +34,10 @@ Scaffold the separate repo and implement, roughly in this order:
 5. **Control plane (HTTP) + Bun CLI** thin client over it. (§9)
 6. **`specs.lock`** + **`GitRefResolver`** (branch-selecting; v1 default `main`) behind the resolver/version-source interfaces. (§7; `offbook-contracts.md` §6)
 7. **Initial-state retained** + **seeded autonomous-emission mode** (toggleable). (§7)
-8. **L2 scenarios with seeded `delay`** — but resolve the authoring-format thread first (see Open Threads). (§4, §6)
+8. **L2 scenarios with seeded `delay`** — authoring format **resolved** in `offbook-l2-scenarios.md`; build to that. (§4, §6)
 
 ### Step 3 — Parallel & after
-- Open the **L2 authoring-format** thread in parallel with Step 2 — it gates whether v1 *feels* useful. (Open Threads #1)
+- The **L2 authoring-format** thread is **resolved** (`offbook-l2-scenarios.md`); it gated whether v1 *feels* useful and is no longer open.
 - Leave **v2 resolution** and **adversarial timing** untouched until v1 is proven.
 
 ---
@@ -52,7 +52,7 @@ Scaffold the separate repo and implement, roughly in this order:
 - [ ] Control plane + Bun CLI
 - [ ] `specs.lock` + `GitRefResolver` (branch-selecting, v1 default `main`) behind interfaces
 - [ ] Retained initial state + seeded toggleable autonomous emission
-- [ ] L2 scenarios with seeded `delay` (after authoring format decided)
+- [ ] L2 scenarios with seeded `delay` (authoring format decided — `offbook-l2-scenarios.md`)
 
 **Out of v1:** semver→SHA→file resolution, per-service strategy config, `--env`, real auth validation, release-tooling integration, adversarial timing. (§11)
 
@@ -71,7 +71,7 @@ Scaffold the separate repo and implement, roughly in this order:
 
 ## Open threads (decide before the relevant build step)
 
-1. **L2 scenario authoring format** — the single most important open thread; if authoring is tedious the tool never gets past L1. Decide format, topic-match + param binding, templating vs L3 boundary, `delay` expression, author-time validation, hot-reload. **Blocks v1 Step 2.8.** (§10)
+1. **L2 scenario authoring format** — **RESOLVED** (`offbook-l2-scenarios.md`, status: *Decided*): format, topic-match + param binding, templating vs L3 boundary, `delay` expression, author-time validation, and hot-reload are all decided. (Formerly the single most important open thread; it no longer blocks Step 2.8.)
 2. **Release-tooling boundary** — how "environment → deployed semver" is obtained, and whether the mock *calls* the tooling or *consumes its output*. **Gates v2 only.** (§7)
 
 ---

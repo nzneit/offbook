@@ -35,6 +35,7 @@ when every `☐` item is ticked, its decisions **fold into** the canonical doc n
 | Doc | Type | Status | Lineage | Summary |
 |---|---|---|---|---|
 | [v1 Pre-Build Gap Resolution, Round 2 (Handoff)](offbook-build-gaps-2.md) | decision-log | resolved | supersedes [build-gaps](offbook-build-gaps.md) | Round-2 v1 pre-build gap resolution (F1–F21, R1–R5); resolved. |
+| [v1 Pre-Build Standing-Items Audit, Round 3 (Handoff)](offbook-build-gaps-3.md) | decision-log | resolved | — | Round-3 standing-items audit (S1–S31); C-class doc-gaps folded, A-class build-gates, B-class deferrals; resolved. |
 | [v1 Pre-Build Gap Resolution (Handoff)](offbook-build-gaps.md) | decision-log | resolved | — | Round-1 v1 pre-build gap resolution (G1–G25); resolved. |
 | [P1 Contract Decisions (working log)](offbook-contracts-decisions.md) | decision-log | resolved | — | P1 dialog/rationale log feeding offbook-contracts.md (provenance, not canonical). |
 | [CI Synchronous Drain / Quiescence (Handoff)](offbook-ergonomics-ci-quiescence.md) | handoff | resolved | — | Synchronous-drain / quiescence signal for CI moment-4 (EC1); resolved + folded in. |

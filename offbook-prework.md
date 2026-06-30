@@ -51,7 +51,7 @@ Parallel **autonomous agents** specifically need: **frozen seams** (so they don'
 - **Refs:** handoff "v1 build checklist", §3, §5, §9.
 
 ### P3 — Commit test fixtures (sample AsyncAPI specs)
-- [x] **Deliverable:** `fixtures/asyncapi/` — **complete** (thermostat v3 both-directions · composition allOf/oneOf/anyOf · external-ref + shared/common `$id` · v2-pubsub · qos-retain bindings; see `fixtures/asyncapi/README.md`).
+- [x] **Deliverable:** `fixtures/asyncapi/` — **complete** (thermostat v3 both-directions · composition allOf/oneOf/anyOf · external-ref + shared/common `$id` · v2-pubsub · qos-retain bindings · qos-overrides config tiers (G13); see `fixtures/asyncapi/README.md`).
 - **Why it blocks:** the tool consumes AsyncAPI specs, but agents can't see the real proprietary ones.
 - **Contents:** representative specs covering **both directions** (toClient / fromClient) and the known-hard cases — external `$ref`, `$id`, `allOf` / `oneOf` / `anyOf` — so L1 and validation can be developed and the §5 correctness bar actually tested. A oneOf hard schema sits on a **fromClient** operation (composition `receiveSubmission`), so client-publish validation of the hard cases is exercised end-to-end, not just via mock-side L1 recheck.
 - **Refs:** §5, §4, §12.4.
