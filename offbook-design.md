@@ -1,3 +1,9 @@
+---
+type: spec
+status: living
+summary: Decisions & rationale (§1–§12) — canonical for "why".
+---
+
 # Offbook — Design Document
 
 *Knows every line. Needs no cast.*

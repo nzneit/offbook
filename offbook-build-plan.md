@@ -1,3 +1,9 @@
+---
+type: spec
+status: living
+summary: Tech stack, repo scaffold, tiered dependency graph, per-module acceptance, spike specs.
+---
+
 # Offbook — v1 Build Plan (P2)
 
 *Knows every line. Needs no cast.*

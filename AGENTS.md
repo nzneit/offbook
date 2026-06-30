@@ -1,3 +1,9 @@
+---
+type: meta
+status: living
+summary: Guidance for agents/humans — doc-map, hard constraints, vocabulary, review angles.
+---
+
 # AGENTS.md — Offbook
 
 Guidance for any agent (or human) working in this repo. `CLAUDE.md` is a symlink to this file.
@@ -15,6 +21,8 @@ Guidance for any agent (or human) working in this repo. `CLAUDE.md` is a symlink
 - **`fixtures/asyncapi/`** — test specs + their README (incl. the **Fixture quality bar**).
 
 **Conflict rule:** if a doc disagrees with `offbook-contracts.md` on an interface/API detail, the contract wins — fix the other doc.
+
+**Work tracking (temporary scaffold).** `INDEX.md` is a generated map of every doc + the open-work frontier; each doc carries `type`/`status`/`summary` frontmatter. Regenerate with `bun scripts/docs-index.ts`. This is intentionally idiosyncratic and gets wound down at MVP: `bun scripts/docs-index.ts --teardown`.
 
 ## Hard constraints (violating these defeats the purpose)
 - **Transport isolation.** Only `src/broker/` may import `aedes` (or any MQTT/transport package); everything else operates on the normalized message model. A lint rule enforces this.

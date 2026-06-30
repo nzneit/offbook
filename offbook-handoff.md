@@ -1,3 +1,9 @@
+---
+type: tracker
+status: open
+summary: What to build, in order — currently pointing at Step 2 (build the v1 core).
+---
+
 # Offbook — Agent Handoff
 
 *Knows every line. Needs no cast.*

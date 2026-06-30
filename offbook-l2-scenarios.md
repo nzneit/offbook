@@ -1,3 +1,9 @@
+---
+type: spec
+status: living
+summary: L2 scenario authoring format — declarative YAML behavior layer.
+---
+
 # Offbook — L2 Scenario Authoring Format
 
 *Knows every line. Needs no cast.*

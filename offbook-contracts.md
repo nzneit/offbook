@@ -1,3 +1,9 @@
+---
+type: spec
+status: living
+summary: Frozen v1 interfaces, HTTP control-plane API, and config schemas — the canonical authority (conflict rule).
+---
+
 # Offbook — Interface & API Contracts (v1)
 
 *Knows every line. Needs no cast.*

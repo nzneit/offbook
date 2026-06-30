@@ -1,3 +1,9 @@
+---
+type: decision-log
+status: resolved
+summary: P1 dialog/rationale log feeding offbook-contracts.md (provenance, not canonical).
+---
+
 # Offbook — P1 Contract Decisions (working log)
 
 *Knows every line. Needs no cast.*
