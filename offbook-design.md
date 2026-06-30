@@ -30,7 +30,17 @@ The current mocks fail specifically where they diverge from real protocol behavi
 
 > **Move contract-break and async-bug detection from deploy-time to dev-time.**
 
+**The v1 wedge is the contract-break half — bidirectional validation (§5).** Of the values the tool delivers, validation is the one it leads with: it is fully shippable in v1, demonstrable on the very *first run* (the developer can **witness a break get caught** — see `offbook demo`, §9), and it is the value every other part exists to protect (a mock is only worth trusting if it catches breaks — §7, *Spec trustworthiness*). **Async/timing fidelity (§6) and discovery (below) are *supporting* value, not co-headliners** — timing because its differentiated form (adversarial faults) is v2, discovery because it is a by-product of consuming the specs. Leading with one wedge keeps the pitch a sentence, not a paragraph.
+
 A secondary but significant benefit: the tool becomes the canonical **discovery surface** for "what topics and message shapes exist," replacing the browser application's copy-pasted constants.
+
+### Who this is for
+
+**Primary user — the app developer on the browser application.** Fluent in the app's own stack and domain, **not** an MQTT or AsyncAPI expert. Every surface decision serves this developer: the hardcoded-mock pain above, the discovery surface that replaces copy-pasted constants, and the moment-1 onboarding promise (§9) are all theirs.
+
+**"No MQTT knowledge required" is scoped to *getting value*, not to authoring.** This user reaches the tool's two largest values with **zero authoring and zero MQTT fluency**: the app boots and renders against the **L1 schema-valid floor** (§4), and everything it *publishes* is **validated against the spec automatically** (§5, observe-and-surface). **L2/L3 authoring** — scripted causal/timed behavior — is a **progressive, opt-in tier** the same developer grows into, scaffolded by the first-run on-ramp (the EI2 orientation banner; the EQ5/EQ7 teaching diagnostics), **not** a zero-knowledge promise. So when §4 says "the development value lives in L2/L3," it means the *behavioral richness* lives there — the contract-and-timing fidelity that is the core value proposition does **not** wait on authoring.
+
+**Dependency persona — the upstream spec owner (the service team).** **Not** a user Offbook serves or can compel, but the party whose spec hygiene the tool's correctness rests on: the tool is only as truthful as the AsyncAPI specs it consumes (§2, §7), so a stale or partial spec silently **bounds — or inverts** — the value for the primary user. (What the tool *does* about a stale/partial spec — the degraded-spec posture — is a separate, still-open product decision.) **Opportunistic path:** the spec owner *may* run Offbook for their own ends — sanity-checking a spec change against a real client, or as a discovery surface — a concrete instance of §3's note that the tool "may be used by more than just the browser application." Welcome but unplanned-for; it does not make them a primary user.
 
 ---
 
@@ -122,13 +132,13 @@ Behavior is resolved with **first-match-wins, in order L3 → L2 → L1**. This 
 
 ### Important framing for expectations
 
-AsyncAPI specs describe **shape, not causality**. The spec yields L1 (structure + validation) for free, but the *development value* lives in L2/L3, which are **authored by humans**. The tool's first-run experience must set this honestly: *the spec gives you validation and structure; humans give you behavior.* (Surfaced by the `offbook up` empty-state orientation banner — EI2.)
+AsyncAPI specs describe **shape, not causality**. The spec yields L1 (structure + validation) for free — and the **L1 floor plus automatic validation are the primary user's no-authoring values** (see *Who this is for*, §1). The richer **causal/timed behavior** lives in L2/L3, which are **authored by humans** — a progressive, opt-in tier, not the entry fee. The tool's first-run experience must set this honestly: *the spec gives you validation and structure; humans give you behavior.* (Surfaced by the `offbook up` empty-state orientation banner — EI2.)
 
 ---
 
 ## 5. Bidirectional Contract Validation (Headline Feature)
 
-This is the primary purpose, directly targeting "drift undetected until deploy."
+This is the primary purpose, directly targeting "drift undetected until deploy." — and the **v1 wedge** (§1): the job the tool leads with, and the one `offbook demo` shows on run #1.
 
 - **Browser application → service:** messages the browser application publishes are validated against the spec's receive-side schemas. The engine **observes and surfaces violations immediately and loudly** (control plane + validation log), so the browser application learns it is off-contract *now*, locally, instead of at deploy time. Note: even with embedded Aedes, the model is **observe-and-surface, not block-at-broker** — real MQTT brokers (ActiveMQ included) are payload-agnostic and deliver off-spec bytes without complaint, so broker-level rejection would be *anti*-fidelity. Surfacing loudly (not blocking delivery) is both sufficient and more prod-faithful. (This also keeps the design portable if the broker ever moves out-of-process and the engine becomes a privileged client.)
 - **Service → browser application:** the mock's emissions are spec-valid by construction (L1) or validated at scenario-load time (L2), so the browser application is developed against contract-true responses.
@@ -145,6 +155,18 @@ Mitigations:
 - Use the spec's self-declared `info.version` as a drift/sanity check so a mis-consumed spec announces itself (see §7).
 - **Test the validation pipeline against specs that use external `$ref`s and `$id`** before trusting it in CI. The parser bundles/dereferences *before* validating, and `$ref` sibling-keyword and `$id` base-URI handling can produce surprising results — exactly the silent-wrongness §5 warns about.
 
+### Earning continued trust — success criteria, the scoreboard, and de-noising
+
+Correctness (above) is necessary but not sufficient: the tool also dies if it never *shows* the dev it is working, or if it *buries* real breaks in duplicate noise. Beyond "be correct," v1 commits to a small set of **success criteria** — what "worth keeping" looks like:
+
+1. **Breaks caught** — the value proof, and the tool **self-reports** it: `offbook status` surfaces *"caught N distinct contract breaks this session"* (the `byOrigin.client` signal, reframed from a CI-gate input into a visible win tally). A dev tool that never shows its own scoreboard gets dropped the first time it is mildly annoying.
+2. **False-positive budget = 0** — a false positive (flagging a *valid* message) is a **P0 bug**, not a tuning knob; it is the single number that protects adoption and makes the correctness bar above measurable.
+3. **Time-to-first-value** — one command, seconds: `offbook demo` (§9) is the measurable on-ramp to a witnessed catch.
+
+*(Authoring effort and setup-to-running against real specs are real goals too, but hard to instrument — qualitative, not committed metrics.)*
+
+**De-noising (the third tool-killer).** A chatty off-spec client mints hundreds of identical violations, and a wall of duplicates trains devs to ignore the tool exactly as a false positive does. Fix it at the **read surface only**: both the human `offbook validation` view and the scoreboard operate on a **distinct violation** — keyed by its *structural signature* (`origin + kind + channel + error location/keyword`, **not** the raw offending value) — collapsing repeats to `×N (first…last seq)`. The **raw log is untouched**: the per-entry `seq` array, the bounded ring buffer, the F9 determinism projection, `?sinceSeq=`, and the CI gate (`byOrigin.client === 0`) stay exactly as `offbook-contracts.md` §4/§5 define them (`--json` still returns the raw per-entry array). Aggregation is a derived view, never a change to what is stored or asserted.
+
 ### The perspective-inversion trap (normalize once)
 
 In AsyncAPI, operation direction is described from the **documented service's** point of view: the spec's `send` is something the **browser application (the client) receives**, and the spec's `receive` is what the **client publishes**. Normalize this **once at parse time** onto the `Channel` record — `direction: 'toClient' | 'fromClient'` — so no downstream code reasons about the inversion. (Direction lives on the channel, **not** on each message; see `offbook-contracts.md` §1.)
@@ -153,7 +175,7 @@ In AsyncAPI, operation direction is described from the **documented service's** 
 
 ## 6. Timing / Async Emulation
 
-The current mocks are **instant and too polite**; real MQTT is neither. Reproducing real async behavior is where the past bugs live, so timing is a **v1 requirement**, not polish.
+The current mocks are **instant and too polite**; real MQTT is neither. Reproducing real async behavior is where the past bugs live, so timing is a **v1 requirement**, not polish. (It is *supporting* value, not the headline wedge: the validation wedge — §1/§5 — is what the tool leads with; timing's *differentiated* form, adversarial faults, is v2, so v1 ships `delay` only.)
 
 **Framing:** this approach is **Deterministic Simulation Testing (DST)-inspired** — seeded, replayable fault/timing injection so failures reproduce by replaying the seed (the technique behind FoundationDB's `BUGGIFY`, Antithesis, TigerBeetle, etc.). Borrow the name and prior art for credibility, but state honestly that it is *DST-inspired*, not full DST: the tool controls message timing/faults, not the browser application's or runtime's entire execution (clock, scheduling, IO).
 
@@ -192,6 +214,14 @@ Two behaviors that were initially conflated, now decided independently:
 ### Source of truth: consumed AsyncAPI specs
 
 Specs are consumed from the service repositories. Deriving behavior from consumed specs (rather than hand-written constants) is what kills the **manual rot** pain — provided specs are re-consumed regularly and updating them stays low-friction (`offbook specs update`, with the lockfile making the diff reviewable).
+
+### Spec trustworthiness — fidelity honesty on the *content* axis (v1)
+
+The version-axis honesty below ("never lie about its own fidelity") answers *which spec version did I get*. It does not answer the deeper question the tool's whole value rests on: **is this spec trustworthy at all?** A mock is only as truthful as the specs it consumes, so a spec that is unreachable, vacuous, or stale can quietly **invert** the value — validating the client *green* against a contract that is wrong or asserts nothing is **false confidence**, the exact "ship a break unnoticed" failure this project exists to kill. Three distinct failure modes, three dispositions:
+
+- **Mode 1 — Won't load → fatal.** A service whose spec fails to fetch (unreachable repo, bad creds, missing branch) or parse **aborts `offbook up`** with a named, actionable foreground error (`service X: spec fetch failed — <repo>@<branch>: <cause>`), *before* the server detaches — never a raw git/parse stack trace. Deliberately **stricter than scenario-load**: the spec is the *foundational source of truth* (a missing one means the mock would lie by omission — silently missing channels), whereas a bad scenario is *optional authored enrichment* (just less behavior). So spec-load is fatal **independent of `strict`**, which governs scenarios only (§9; `strict` in `offbook-contracts.md` §1a, skipped-loud per `offbook-l2-scenarios.md` §7). *(A spec that parses but yields zero channels is not a load failure — it falls to Mode 2.)*
+- **Mode 2 — Loads but asserts nothing → flag, don't fail.** A channel whose schema is **vacuous** (`{}`, `true`, or `type: object` with neither `properties` nor `required`) lets the client publish anything and validate **green** while the contract checked nothing — silent false confidence (worse than the *unknown-topic* case, which is already loud per §5). At load the tool flags each such channel as a non-fatal **`spec-load` Diagnostic** (`offbook-contracts.md` §5): *"channel X validates green but its schema constrains nothing — passing here is unverified."* Scoped tight to the **unambiguous** vacuous shapes — a conservative "asserts effectively nothing" check, **not** a graded quality score (grading deferred). Surfaced in `/diagnostics` + `offbook status`.
+- **Mode 3 — Loads, complete, but stale vs the live service → undetectable; surface provenance.** The tool has only the spec, never a view of the running service (and gaining one would defeat developing *without* the backend), so it **cannot** detect that the spec lags reality. The honest response is **calibration, not detection**: it validates against the **spec as fetched**, so a green result is only as fresh as the spec. It surfaces each service's spec **source + age** (the lockfile's `fetched-at`, exposed as `SpecInfo.fetchedAt` on `GET /specs` + `offbook status`) **neutrally** — no arbitrary "N days = stale" threshold; the dev weighs it, and `offbook specs update` re-consumes. Spec age is also the signal that prompts the upstream **spec-owner dependency** (§1, *Who this is for*) to re-publish. *(Note: §7's existing "drift detection" — `info.version` vs requested — catches a wrong-version **mapping**, not staleness vs reality; these are different axes.)*
 
 ### The resolution chain (v2): semver → SHA → spec file
 
@@ -283,7 +313,7 @@ Even though v1 only implements the simplest path, design these interfaces now so
 
 The tool is reached for at four distinct moments with different demands:
 
-1. **Onboarding ("just cloned the browser application, want it to run").** Value = zero-to-running with one command, no MQTT knowledge required. Needs **good defaults + retained initial state**. Failure mode: a blank UI and a dev who can't tell what's broken.
+1. **Onboarding ("just cloned the browser application, want it to run").** Value = zero-to-running with one command, **no MQTT knowledge required** — the scoped promise: the L1 floor + automatic validation, with authoring a later opt-in tier (see *Who this is for*, §1). Needs **good defaults + retained initial state**. Failure mode: a blank UI and a dev who can't tell what's broken.
 2. **Daily driver ("building against a service that isn't running locally").** Needs **fast iteration on behavior** (live hot-reload of L2 scenarios; L3 handler *code* changes auto-restart the process via `offbook up --watch` — data is live, code restarts, EH1) and a **manual publish** affordance to drive the UI by hand.
 3. **Debugging ("reproduce a specific situation").** Needs **named scenarios fired on demand** and **reset to known state**; ideally record/replay later.
 4. **Automated tests (CI / Playwright).** Needs a **scriptable, synchronous, deterministic** control plane: reset → publish → **settle** (`GET /v1/pending?wait`, the authoritative quiescence signal — one blocking call, no poll-with-timeout, EC1) → assert → teardown, with no random intervals firing mid-assertion.
@@ -299,6 +329,7 @@ The biggest ergonomic risk is a dev not knowing **what topics exist, what they m
 Bun chosen for fast startup (a CLI invoked constantly), native TS, built-in shell/arg handling, and running server + CLI from one toolchain with no build step. The CLI is a thin client over the HTTP control plane. Indicative commands:
 
 - `offbook init [--dir .]` — scaffold a fresh project (the onboarding cold-start, EI1): writes, **only if absent** (re-run refuses, nonzero), `services.yaml` (`gitHost: <PLACEHOLDER>` + a commented example service), `environments.yaml` (a commented `service: version`), `scenarios/00-example.yaml` (the l2 §0 sample), an **empty `handlers/`** dir (so `up --watch` has a target), and a **`.gitignore`** that ignores the run-artifact dir (`.offbook/` — the runfile + `offbook.log`; `specs.lock` stays **tracked**); prints next steps (`set gitHost, then offbook up`). Does **not** scaffold `specs.lock` (generated by `up`).
+- `offbook demo` — **zero-setup first value (the validation wedge witnessed on run #1, §1/§5).** Boots an *ephemeral* mock against a **bundled** demo spec (a fixture promoted to a shipped demo asset — no `services.yaml`, no git, no `runDir` writes), seeds populated state, then publishes a deliberately **off-contract** payload and shows it caught in `/validation` within seconds, with narration (*"↑ Offbook just caught a contract break that would have shipped silently"*). Ephemeral and self-tearing-down — distinct from `init`, which scaffolds a real project to adopt. This is the evaluation on-ramp that precedes moment 1 (and the only zero-git way to see the tool run, now that spec-load is fatal — §7).
 - `offbook up [--watch] [--ci] [--strict] [--frozen]` / `offbook down` — lifecycle. **Two boot profiles over `DEFAULT_CONFIG`:** the **interactive default** (`wallClock=true` for human-perceptible timing, `mode=autonomous`, `strict=false` so a bad scenario surfaces in `/diagnostics` instead of crashing the dev's server), and **`--ci`** — the moment-4 one-flag CI boot that co-sets `mode=passive`, `wallClock=false` (fast-virtual; CI pays no real wall time), and `strict=true`, and forces `--watch` off; the determinism gate's *boots-passive* requirement (§5/contracts §3) **is** `--ci`, which then asserts `GET /mode==passive`. `--strict` exposes the fatal-scenario-load behavior on its own (e.g. while authoring) without the rest of the CI profile; `--frozen` is orthogonal (pins spec resolution, §7), so `up --ci --frozen` is valid. `--watch` (autonomous-only) restarts the server on `handlers/**/*.ts` changes so L3 code edits take effect without a manual `down && up` (EH1; off under `--ci`/`passive`). On a **fresh project** (empty `scenarios/`+`handlers/`), `up` prints one honest orientation line — *"N topics served from L1 schema-fakes (valid filler); author behavior in scenarios/\*.yaml (L2) or handlers/\*.ts (L3); discover: offbook topics"* — suppressed once ≥1 scenario/handler loads (EI2)
 - `offbook topics` — discovery (the documentation-replacement win). Default render is a **compact human view** grouped by service: per topic, the human direction label (above), resolved qos/retain, a **per-field summary** (name · type · required-ness; enums as `a | b | c`, numeric bounds, `format`), and the seeded `example`. Composed schemas (`allOf`/`oneOf`/`anyOf`) flatten to the effective field set with `oneOf<…>` markers, deferring the full schema to `--schema`. `--compact`/`-q` collapses to one line per topic, `--no-examples` drops examples, `--json` emits the raw `TopicInfo[]`, `--service`/`--receives`/`--sends` filter (mapping to `?service=`/`?direction=`). It **never** prints raw JSON Schema by default (ER1).
 - `offbook publish <topic> [--example | --payload <json> | --payload-file <path> | --payload -] [--qos N] [--retain] [--force] [--wait]` — hand-drive the UI; `--example` generates a schema-valid payload (and is the default when neither `--example` nor a `--payload*` source is given), the `--payload*` sources give an explicit body (mutually exclusive with `--example`, rejected locally to mirror the contract's `400 example-and-payload`). Publishing to a topic that matches **no channel** still publishes raw but **exits nonzero by default** — `--force` to allow the intentional off-contract case — printing `⚠ no channel matches '<topic>' — published raw (flagged in /validation)` (EQ1/EQ4). `--wait` (also on `scenario`) blocks until the emissions this action caused have settled (`GET /v1/pending?wait`), so a script needn't poll (EC1). `--qos`/`--retain` send explicit values that **override the channel's spec binding** (`body ?? channel`, contracts §3/§5); the CLI echoes the effective `qos`/`retain` and prints a one-line `⚠ off-spec override` when they differ from the binding, so an off-spec emit is never silent (also flagged in the divergence warn-log / `offbook logs`).
@@ -347,7 +378,7 @@ Questions — all answered in `offbook-l2-scenarios.md`:
 - HTTP control plane + Bun CLI — §9.
 - Initial state always retained; seeded autonomous-emission mode — §7.
 
-**Explicitly deferred out of v1:** semver→SHA→file resolution, per-service strategy config, `--env`, real auth validation, release-tooling auto-detect integration, adversarial timing.
+**Explicitly deferred out of v1:** semver→SHA→file resolution, per-service strategy config, `--env`, real auth validation, release-tooling auto-detect integration, adversarial timing, graded spec-quality scoring + coverage instrumentation.
 
 ### v2 — the resolution layer & enhancements
 **Goal:** sharpen cross-environment fidelity once the core is proven and the release-tooling dependency is understood.
@@ -356,6 +387,7 @@ Questions — all answered in `offbook-l2-scenarios.md`:
 - Per-service declarative strategy config + manual override; semver range tolerance + `info.version` drift-check.
 - `--env` in CLI; `offbook specs resolve` dry-run; richer per-hop lockfile entries.
 - Adversarial timing primitives (ordering, duplicates, reorder, drop-redeliver) — additive on the v1 step model.
+- **Spec-quality grading + coverage instrumentation** — graded schema-strength scoring (beyond v1's binary vacuous-schema flag, §7 Mode 2) and an observed-topic **coverage rollup** (% of exercised topics resolving to a meaningful matching channel). v1 ships only the binary vacuous flag + per-message `unknown-topic` violation.
 - All slotting behind the interfaces v1 already designed for, so nothing downstream changes.
 
 **Rationale for the split:** the core pains (contract drift + async realism) are all solvable against a *single* spec version; they do not require the resolution machinery. The per-environment resolution layer addresses a second-order concern ("behaves differently across environments") whose root cause is largely the drift itself. Treating resolution as v1-blocking risks v1 never shipping; treating it as a v2 enhancement ships a useful tool soon and verifies the release-tooling dependency off the critical path.
