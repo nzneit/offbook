@@ -367,7 +367,7 @@ interface VersionSource { versions(environment: string | null): Promise<Record<s
 ### Config files (v1 minimal, v2-shaped)
 ```yaml
 # services.yaml — per-service location (v1: repo + fixed specPath + optional branch; strategy machinery is v2)
-gitHost: https://git.example.com   # global base URL for slug-form repos — NO built-in default (host-agnostic); a slug with no gitHost is a config error (G20)
+gitHost: https://git.example.com   # global base URL for slug-form repos — NO built-in default (host-agnostic); a slug with no gitHost is a config error (G20). `offbook init` scaffolds this file with gitHost: <PLACEHOLDER> (EI1)
 services:
   serviceA: { repo: org/service-a, specPath: asyncapi.yaml }                                  # slug → resolved against gitHost; branch defaults to main
   serviceB: { repo: org/service-b, specPath: asyncapi.yaml, branch: dev }                     # slug, deploys from dev
