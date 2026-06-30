@@ -1,8 +1,8 @@
 ---
 type: handoff
-status: open
-summary: 7 quick ergonomics fixes (EQ1–EQ7) — small spec/CLI edits.
-folds-into: [offbook-contracts, offbook-design]
+status: resolved
+summary: 7 quick ergonomics fixes (EQ1–EQ7) — small spec/CLI edits; resolved + folded in.
+folds-into: [offbook-contracts, offbook-design, offbook-l2-scenarios, offbook-build-plan]
 ---
 
 # Offbook — Ergonomics Quick Wins (Handoff)
@@ -11,7 +11,7 @@ folds-into: [offbook-contracts, offbook-design]
 
 **Companion to:** `offbook-contracts.md` (the **canonical** frozen interfaces — the conflict rule applies: if any other doc disagrees on an interface/API detail, the contract wins and the other doc is the bug), `offbook-design.md` (§9 usage moments), `offbook-l2-scenarios.md`. **Sibling handoffs (the larger, isolated areas from the same review):** `offbook-ergonomics-init-scaffold.md`, `offbook-ergonomics-ci-quiescence.md`, `offbook-ergonomics-cli-rendering.md`, `offbook-ergonomics-server-observability.md`, `offbook-ergonomics-l3-hot-reload.md`.
 
-**Status:** **Open** — 7 quick-to-resolve items from the end-user ergonomics review (2026-06-29). Each is a small, localized spec or CLI change (a sentence of contract, a flag, a warning string, one Diagnostic kind) — collectively one sitting / one PR. None blocks the build fan-out; they sharpen the human-facing edges of moments 1–4 (`offbook-design.md` §9) before `cli/` + `control-plane/` are built.
+**Status:** **Resolved** (2026-06-30) — all 7 items decided in dialog and folded into the canonical docs (`offbook-contracts.md` §4/§5, `offbook-design.md` §7/§9, `offbook-l2-scenarios.md` §5/§7, `offbook-build-plan.md` Tier 4). See the **Decision log** for what was taken — including the three places the decision **overrode this doc's printed recommendation** (EQ1 default exit code, EQ3 label noun, EQ6 humanization boundary) and the EQ4 verb fix (`scenario`, not `trigger`). Originally 7 quick-to-resolve items from the end-user ergonomics review (2026-06-29), each a small localized spec/CLI change sharpening the human-facing edges of moments 1–4.
 
 **Why this exists.** The machine-facing surfaces (CI loop, error codes, determinism) are strong; the human-facing edges have small, cheap gaps that are far cheaper to close now (as spec) than after the acceptance tests freeze them. These are the ones with no real design fork — adopt the resolution and move on.
 
@@ -55,7 +55,7 @@ folds-into: [offbook-contracts, offbook-design]
   ```
   `cli/`: print `⚠ no channel matches 'state/thermostat' — published raw (will be flagged in /validation)` when `matched === false`; nonzero exit under a `--strict` flag.
 - **Acceptance:** the `/publish` contract test asserts `{ matched:false, direction:null }` for an unknown topic and `{ matched:true }` for a known one; `offbook publish <unknown> --payload '{}'` prints the warning.
-- **Status:** ☐ open
+- **Status:** ☑ **resolved** (2026-06-30) — adopted `matched: boolean` + `direction: Direction|null` (`null ⟺ matched===false`, normative, scoped to the `/publish` response); an unmatched publish re-enters `onInbound` as `origin:client` and raises `unknown-topic`. **CLI default = exit nonzero, `--force` to allow** (overrides this doc's warn-then-`--strict` default). Folded → contracts §5, design §9, build-plan Tier 4.
 
 ### EQ5 — parametrized `toClient` channels render blank, with nothing pointing at the fix
 - **Where:** `offbook-contracts.md` §2 materialization (parametrized = lazy, lines ~118–119), `seedInstances` (§6, line ~331), `Diagnostic.kind` union (§5, line ~276); `offbook-design.md` §7a (lines ~180–182), §9 moment-1 failure mode "blank UI and a dev who can't tell what's broken" (line ~280).
@@ -68,7 +68,7 @@ folds-into: [offbook-contracts, offbook-design]
   ```
 - **Acceptance:** booting against a spec whose only `toClient` channel is parametrized, with no `seedInstances`, yields a `GET /diagnostics` entry of kind `uninstantiated` naming the channel; adding a `seedInstances` entry for it removes the diagnostic.
 - **Relates to:** `offbook-ergonomics-init-scaffold.md` EI2 (first-run orientation).
-- **Status:** ☐ open
+- **Status:** ☑ **resolved** (2026-06-30) — added `Diagnostic.kind: 'uninstantiated'` (info) + a 4th `DiagnosticSummary.byKind` key; the channel **address rides `source?`** (Diagnostic has no `channel` field), the teaching sentence in `detail`; counted from the engine's `InstanceRegistry` ledger, **not** async `getState()`. Folded → contracts §5.
 
 ---
 
@@ -85,8 +85,8 @@ folds-into: [offbook-contracts, offbook-design]
   offbook trigger <name>  [--param k=v]... [--payload <json> | --payload-file <path> | --payload -]
   ```
   `--example` and `--payload*` are mutually exclusive — the CLI rejects both locally, mirroring the contract's `example-and-payload` 400.
-- **Acceptance:** `echo '{"mode":"heat"}' | offbook publish command/t1/set --payload -` injects that payload; `offbook trigger set-temp --param deviceId=t1` binds `{{deviceId}}`; passing both `--example` and `--payload` exits nonzero without hitting the server.
-- **Status:** ☐ open
+- **Acceptance:** `echo '{"mode":"heat"}' | offbook publish command/t1/set --payload -` injects that payload; `offbook scenario set-temp --param deviceId=t1` binds `{{deviceId}}`; passing both `--example` and `--payload` exits nonzero without hitting the server.
+- **Status:** ☑ **resolved** (2026-06-30) — adopted all input forms (`--payload`/`--payload-file`/stdin `-`/repeatable `--param k=v`); `--example`/`--payload*` mutually exclusive; **bare `offbook publish <topic>` defaults to `--example`**. Verb stays **`offbook scenario`** (not `trigger` — CLI verbs are decoupled from endpoint names; corrects this doc's earlier `offbook trigger` wording). Folded → design §9, build-plan Tier 4.
 
 ### EQ6 — `Violation.detail` is not contracted as human-readable
 - **Where:** `offbook-contracts.md` §4 `Violation.detail` (line ~239) + `errors?: SchemaError[]` (line ~243); `SchemaError = Omit<ErrorObject,'data'|'schema'>` (line ~227).
@@ -96,7 +96,7 @@ folds-into: [offbook-contracts, offbook-design]
 - **Recommended resolution:** spec that for `kind: 'schema'`, `detail` is a one-line humanized rendering of the primary `SchemaError` — e.g. `payload.target: must be number (got "22")` — derived from `errors[0]` (instancePath + a human form of the keyword). The full `errors[]` stay machine-facing.
 - **Acceptance:** a schema violation's `detail` contains the offending instance path and a plain-language expectation (assertable: `detail` includes the `instancePath` and the keyword's human form), not a generic constant.
 - **Relates to:** `offbook-ergonomics-cli-rendering.md` ER2 (CLI formats `errors[]`).
-- **Status:** ☐ open
+- **Status:** ☑ **resolved** (2026-06-30) — chose **(b): keep `detail` terse + stable** (a derived `<instancePath>: <keyword>`, safe inside the F9 projection) and humanize in the **CLI/ER2** from `errors[]`+`payload`, *not* in `detail` itself (overrides this doc's "humanize `detail`" rec — evolving prose would weld into the determinism baseline). The `(got "22")` value comes from `Violation.payload`@instancePath, since `SchemaError` `Omit`s Ajv's `data`. Folded → contracts §4; render half is ER2.
 
 ---
 
@@ -109,7 +109,7 @@ folds-into: [offbook-contracts, offbook-design]
 - **Decision owed:** none — mechanical (wording of the existing branch warning).
 - **Recommended resolution:** the §7 honesty warning explicitly names this, e.g.: `version pinning unavailable in v1: requested versions in environments.yaml are RECORDED but NOT honored; fetching branch tips (serviceA→main, serviceB→dev).` Capture this required content in contracts §6 / design §7.
 - **Acceptance:** `offbook up` in branch mode emits a warning containing both "recorded" and "not honored" (or equivalent) and naming each service's branch; a string assertion on the warning passes.
-- **Status:** ☐ open
+- **Status:** ☑ **resolved** (2026-06-30) — the notice is carried CI-assertably on `GET /v1/specs.warnings?` in branch mode (suppressed under `pinned`/`--frozen`), and the design §7 honesty string was corrected (it falsely said "branch `main` for all services"; serviceB→dev). Folded → contracts §5, design §7.
 
 ### EQ3 — human discovery surface exposes raw `toClient` / `fromClient`
 - **Where:** `offbook-design.md` §9 discoverability (line ~289 — itself glosses the vocab as "browser-receives vs browser-sends"); `offbook-contracts.md` §5 `TopicInfo.direction` + `?direction=` filter (lines ~264, ~272).
@@ -119,7 +119,7 @@ folds-into: [offbook-contracts, offbook-design]
 - **Recommended resolution:** `cli/` maps `direction` to human labels in `offbook topics`/`state`; `--json` keeps raw `toClient`/`fromClient`. Keep `?direction=toClient|fromClient` as the API filter; accept `--receives` / `--sends` as CLI sugar.
 - **Acceptance:** `offbook topics` default (non-`--json`) output contains no literal `toClient`/`fromClient` token; `offbook topics --receives` filters to `toClient` channels; `--json` still carries the wire vocab.
 - **Relates to:** `offbook-ergonomics-cli-rendering.md` ER1.
-- **Status:** ☐ open
+- **Status:** ☑ **resolved** (2026-06-30) — chose **"client receives / client sends"** (frozen-vocab-consistent; maps 1:1 to `toClient`/`fromClient`) over this doc's "app receives/sends". Declared **surface-wide** (incl. the `direction` field CR4 added to `/publish`); `--json`/`?direction=` keep wire vocab; dropped the `offbook state` half (`StateEntry` has no `direction`). Renderer + `--receives`/`--sends` are ER1. Folded → design §9.
 
 ### EQ7 — `{param}` vs `{{param}}` mismatch yields a generic, non-teaching error
 - **Where:** `offbook-l2-scenarios.md` §5 brace convention (lines ~102–106); §7 reference-resolvability check ("`{{param}}` must be captured by `when.topic`", line ~136).
@@ -128,7 +128,7 @@ folds-into: [offbook-contracts, offbook-design]
 - **Decision owed:** none — mechanical (message wording).
 - **Recommended resolution:** when a `{{param}}` is uncaptured, the `scenario-load` diagnostic explains the convention: `emit references {{deviceId}} but when.topic 'command/set' captures no {deviceId} — use single braces {deviceId} on when.topic to capture, double {{deviceId}} on emit to substitute`.
 - **Acceptance:** a scenario with an uncaptured `{{deviceId}}` produces a `/diagnostics` `scenario-load` entry whose detail names both the missing capture and the single-vs-double convention.
-- **Status:** ☐ open
+- **Status:** ☑ **resolved** (2026-06-30) — chose **(a): reject a single-`{param}` on an emit field at load** with a teaching `scenario-load` diagnostic (it would otherwise exact-match the channel address and silently emit a literal-braced topic). Forced correction: the resolvability message names **both** param sources (`when.topic` capture **or** the trigger `params` body) so it stays true for `when`-less scenarios like `device-offline`. Folded → l2-scenarios §5/§7.
 
 ---
 
@@ -142,4 +142,10 @@ EQ1, EQ4, EQ6 are the three a `cli/` author should do together (they all shape `
 
 | ID | Decision taken | File(s) patched | Resolver | Date |
 |---|---|---|---|---|
-| | | | | |
+| EQ1 | `/publish` → `202 { topic, direction: Direction\|null, matched, injected, sinceSeq }` (`null ⟺ !matched`, scoped to the response); unmatched publish re-enters `onInbound` as `origin:client` + raises `unknown-topic`. CLI exits nonzero by default, `--force` to allow (override of the doc's `--strict` default) | offbook-contracts.md §5; offbook-design.md §9; offbook-build-plan.md Tier 4 | CodeReviewJoe | 2026-06-30 |
+| EQ2 | Version-not-honored notice carried on `GET /v1/specs.warnings?` (branch mode; suppressed pinned/`--frozen`); corrected the false design §7 "branch `main` for all services" string (serviceB→dev) | offbook-contracts.md §5; offbook-design.md §7 | CodeReviewJoe | 2026-06-30 |
+| EQ3 | Human direction labels = **"client receives / client sends"** (frozen-vocab-consistent), declared surface-wide incl. the `/publish` `direction` field; `--json`/`?direction=` keep wire vocab; `offbook state` half dropped | offbook-design.md §9 (renderer → ER1) | CodeReviewJoe | 2026-06-30 |
+| EQ4 | CLI input forms `--payload`/`--payload-file`/stdin `-`/repeatable `--param k=v`; `--example` ⊕ `--payload*`; bare `publish` defaults to `--example`; verb stays **`offbook scenario`** (not `trigger`) | offbook-design.md §9; offbook-build-plan.md Tier 4 | CodeReviewJoe | 2026-06-30 |
+| EQ5 | `Diagnostic.kind: 'uninstantiated'` (info) + 4th `byKind` key; channel address in `source?`, teaching in `detail`; counted from the `InstanceRegistry` ledger (not async `getState()`) | offbook-contracts.md §5 | CodeReviewJoe | 2026-06-30 |
+| EQ6 | (b) `detail` stays terse + stable (`<instancePath>: <keyword>`, in the F9 projection); humanization lives in the CLI/ER2 from `errors[]`+`payload`; `(got X)` read from `Violation.payload`@instancePath | offbook-contracts.md §4 (render → ER2) | CodeReviewJoe | 2026-06-30 |
+| EQ7 | (a) reject a single-`{param}` on an emit field at load with a teaching `scenario-load` diagnostic; resolvability message names both param sources (`when.topic` or trigger `params`) | offbook-l2-scenarios.md §5/§7 | CodeReviewJoe | 2026-06-30 |

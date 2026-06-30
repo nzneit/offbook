@@ -258,7 +258,7 @@ Benefits: reproducibility (rebuild the exact mock even if main moved), debuggabi
 ### Invariants & honesty
 
 - **One running mock = one lockfile = one coherent environment snapshot.** A single instance is pinned to one resolved set; a Frankenstein of dev-serviceA + stage-serviceB is disallowed unless explicitly constructed. Two environments side-by-side = two processes/ports.
-- **The tool must never lie about its own fidelity.** When running the v1 branch stopgap (no version pinning), the CLI must warn (e.g. "version pinning unavailable; using branch `main` for all services") rather than pretend `--env` was honored.
+- **The tool must never lie about its own fidelity.** When running the v1 branch stopgap (no version pinning), the CLI must warn — naming the **actual per-service branches**, not a blanket `main` — that requested versions are recorded but not honored (e.g. "version pinning unavailable in v1: requested versions in `environments.yaml` are **recorded but NOT honored**; fetching branch tips (serviceA→main, serviceB→dev)") rather than pretend `--env` was honored. The same notice is exposed CI-assertably on `GET /v1/specs.warnings?` in branch mode (`offbook-contracts.md` §5), suppressed under `pinned`/`--frozen` (EQ2).
 
 ### Forward-compatible seams (build into v1)
 
@@ -292,7 +292,7 @@ The tool is reached for at four distinct moments with different demands:
 
 ### Discoverability is the make-or-break for daily use
 
-The biggest ergonomic risk is a dev not knowing **what topics exist, what they may send, and what they'll get back** — exactly the knowledge currently trapped in copy-pasted constants. The tool should *become* the discovery surface: list every topic, its direction (browser-receives vs browser-sends — i.e. toClient vs fromClient), its payload shape, and its source service; and offer one-click "send a valid example" for browser-sends (fromClient) topics. If the mock answers "what can I talk to and how" better than grepping the codebase, devs will use it as living documentation.
+The biggest ergonomic risk is a dev not knowing **what topics exist, what they may send, and what they'll get back** — exactly the knowledge currently trapped in copy-pasted constants. The tool should *become* the discovery surface: list every topic, its direction (rendered in human output as **"client receives"** for `toClient` / **"client sends"** for `fromClient` — EQ3), its payload shape, and its source service; and offer one-click "send a valid example" for "client sends" (`fromClient`) topics. If the mock answers "what can I talk to and how" better than grepping the codebase, devs will use it as living documentation. **Direction humanization is surface-wide:** every human-facing rendering — `offbook topics` and the `direction` field on the `/publish` response (`offbook-contracts.md` §5) — uses the "client receives/sends" labels, while `--json` and the `?direction=` API filter keep the frozen `toClient`/`fromClient` wire vocab; the renderer and `--receives`/`--sends` filter sugar live in `cli/` (see `offbook-ergonomics-cli-rendering.md`).
 
 ### CLI surface (Bun)
 
@@ -300,9 +300,9 @@ Bun chosen for fast startup (a CLI invoked constantly), native TS, built-in shel
 
 - `offbook up` / `offbook down` — lifecycle
 - `offbook topics` — discovery (the documentation-replacement win)
-- `offbook publish <topic> [--example]` — hand-drive the UI; `--example` generates a schema-valid payload
+- `offbook publish <topic> [--example | --payload <json> | --payload-file <path> | --payload -] [--qos N] [--retain] [--force]` — hand-drive the UI; `--example` generates a schema-valid payload (and is the default when neither `--example` nor a `--payload*` source is given), the `--payload*` sources give an explicit body (mutually exclusive with `--example`, rejected locally to mirror the contract's `400 example-and-payload`). Publishing to a topic that matches **no channel** still publishes raw but **exits nonzero by default** — `--force` to allow the intentional off-contract case — printing `⚠ no channel matches '<topic>' — published raw (flagged in /validation)` (EQ1/EQ4).
 - `offbook state` — show retained values (see what the browser application sees)
-- `offbook scenario <name>` / `offbook reset` — debugging / test control
+- `offbook scenario <name> [--param k=v]... [--payload <json> | --payload-file <path> | --payload -]` / `offbook reset` — debugging / test control; repeatable `--param k=v` binds the scenario's `{{param}}` captures and `--payload*` supplies the inbound payload (EQ4). *(The verb stays `scenario`, not `trigger` — CLI verbs are deliberately decoupled from endpoint names; this hits `POST /v1/trigger/{name}`.)*
 - `offbook mode <autonomous|passive>` — the emission toggle (`passive` = no self-initiated emission; both modes are seeded-deterministic, so "passive", not "deterministic")
 - `offbook validation` — view contract-violation log
 - `offbook specs update` — refresh specs (keep this low-friction to prevent rot)

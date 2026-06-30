@@ -41,14 +41,14 @@ folds-into: [offbook-design]
 - **Where:** `offbook-design.md` §9 discoverability (lines ~287–289, "make-or-break"); `offbook-contracts.md` §5 `GET /v1/topics` + `TopicInfo` (lines ~264, ~272–273, `schema: object`, `example?`, `direction`, `service`, `qos`, `retain`); build-plan Tier 4 (line ~87).
 - **Problem:** the endpoint returns a fully-bundled JSON Schema per topic. A CLI that prints that is *worse* than grepping the constants it's meant to replace. The compact human view — fields + types + required-ness, the seeded `example`, direction, service, qos/retain — is undesigned, and the only acceptance ("renders the response") won't catch a raw dump.
 - **If unaddressed:** the headline value proposition ("if the mock answers 'what can I talk to and how' better than grepping, devs use it as living documentation") fails at the presentation layer.
-- **Decision owed:** the default shape — compact per-topic field list, a table, or a tree; and whether the seeded `example` shows by default. *Recommend* a list grouped by service, with a human direction label (EQ3), a flattened field summary, and the example; `--json` for the raw `TopicInfo[]`, `--schema` to inline the full schema.
+- **Decision owed:** the default shape — compact per-topic field list, a table, or a tree; and whether the seeded `example` shows by default. *Recommend* a list grouped by service, with a human direction label (EQ3, **resolved** → "client receives" / "client sends"), a flattened field summary, and the example; `--json` for the raw `TopicInfo[]`, `--schema` to inline the full schema.
 - **Recommended resolution (render sketch — adopt or override):**
   ```
   serviceC
-    command/{deviceId}/set   ← app sends      qos1
+    command/{deviceId}/set   ← client sends      qos1
       deviceId: string (req) · mode: "heat"|"cool" (req) · target: number
       example  { deviceId: "thermostat-1", mode: "heat", target: 21 }
-    state/{deviceId}         → app receives   qos0  retain
+    state/{deviceId}         → client receives   qos0  retain
       deviceId: string (req) · status: string (req) · updatedAt: string
       example  { deviceId: "thermostat-1", status: "heating", updatedAt: "…" }
 

@@ -109,6 +109,7 @@ A scenario has three top-level fields:
 ### Brace convention
 - **`{param}` (single)** — capture, on the **match side** only (`when.topic`).
 - **`{{…}}` (double)** — substitution, on the **emit side** (the `emit.topic` *and* payload values).
+- **A single-`{param}` on the *emit* side is a load error (EQ7).** An `emit.topic` must be either fully concrete or a `{{param}}` template; a single-brace segment there (`state/{deviceId}` where `state/{{deviceId}}` was meant) would today exact-match the channel address, pass load (it *is* a valid `toClient` address — §7 topic/direction check), and **silently emit a literal brace-laden topic** no subscriber matches. The loader therefore **rejects it** with a teaching `scenario-load` diagnostic (§7). *(Literal brace-named MQTT topics collide with AsyncAPI's own `{param}` syntax and are not a supported emit target in v1.)*
 
 ### Vocabulary (closed — no conditionals, arithmetic, or loops)
 - `{{param}}` — a captured topic param.
@@ -139,7 +140,7 @@ The author templates **only the causal fields**; omitted required schema fields 
 - **Load-time (static, fail fast):**
   - *Skeleton schema check* — substitute each `{{…}}` with a type-appropriate / L1-faked stand-in and run Ajv; wrong-typed literals, unknown fields, structurally impossible payloads fail now.
   - *Topic/direction check* — `when.topic` must match a `fromClient` channel and `emit.topic` a `toClient` channel in some consumed spec (§5 normalized direction). A `when` on a toClient topic is a direction error.
-  - *Reference resolvability* — `{{param}}` must be captured by `when.topic`; `{{payload.x}}` checked against the inbound channel schema; unknown helpers rejected (closed set).
+  - *Reference resolvability* — every `{{param}}` must have a source: **captured by `when.topic`, *or* supplied via the trigger request `params`** for a `when`-less trigger-only scenario (so the `device-offline` example, §0, validates); `{{payload.x}}` checked against the inbound channel schema; unknown helpers rejected (closed set). An **unresolvable `{{param}}`** — or a **single-`{param}` on an emit field** (EQ7) — yields a `scenario-load` diagnostic whose detail teaches the single-captures / double-substitutes convention and names **both** param sources, never a bare "unknown param".
   - *Structural* — name uniqueness (§2 Scenario anatomy), terminal `#` (§4 Matching), delay syntax (§6 Timing). *(Named §N here = this doc's own sections, not the design doc.)*
 - **Emit-time (runtime backstop):** the §4 L1 Ajv recheck of the *actual* produced payload — catches anything load-time couldn't (e.g. an inbound value that pushed a templated field off-spec).
 

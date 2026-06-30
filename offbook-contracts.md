@@ -242,7 +242,7 @@ interface Violation {
   severity: 'error' | 'warning';   // default from kind; policy may override
   topic: string;
   channel?: string;                // AsyncAPI channel matched / should-match
-  detail: string;
+  detail: string;                  // terse, STABLE machine rendering — for kind:'schema' a derived `<instancePath>: <keyword>` (deterministic; lives in the F9 projection). Human-friendly phrasing is rendered by the CLI/ER2 from `errors[]`+`payload`, NOT stored here, so wording can evolve without breaking byte-identical goldens (EQ6).
   payload?: unknown;               // offending/contextual; raw string for decode; may be truncated
   clientId?: string;               // when origin === 'client'
   errors?: SchemaError[];          // when kind === 'schema'
@@ -270,7 +270,7 @@ interface Violation {
 | `GET /v1/topics` | `{ topics: TopicInfo[] }` | dereferenced **schema + seeded example inline** (via the injected `Faker`, F11); `?direction=` / `?service=` filters; `?schema=false` slim mode |
 | `GET /v1/state` | `{ state: StateEntry[] }` | lean, **concrete** topics; `?topic=` prefix filter |
 | `GET /v1/validation` | `{ violations: Violation[]; summary: ValidationSummary }` | `?sinceSeq=` (strictly-greater) `?origin=` `?severity=` `?kind=`; ordered by `seq` alone (now a total order — G6); violations-only. **Bounded ring buffer** — see note below |
-| `GET /v1/specs` | `{ specs: SpecInfo[]; resolutionMode; warnings? }` | `resolutionMode: 'branch' \| 'pinned'` honesty flag (§7) |
+| `GET /v1/specs` | `{ specs: SpecInfo[]; resolutionMode; warnings? }` | `resolutionMode: 'branch' \| 'pinned'` honesty flag (§7); in **branch** mode `warnings?` carries the version-not-honored notice — "requested versions in `environments.yaml` are recorded but NOT honored; fetching branch tips (serviceA→main, serviceB→dev)", naming each service's actual branch; suppressed under `pinned`/`--frozen` (EQ2) |
 | `GET /v1/diagnostics` | `{ diagnostics: Diagnostic[]; summary: DiagnosticSummary }` | load/hot-reload-populated; dev-time surface |
 | `GET /v1/mode` | `{ mode, seed }` | |
 
@@ -279,8 +279,13 @@ interface TopicInfo { topic: string; direction: Direction; service: string;
   title?: string; description?: string; schema: object; example?: unknown; qos?: 0|1|2; retain?: boolean; }
 interface StateEntry { topic: string; payload: unknown; qos?: 0|1|2; retain: true; }  // retain is always true — clearing a retained topic EVICTS it (§2), so /state never returns tombstones; a decode-failure (§2) is never stored, so payload is always a successfully-decoded value
 interface SpecInfo { service: string; declaredVersion?: string; source: string; contentHash: string; channelCount: number; }  // declaredVersion = info.version, read parser-free by ingestion/ (shallow yaml read, G12) — NOT the requested version (they differ in v1 branch mode)
-interface Diagnostic { kind: 'scenario-load' | 'overlap' | 'spec-load';
+interface Diagnostic { kind: 'scenario-load' | 'overlap' | 'spec-load' | 'uninstantiated';
   severity: 'error' | 'warning' | 'info'; detail: string; source?: string; scenarioName?: string; }
+// 'uninstantiated' (info, EQ5) — emitted at startup for each parametrized toClient channel with ZERO materialized
+//   instances, counted from the engine's InstanceRegistry ledger (NOT the async getState() retained store). The channel
+//   ADDRESS goes in `source?` (machine-filterable — Diagnostic has no `channel` field); the teaching sentence ("no
+//   instances yet — subscribe to a concrete topic, send a matching command, or add seedInstances") goes in `detail`.
+//   Cleared once an instance materializes.
 
 interface ValidationSummary {    // the CI-facing payload of GET /v1/validation
   errors: number;                // count of severity === 'error' violations (within the retained window)
@@ -292,7 +297,7 @@ interface ValidationSummary {    // the CI-facing payload of GET /v1/validation
 
 interface DiagnosticSummary {    // mirrors ValidationSummary for GET /v1/diagnostics (F15)
   errors: number; warnings: number; info: number;
-  byKind: Record<'scenario-load' | 'overlap' | 'spec-load', number>;   // all three keys always present, zero-filled
+  byKind: Record<'scenario-load' | 'overlap' | 'spec-load' | 'uninstantiated', number>;   // all four keys always present, zero-filled
 }
 
 // Closed set of error-envelope codes (every non-2xx path returns one); the CLI/CI branch on this union, no ad-hoc strings.
@@ -307,7 +312,7 @@ type ErrorCode =
 > **Violation-log retention.** The log is a **bounded ring buffer** capped at `config.maxViolations` — a fixed-size **circular buffer with head/tail indices** (O(1) insert + evict, never `push`/`shift`; `seq`/`oldestSeq`/`sinceSeq` map onto ring indices — F21) — so a left-running dev instance has a **memory ceiling, not unbounded growth**. (It is the only unbounded log in v1 — `/state` is the retained store, bounded by topic count; `config.maxEvents` is reserved should inbound-event history ever be retained.) `seq` is **unique per entry**, process-monotonic, and **never reused** (G6), so `?sinceSeq=` (strictly-greater) stays correct even across eviction; `summary.oldestSeq` is the lowest still-retained `seq`, so a caller whose `sinceSeq < oldestSeq` knows older violations were evicted. **The CI loop is unaffected** — its `reset`-checkpoint → poll window holds far fewer than `maxViolations` entries, so nothing it cares about is ever evicted. (`reset` does not clear the log — eviction is by capacity only.)
 | Endpoint | Body | Result | Notes |
 |---|---|---|---|
-| `POST /v1/publish` | `{ topic, payload?, example?, qos?, retain? }` — **`payload` XOR `example`** | `202 { topic, direction, injected, sinceSeq }` | **direction inferred from the channel** (toClient drives UI / fromClient simulates client + validates); reports resolved `direction`; unknown topic → raw publish + flag. `sinceSeq` is the **Violation-log baseline before injecting** (the strictly-greater cursor `?sinceSeq=` consumes, G6) — defined for **both** directions; poll `/validation?sinceSeq=<returned>` for this publish's violations. (A `fromClient` publish re-enters `onInbound` with an internal engine-assigned `meta.seq`, G9 — a different number-space, **not** returned; a `toClient` publish is a mock emission with no `InboundEvent`.) `payload?: unknown` is an explicit value; `example?: boolean` (`true`) generates a seeded schema-valid payload **at channel level** (`instanceParams` omitted ⇒ byte-equal to `GET /topics`, CR1/F11); **both present → `400 example-and-payload`**; `example: true` on an unknown topic → `400 example-on-unknown-topic` |
+| `POST /v1/publish` | `{ topic, payload?, example?, qos?, retain? }` — **`payload` XOR `example`** | `202 { topic, direction: Direction \| null, matched, injected, sinceSeq }` | **direction inferred from the channel** (toClient drives UI / fromClient simulates client + validates); reports resolved `direction` (or `null` when no channel matches). **`matched: boolean`** says whether the topic resolved to a channel; **`direction` is `null` iff `matched === false`** — normative, with the nullability scoped to the `/publish` *response* only (`Channel.direction`/`TopicInfo.direction` stay non-null). An unmatched topic still **publishes raw** (observe-and-surface) and raises an **`unknown-topic`** `Violation`; the CLI exits nonzero on it unless `--force` (design §9). `sinceSeq` is the **Violation-log baseline before injecting** (the strictly-greater cursor `?sinceSeq=` consumes, G6) — defined for **both** directions; poll `/validation?sinceSeq=<returned>` for this publish's violations. (A `fromClient` or unknown-topic publish re-enters `onInbound` as `origin: client` with an internal engine-assigned `meta.seq`, G9 — a different number-space, **not** returned; a matched `toClient` publish is a mock emission with no `InboundEvent`.) `payload?: unknown` is an explicit value; `example?: boolean` (`true`) generates a seeded schema-valid payload **at channel level** (`instanceParams` omitted ⇒ byte-equal to `GET /topics`, CR1/F11); **both present → `400 example-and-payload`**; `example: true` on an unknown topic → `400 example-on-unknown-topic` |
 | `POST /v1/trigger/{name}` | `{ params?, payload? }` (omitted → seed-faked) | `202 { scenario, fired, sinceSeq }` | `params` entries bind the scenario's `{{param}}` captures (e.g. `params.deviceId` → `{{deviceId}}`); `payload` supplies the inbound payload for a reactive scenario fired by hand; `sinceSeq` is the **log baseline before firing** — poll `/validation?sinceSeq=` for the violations this trigger produced (F3; uniform with `/publish` + `/reset`, and universally defined — an on-demand scenario has no inbound `meta.seq` source). `404 unknown-scenario` |
 | `POST /v1/reset` | `{ seed? }` | `200 { reset, seed, sinceSeq }` | returns **active seed + the `sinceSeq` log baseline** (feeds `?sinceSeq=`, F3); **non-destructive** — re-seeds PRNG, resets virtual clock, re-instantiates L3 handlers, republishes initial state, halts autonomous; the log cursor is process-monotonic, log not cleared |
 | `POST /v1/mode` | `{ mode: 'autonomous' \| 'passive' }` | `200 { mode, seed }` | default `autonomous` (§7b); startup flag/env boots `passive` for CI; mode-set ≠ reset |
