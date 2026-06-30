@@ -8,7 +8,7 @@ summary: L2 scenario authoring format — declarative YAML behavior layer.
 
 *Knows every line. Needs no cast.*
 
-**Companion to:** `offbook-design.md` (canonical decisions/rationale) and `offbook-handoff.md` (sequence). This doc **resolves the open thread in design §10** and **unblocks handoff Step 2.8**. Section refs (e.g. §5) point to the design doc.
+**Companion to:** `offbook-design.md` (canonical decisions/rationale) and `offbook-handoff.md` (sequence). This doc **resolves the open thread in design §10** and **unblocks handoff Step 2.8**. **Section-ref convention:** a bare `§N` refers to **this** document's sections; cross-document refs are always prefixed — `design §N`, `l2 §N`, `contracts §N`.
 
 **Status:** Decided (worked through as a dialog). Decision log at the end.
 
@@ -18,7 +18,7 @@ summary: L2 scenario authoring format — declarative YAML behavior layer.
 
 ## 0. Settled headline
 
-L2 scenarios are **declarative YAML data** — never code. The escape to code is **lateral**: when a scenario needs real logic, you hand that whole topic to an **L3 handler** (which shadows L2 by the §4 first-match-wins precedence). This keeps L2 a low-friction, diffable, load-validatable, hot-reloadable surface and preserves the L2/L3 distinction.
+L2 scenarios are **declarative YAML data** — never code. The escape to code is **lateral**: when a scenario needs real logic, you hand that whole topic to an **L3 handler** (which shadows L2 by the design §4 first-match-wins precedence). This keeps L2 a low-friction, diffable, load-validatable, hot-reloadable surface and preserves the L2/L3 distinction.
 
 ### Canonical example
 
@@ -57,8 +57,8 @@ L2 scenarios are **declarative YAML data** — never code. The escape to code is
 ## 1. Paradigm (D1)
 
 - L2 = **declarative YAML**; L2 and L3 are **separate layers**, not composed.
-- Code escape is **lateral**: write an L3 handler for the topic; it shadows L2 via first-match-wins (§4).
-- **Deferred:** inline `handler:` references inside a scenario step (composing code into a declarative flow). Add only if the coarse escape proves too blunt against real scenarios — n=1 discipline (§3, §7).
+- Code escape is **lateral**: write an L3 handler for the topic; it shadows L2 via first-match-wins (design §4).
+- **Deferred:** inline `handler:` references inside a scenario step (composing code into a declarative flow). Add only if the coarse escape proves too blunt against real scenarios — n=1 discipline (design §3, design §7).
 
 ## 2. Scenario anatomy (D2)
 
@@ -71,7 +71,7 @@ A scenario has three top-level fields:
 | `then` | yes | An **ordered list of steps** (≥1). One-shot is the degenerate single-element list. |
 
 - The only step kind in v1 is `emit`. (v2 fault steps are additive — see §6.)
-- **Within L2, the first matching scenario wins** (consistent with the L3→L2→L1 first-match-wins, §4).
+- **Within L2, the first matching scenario wins** (consistent with the L3→L2→L1 first-match-wins, design §4).
 
 ## 3. File layout & dispatch order (D2)
 
@@ -83,7 +83,7 @@ A scenario has three top-level fields:
 
 ## 4. Matching (D3)
 
-`when` only matches messages the **browser application publishes** (`direction: fromClient` in the §5 normalized model).
+`when` only matches messages the **browser application publishes** (`direction: fromClient` in the design §5 normalized model).
 
 ### Topic pattern + parameter binding
 - `{param}` — matches exactly one level **and captures** it (a "named `+`"); available to templating as `{{param}}`. Verbatim the AsyncAPI channel-address form, so authors copy channels straight from the spec.
@@ -120,7 +120,7 @@ A scenario has three top-level fields:
   - `{{now}}` — the **logical seeded clock** (`offbook-contracts.md` §3): `now()` = `fixedEpoch + Σ(seeded delays)`, *not* wall-clock (a real `Date.now()` would break replayability). It advances by the **full** seeded delay of each step even though, in the default scheduler, the emit is delivered on the next event-loop task rather than after real wall time elapses (contracts §3, design §6).
 
 ### Auto-fill
-The author templates **only the causal fields**; omitted required schema fields are **seed-faked by L1** and the whole payload is **Ajv-rechecked before emit** (§4). Scenarios stay minimal and spec-valid by construction.
+The author templates **only the causal fields**; omitted required schema fields are **seed-faked by L1** and the whole payload is **Ajv-rechecked before emit** (design §4). Scenarios stay minimal and spec-valid by construction.
 
 ### The boundary (write this into reviews)
 > L2 templating shapes **data only**: substitute captured params, inbound payload fields, and seeded helpers into a payload skeleton; omitted required fields are seed-faked by L1 and Ajv-rechecked before emit. The moment a response needs a **conditional, computation, loop, memory across messages, or external state**, that is the **L3 boundary** — by design.
@@ -129,9 +129,9 @@ The author templates **only the causal fields**; omitted required schema fields 
 
 - **`delay` is a per-step property.** Syntax: constant `<n><unit>` (`150ms`, `2s`) or ranged `<min>-<max><unit>` (`150-300ms`). **Unit required** (`ms` | `s`); no bare numbers. Omitted ⇒ `0` (immediate). A constant is the degenerate zero-width range.
 - **Multi-step timing is relative/cumulative:** each step's delay is measured from the **previous emit**, so step N's absolute time = sum of delays 1..N. Natural "wait, emit, wait, emit" scripting.
-- **Seeded, order-independent draws:** each ranged delay = `mulberry32(hash(runSeed + scenarioName + stepIndex))` — the same Mulberry32 PRNG as L1 (§4), keyed by a stable identity (not a shared stream cursor). Same run seed ⇒ byte-identical timings; independent of evaluation order; steps independent. This makes §6's headline real: "reproduce the bug where the ack lands after the timeout" is a repeatable fixture.
+- **Seeded, order-independent draws:** each ranged delay = `mulberry32(hash(runSeed + scenarioName + stepIndex))` — the same Mulberry32 PRNG as L1 (design §4), keyed by a stable identity (not a shared stream cursor). Same run seed ⇒ byte-identical timings; independent of evaluation order; steps independent. This makes design §6's headline real: "reproduce the bug where the ack lands after the timeout" is a repeatable fixture.
 - **A resolved delay advances the logical clock, not wall time (default scheduler).** The drawn `delayMs` is added to the logical `now()` (`offbook-contracts.md` §3) and the emit is delivered on the **next event-loop task** — enough to force the client's async code to suspend/resume (design §6) without CI paying the real seconds. Real wall delay is the wall-paced mode selected by `config.wallClock` (`offbook-contracts.md` §1a, CR6) for human-perceptible timing, never the CI/replay path.
-- **v2 (deferred, additive on the step model):** adversarial timing — `duplicate`, `reorder`, `drop`, `redeliver` — are added as more step properties, no restructuring (§6).
+- **v2 (deferred, additive on the step model):** adversarial timing — `duplicate`, `reorder`, `drop`, `redeliver` — are added as more step properties, no restructuring (design §6).
 
 ## 7. Author-time validation (D6)
 
@@ -139,12 +139,12 @@ The author templates **only the causal fields**; omitted required schema fields 
 
 - **Load-time (static, fail fast):**
   - *Skeleton schema check* — substitute each `{{…}}` with a type-appropriate / L1-faked stand-in and run Ajv; wrong-typed literals, unknown fields, structurally impossible payloads fail now.
-  - *Topic/direction check* — `when.topic` must match a `fromClient` channel and `emit.topic` a `toClient` channel in some consumed spec (§5 normalized direction). A `when` on a toClient topic is a direction error.
+  - *Topic/direction check* — `when.topic` must match a `fromClient` channel and `emit.topic` a `toClient` channel in some consumed spec (design §5 normalized direction). A `when` on a toClient topic is a direction error.
   - *Reference resolvability* — every `{{param}}` must have a source: **captured by `when.topic`, *or* supplied via the trigger request `params`** for a `when`-less trigger-only scenario (so the `device-offline` example, §0, validates); `{{payload.x}}` checked against the inbound channel schema; unknown helpers rejected (closed set). An **unresolvable `{{param}}`** — or a **single-`{param}` on an emit field** (EQ7) — yields a `scenario-load` diagnostic whose detail teaches the single-captures / double-substitutes convention and names **both** param sources, never a bare "unknown param".
-  - *Structural* — name uniqueness (§2 Scenario anatomy), terminal `#` (§4 Matching), delay syntax (§6 Timing). *(Named §N here = this doc's own sections, not the design doc.)*
-- **Emit-time (runtime backstop):** the §4 L1 Ajv recheck of the *actual* produced payload — catches anything load-time couldn't (e.g. an inbound value that pushed a templated field off-spec).
+  - *Structural* — name uniqueness (§2 Scenario anatomy), terminal `#` (§4 Matching), delay syntax (§6 Timing).
+- **Emit-time (runtime backstop):** the design §4 L1 Ajv recheck of the *actual* produced payload — catches anything load-time couldn't (e.g. an inbound value that pushed a templated field off-spec).
 
-**Failure handling — lenient-but-loud in dev, strict in CI** (mirrors the §7/§9 emission-mode split): a broken scenario is **skipped loudly** (logged + surfaced in `GET /diagnostics` — the static config/load surface, *not* the runtime `/validation` log; P1.D4 — and not loaded) so one typo doesn't blank the UI (onboarding, §9 moment 1). A **strict mode** fails fast on any scenario error for CI.
+**Failure handling — lenient-but-loud in dev, strict in CI** (mirrors the design §7/design §9 emission-mode split): a broken scenario is **skipped loudly** (logged + surfaced in `GET /diagnostics` — the static config/load surface, *not* the runtime `/validation` log; P1.D4 — and not loaded) so one typo doesn't blank the UI (onboarding, design §9 moment 1). A **strict mode** fails fast on any scenario error for CI.
 
 ## 8. Loading, hot-reload & control plane (D7)
 
@@ -152,9 +152,9 @@ The author templates **only the causal fields**; omitted required schema fields 
 - **Hot-reload (dev affordance, `autonomous` mode only):** watch the tree; on change re-glob/re-sort/re-validate and **atomically swap** the table; surface what changed + any new errors loudly. **Swaps definitions only — does not reset runtime state** (counters/virtual clock continue); returning to t0 is `reset`.
 - **L3 handler *code* reloads by process restart, not in-place swap (EH1).** The bullet above is L2 — declarative data, swapped live. L3 handlers are **code** (`handlers/**/*.ts`, side-effecting `register()` on import), so editing one and calling `reset` runs **stale code** (`reset` re-instantiates handler *state*, not changed modules — `offbook-contracts.md` §5). The affordance is **`offbook up --watch`** (`autonomous`-only): it watches `handlers/**/*.ts` and **restarts the process** on change — a fresh module graph (correct by construction), re-seeded + re-materialized, with a loud "restarting for handler change" notice (the client reconnects). Without `--watch`, an L3 code change needs `offbook down && up`, and the `up`/`reset` output says so. The model: **data changes are live (L2), code changes restart (L3)**. Like the L2 watcher, this restart-watch is **frozen in `passive`** (no restart mid-CI-window; `offbook-contracts.md` §5, build-gaps-2 F10). *(True in-process HMR — re-import + re-register without a restart — is deferred to v2 behind a Bun module-reload spike.)*
 - **`passive` mode freezes the scenario set:** mirroring the way `passive` fires no autonomous ticks (`offbook-contracts.md` §5), `passive` loads the scenario set **once at startup with no watcher** — hot-reload is disabled. So editing a scenario file between `reset` and an assertion cannot change the matched scenario; the dispatch table is as deterministic across a CI window as the emission stream. Hot-reload is therefore a dev-only affordance.
-- **Trigger:** `POST /trigger/{name}` fires a named scenario on demand (§9 debugging moment). Optional request body supplies params/inbound payload for a reactive scenario fired by hand — params are **nested** under `params` (canonical, per `offbook-contracts.md` §5): `{ "params": { "deviceId": "t1" }, "payload": { … } }`. Each `params` entry binds the scenario's `{{param}}` captures (here `{{deviceId}}`); anything omitted is seed-faked.
-- **Reset:** `POST /reset` returns to known state — re-seed PRNGs to the run seed, reset counters + virtual clock, republish retained initial state, halt autonomous emission. The CI `reset → publish → wait → assert → teardown` primitive (§9 moment 4).
-- **Seeding:** the run seed is startup config; `reset` re-seeds to that same seed (reproducible); the control plane can set a fresh seed for a new deterministic run. L1 (§4), ranged delays (§6), and helpers (§5) all derive from it — either keyed by a stable identity (ranged delays, the L1 faker, tick jitter) or via a per-scenario/per-handler local counter (`{{seq}}`, `{{uuid}}`, `ctx.random()`); never a long-lived shared cursor (contracts §3 F7).
+- **Trigger:** `POST /trigger/{name}` fires a named scenario on demand (design §9 debugging moment). Optional request body supplies params/inbound payload for a reactive scenario fired by hand — params are **nested** under `params` (canonical, per `offbook-contracts.md` §5): `{ "params": { "deviceId": "t1" }, "payload": { … } }`. Each `params` entry binds the scenario's `{{param}}` captures (here `{{deviceId}}`); anything omitted is seed-faked.
+- **Reset:** `POST /reset` returns to known state — re-seed PRNGs to the run seed, reset counters + virtual clock, republish retained initial state, halt autonomous emission. The CI `reset → publish → wait → assert → teardown` primitive (design §9 moment 4).
+- **Seeding:** the run seed is startup config; `reset` re-seeds to that same seed (reproducible); the control plane can set a fresh seed for a new deterministic run. L1 (design §4), ranged delays (§6), and helpers (§5) all derive from it — either keyed by a stable identity (ranged delays, the L1 faker, tick jitter) or via a per-scenario/per-handler local counter (`{{seq}}`, `{{uuid}}`, `ctx.random()`); never a long-lived shared cursor (contracts §3 F7).
 
 ---
 
