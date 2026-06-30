@@ -284,7 +284,7 @@ Even though v1 only implements the simplest path, design these interfaces now so
 The tool is reached for at four distinct moments with different demands:
 
 1. **Onboarding ("just cloned the browser application, want it to run").** Value = zero-to-running with one command, no MQTT knowledge required. Needs **good defaults + retained initial state**. Failure mode: a blank UI and a dev who can't tell what's broken.
-2. **Daily driver ("building against a service that isn't running locally").** Needs **fast iteration on behavior** (hot-reload of scenarios/handlers) and a **manual publish** affordance to drive the UI by hand.
+2. **Daily driver ("building against a service that isn't running locally").** Needs **fast iteration on behavior** (live hot-reload of L2 scenarios; L3 handler *code* changes auto-restart the process via `offbook up --watch` — data is live, code restarts, EH1) and a **manual publish** affordance to drive the UI by hand.
 3. **Debugging ("reproduce a specific situation").** Needs **named scenarios fired on demand** and **reset to known state**; ideally record/replay later.
 4. **Automated tests (CI / Playwright).** Needs a **scriptable, synchronous, deterministic** control plane: reset → publish → wait → assert → teardown, with no random intervals firing mid-assertion.
 
@@ -298,7 +298,7 @@ The biggest ergonomic risk is a dev not knowing **what topics exist, what they m
 
 Bun chosen for fast startup (a CLI invoked constantly), native TS, built-in shell/arg handling, and running server + CLI from one toolchain with no build step. The CLI is a thin client over the HTTP control plane. Indicative commands:
 
-- `offbook up` / `offbook down` — lifecycle
+- `offbook up [--watch]` / `offbook down` — lifecycle; `--watch` (autonomous-only) restarts the server on `handlers/**/*.ts` changes so L3 code edits take effect without a manual `down && up` (EH1)
 - `offbook topics` — discovery (the documentation-replacement win). Default render is a **compact human view** grouped by service: per topic, the human direction label (above), resolved qos/retain, a **per-field summary** (name · type · required-ness; enums as `a | b | c`, numeric bounds, `format`), and the seeded `example`. Composed schemas (`allOf`/`oneOf`/`anyOf`) flatten to the effective field set with `oneOf<…>` markers, deferring the full schema to `--schema`. `--compact`/`-q` collapses to one line per topic, `--no-examples` drops examples, `--json` emits the raw `TopicInfo[]`, `--service`/`--receives`/`--sends` filter (mapping to `?service=`/`?direction=`). It **never** prints raw JSON Schema by default (ER1).
 - `offbook publish <topic> [--example | --payload <json> | --payload-file <path> | --payload -] [--qos N] [--retain] [--force]` — hand-drive the UI; `--example` generates a schema-valid payload (and is the default when neither `--example` nor a `--payload*` source is given), the `--payload*` sources give an explicit body (mutually exclusive with `--example`, rejected locally to mirror the contract's `400 example-and-payload`). Publishing to a topic that matches **no channel** still publishes raw but **exits nonzero by default** — `--force` to allow the intentional off-contract case — printing `⚠ no channel matches '<topic>' — published raw (flagged in /validation)` (EQ1/EQ4).
 - `offbook state` — show retained values (see what the browser application sees)

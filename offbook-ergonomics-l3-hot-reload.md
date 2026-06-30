@@ -1,8 +1,8 @@
 ---
 type: handoff
-status: open
-summary: L3 handler hot-reload parity decision (EH1).
-folds-into: [offbook-l2-scenarios, offbook-design]
+status: resolved
+summary: L3 handler hot-reload parity decision (EH1); resolved + folded in.
+folds-into: [offbook-l2-scenarios, offbook-design, offbook-contracts, offbook-build-plan]
 ---
 
 # Offbook — L3 Handler Hot-Reload Parity (Handoff)
@@ -11,7 +11,7 @@ folds-into: [offbook-l2-scenarios, offbook-design]
 
 **Companion to:** `offbook-contracts.md` (**canonical** — conflict rule: the contract wins; fix other docs to match), `offbook-l2-scenarios.md` (§8 hot-reload), `offbook-design.md` (§9 moment-2), `offbook-build-gaps-2.md` (F19 lazy resolve-at-dispatch). **Originating review:** end-user ergonomics pass (2026-06-29). **Sibling handoffs:** the other `offbook-ergonomics-*.md` area docs.
 
-**Status:** **Open** — 1 item, but it carries a genuine decision (reach parity vs make the asymmetry honest). Atomic/isolated to `engine/` L3 loading + a doc/CLI note. One PR once the decision is made.
+**Status:** **Resolved** (2026-06-30) — decided in dialog as **(c) supervised watch-restart**, a synthesis beyond this doc's original (a)/(b) fork: auto-restart the process on handler-code changes rather than in-process HMR (a) or manual-only (b). Folded into l2 §8, design §9, contracts §5, build-plan Tier 4. See the **Decision log**.
 
 **Why this exists.** L2 scenarios hot-reload (`offbook-l2-scenarios.md` §8), giving the daily-driver a tight authoring loop. Whether editing an L3 handler `.ts` does the same is unspecified: `reset` "re-instantiates L3 handlers" (`offbook-contracts.md` §5, line ~306) — that re-runs handler *state*, not changed *code*. So the two authoring layers likely have different inner loops (L2 live, L3 restart), and a dev editing a handler can silently run stale code.
 
@@ -51,7 +51,7 @@ folds-into: [offbook-l2-scenarios, offbook-design]
   - **(a):** with the server in `autonomous`, editing a handler's reply payload and saving changes the next dispatch's emission with no `down`/`up`; in `passive`, the same edit does **not** change matching within a CI window (watcher frozen).
   - **(b):** the docs and the `reset`/`up` output explicitly state L3 needs a restart; a test asserts that notice is surfaced, and that editing a handler without restart does not change dispatch.
 - **Relates to:** `offbook-build-gaps-2.md` F19 (lazy resolve), F10 (passive freeze for determinism).
-- **Status:** ☐ open
+- **Status:** ☑ **resolved** (2026-06-30) — chose **(c) supervised watch-restart** (introduced in dialog; neither pure (a) nor (b)): `offbook up --watch` (autonomous-only) restarts the process on `handlers/**/*.ts` changes — fresh module graph (correct by construction), re-seeded/re-materialized, loud notice, client reconnects; **frozen in `passive`** (F10). Without `--watch`, L3 code needs `down && up` and the `up`/`reset` output says so. Model: data is live (L2), code restarts (L3); true in-process HMR (a) deferred to v2 behind a Bun module-reload spike. Folded → l2 §8, design §9, contracts §5, build-plan Tier 4.
 
 ---
 
@@ -65,4 +65,4 @@ Self-contained, but the decision interacts with the determinism gate: whichever 
 
 | ID | Decision taken | File(s) patched | Resolver | Date |
 |---|---|---|---|---|
-| | | | | |
+| EH1 | (c) supervised watch-restart: `offbook up --watch` (autonomous-only) restarts the process on `handlers/**/*.ts` changes (fresh module graph, re-seeded/re-materialized, loud notice, client reconnects); frozen in `passive`; without `--watch`, L3 code needs `down && up` and the output says so. In-process HMR (a) deferred to v2 behind a Bun-reload spike | offbook-l2-scenarios.md §8; offbook-design.md §9; offbook-contracts.md §5; offbook-build-plan.md Tier 4 | CodeReviewJoe | 2026-06-30 |
