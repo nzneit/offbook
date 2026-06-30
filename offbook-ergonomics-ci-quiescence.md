@@ -1,8 +1,8 @@
 ---
 type: handoff
-status: open
-summary: Synchronous-drain / quiescence signal for CI moment-4 (EC1).
-folds-into: [offbook-contracts]
+status: resolved
+summary: Synchronous-drain / quiescence signal for CI moment-4 (EC1); resolved + folded in.
+folds-into: [offbook-contracts, offbook-design, offbook-build-plan]
 ---
 
 # Offbook — CI Synchronous Drain / Quiescence (Handoff)
@@ -11,7 +11,7 @@ folds-into: [offbook-contracts]
 
 **Companion to:** `offbook-contracts.md` (**canonical** — conflict rule: the contract wins; fix other docs to match), `offbook-design.md` (§9 moment-4, §6 virtual/wall split), `offbook-build-gaps-2.md` (F10 determinism gate). **Originating review:** end-user ergonomics pass (2026-06-29). **Sibling handoffs:** the other `offbook-ergonomics-*.md` area docs.
 
-**Status:** **Open** — 1 item. Moment-4 (`offbook-design.md` §9, line ~283) promises a "scriptable, **synchronous**, deterministic" control plane, but the only synchronization primitive is polling. Atomic/isolated as a feature (a drain semantic in `engine/` + its expression in `control-plane/`); no change to the violation/state types.
+**Status:** **Resolved** (2026-06-30) — decided in dialog: **actions stay prompt-`202`** (honest, uniform — `202` always means "injected"), and a new **`GET /v1/pending`** read carries the quiescence count + a **`?wait[=ms]`** server-side block-to-quiescence (the CLI `--wait` flag wraps it); no `POST /drain`. Folded into contracts §5, design §9, build-plan Tier 3. See the **Decision log**.
 
 **Why this exists.** Actions return `202` *before* the scheduled emissions they cause have drained (`offbook-contracts.md` §5 line ~259: "actions return promptly after injecting (CI polls /state + /validation for effects)"). In the fast-virtual scheduler (`§3`) emits are delivered on the next event-loop task with **no wall delay**, so the engine *can* run the triggered chain to quiescence synchronously — but that capability isn't exposed, leaving every test author to poll-until-stable against a guessed timeout. This is the one moment-4 affordance the otherwise-excellent CI design leaves unbuilt.
 
@@ -54,7 +54,7 @@ folds-into: [offbook-contracts]
   Run-to-completion dispatch (§3) already orders a single event; extend the drain to the whole *triggered chain* under fast-virtual, where no wall time is owed. Document in contracts §5 that the synchronous-202 guarantee holds only in `passive` + `wallClock:false`.
 - **Acceptance:** in `passive` mode, `POST /trigger` for a 3-step scenario whose steps have cumulative virtual delays returns `202` only after `GET /state` already reflects all three emits (no second poll, no sleep); a determinism test asserts the post-trigger `/state` is complete without any wait loop. In wall-paced mode, `GET /v1/pending` reports a nonzero `scheduled` between a trigger and its last delayed emit, reaching `0` when drained.
 - **Relates to:** `offbook-build-gaps-2.md` F10 (the gate this protects).
-- **Status:** ☐ open
+- **Status:** ☑ **resolved** (2026-06-30) — chose **explicit settle, not implicit synchronous-202**: `/publish` & `/trigger` keep meaning "injected" in every mode; the settle signal is **`GET /v1/pending`** → `{ scheduled, settled }` (excludes the perpetual `autonomous` tick) with **`?wait[=ms]`** blocking server-side to `scheduled===0`, bounded by the F10 horizon. CLI `--wait` flag wraps it; `POST /drain` dropped (the force-fast-forward is a v2 niche). Folded → contracts §5 (conventions + Reads + CI loop), design §9 (moment-4 + CLI), build-plan Tier 3.
 
 ---
 
@@ -68,4 +68,4 @@ Self-contained — but coordinate with whoever owns the determinism gate (F10): 
 
 | ID | Decision taken | File(s) patched | Resolver | Date |
 |---|---|---|---|---|
-| | | | | |
+| EC1 | Explicit settle over implicit synchronous-202: actions stay prompt-`202` (uniform "injected" semantics); add `GET /v1/pending → { scheduled, settled }` (excludes the autonomous tick) + `?wait[=ms]` server-side block-to-quiescence (F10-bounded); CLI `--wait` wraps it; no `POST /drain` | offbook-contracts.md §5; offbook-design.md §9; offbook-build-plan.md Tier 3 | CodeReviewJoe | 2026-06-30 |

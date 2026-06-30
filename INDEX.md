@@ -13,11 +13,10 @@ when every `☐` item is ticked, its decisions **fold into** the canonical doc n
 `status` flips to `resolved` — moving it from *Open work* to *Archive*. The live set you actually track is just the
 *Open work* frontier below.
 
-## Open work — the live frontier (4 docs, 7 open items)
+## Open work — the live frontier (3 docs, 6 open items)
 
 | Doc | Open | Folds into | Summary |
 |---|---|---|---|
-| [CI Synchronous Drain / Quiescence (Handoff)](offbook-ergonomics-ci-quiescence.md) | 1 | [contracts](offbook-contracts.md) | Synchronous-drain / quiescence signal for CI moment-4 (EC1). |
 | [Onboarding Scaffold (`offbook init`) (Handoff)](offbook-ergonomics-init-scaffold.md) | 2 | [design](offbook-design.md) | offbook init onboarding scaffold + honest first-run orientation (EI1–EI2). |
 | [Running-Server Observability (Handoff)](offbook-ergonomics-server-observability.md) | 4 | [design](offbook-design.md) | Running-server observability — log destination, logs, watch, status (EO1–EO4). |
 | [Agent Handoff](offbook-handoff.md) | 0 | — | What to build, in order — currently pointing at Step 2 (build the v1 core). |
@@ -40,6 +39,7 @@ when every `☐` item is ticked, its decisions **fold into** the canonical doc n
 | [v1 Pre-Build Gap Resolution, Round 2 (Handoff)](offbook-build-gaps-2.md) | decision-log | resolved | supersedes [build-gaps](offbook-build-gaps.md) | Round-2 v1 pre-build gap resolution (F1–F21, R1–R5); resolved. |
 | [v1 Pre-Build Gap Resolution (Handoff)](offbook-build-gaps.md) | decision-log | resolved | — | Round-1 v1 pre-build gap resolution (G1–G25); resolved. |
 | [P1 Contract Decisions (working log)](offbook-contracts-decisions.md) | decision-log | resolved | — | P1 dialog/rationale log feeding offbook-contracts.md (provenance, not canonical). |
+| [CI Synchronous Drain / Quiescence (Handoff)](offbook-ergonomics-ci-quiescence.md) | handoff | resolved | — | Synchronous-drain / quiescence signal for CI moment-4 (EC1); resolved + folded in. |
 | [Human-Readable CLI Rendering (Handoff)](offbook-ergonomics-cli-rendering.md) | handoff | resolved | — | Human-readable offbook topics / validation output (ER1–ER2); resolved + folded in. |
 | [L3 Handler Hot-Reload Parity (Handoff)](offbook-ergonomics-l3-hot-reload.md) | handoff | resolved | — | L3 handler hot-reload parity decision (EH1); resolved + folded in. |
 | [Ergonomics Quick Wins (Handoff)](offbook-ergonomics-quick-wins.md) | handoff | resolved | — | 7 quick ergonomics fixes (EQ1–EQ7) — small spec/CLI edits; resolved + folded in. |

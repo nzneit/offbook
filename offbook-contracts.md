@@ -262,7 +262,7 @@ interface Violation {
 
 ## 5. Control-plane HTTP API
 
-**Conventions:** `/v1` prefix · JSON only · error envelope `{ error: { code: ErrorCode, message, details? } }` where `ErrorCode` is the closed union below · **actions return promptly after *injecting*** (CI polls `/state` + `/validation` for effects) · no-auth / no-CORS / localhost bind (dev appliance; the client uses MQTT, not this API).
+**Conventions:** `/v1` prefix · JSON only · error envelope `{ error: { code: ErrorCode, message, details? } }` where `ErrorCode` is the closed union below · **actions return promptly after *injecting*** (a `202` means "injected", never "drained" — uniform across modes); to wait for the emissions an action caused to reach **quiescence**, use `GET /v1/pending?wait` below (the moment-4 synchronous-CI primitive, EC1) · no-auth / no-CORS / localhost bind (dev appliance; the client uses MQTT, not this API).
 
 ### Reads
 | Endpoint | Returns | Notes |
@@ -273,6 +273,7 @@ interface Violation {
 | `GET /v1/specs` | `{ specs: SpecInfo[]; resolutionMode; warnings? }` | `resolutionMode: 'branch' \| 'pinned'` honesty flag (§7); in **branch** mode `warnings?` carries the version-not-honored notice — "requested versions in `environments.yaml` are recorded but NOT honored; fetching branch tips (serviceA→main, serviceB→dev)", naming each service's actual branch; suppressed under `pinned`/`--frozen` (EQ2) |
 | `GET /v1/diagnostics` | `{ diagnostics: Diagnostic[]; summary: DiagnosticSummary }` | load/hot-reload-populated; dev-time surface |
 | `GET /v1/mode` | `{ mode, seed }` | |
+| `GET /v1/pending` | `{ scheduled: number; settled: boolean }` | **quiescence signal (EC1).** `scheduled` = pending reactive/triggered emits still queued, **excluding** the perpetual `autonomous` tick (else it never reaches 0). `?wait` **blocks server-side until `scheduled === 0`** — the synchronous drain the moment-4 CI loop wants (in `passive`+fast-virtual there's no wall time to pay; in wall-paced it waits the real delays) — bounded by the F10 virtual horizon; `?wait=<ms>` caps the wait. `settled` is `true` when it reached 0, `false` if it returned at the cap. Actions stay prompt-`202`; this is the **explicit** settle step (CLI `--wait` wraps it); no `POST /drain` in v1 |
 
 ```ts
 interface TopicInfo { topic: string; direction: Direction; service: string;
@@ -323,7 +324,7 @@ type ErrorCode =
 - **A `fromClient` `/publish` re-enters the broker's inbound path (G9).** An HTTP-injected publish has no ws client to mint `meta`, so the control-plane synthesizes an `InboundEvent` and feeds it through the **same `onInbound` path the broker uses for real client publishes** — `meta.clientId = 'control-plane'` (configurable via `config.injectedClientId`), `meta.receivedAt = wall now`, `meta.seq` assigned by the engine — so it is validated identically to a real publish and tagged **`origin: 'client'`**. A contract break therefore lands in `byOrigin.client` (never silently in `byOrigin.mock`), so the headline gate below can't false-negative on injected traffic.
 - **`up` / `down` are NOT HTTP endpoints — they are process management (G14).** No request can start the server that would serve it; `offbook up` **spawns the server detached, writes a PID + port runfile, and probes the control-plane port for readiness**, and `offbook down` reads the runfile and signals the process. (`offbook specs update` *is* HTTP — it hits `POST /v1/specs/refresh` above so the running registry doesn't go stale.)
 
-The CI loop reads cleanly: `reset` (checkpoint `sinceSeq`) → `publish`/`trigger` → poll `GET /validation?sinceSeq=<checkpoint>` → assert `summary.byOrigin.client === 0`.
+The CI loop reads cleanly: `reset` (checkpoint `sinceSeq`) → `publish`/`trigger` → **`GET /pending?wait`** (settle — one blocking call, no poll-with-timeout, EC1) → read `GET /validation?sinceSeq=<checkpoint>` → assert `summary.byOrigin.client === 0`.
 
 ## 6. Spec ingestion & config (the §7 seams, v1)
 
