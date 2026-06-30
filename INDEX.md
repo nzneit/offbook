@@ -13,11 +13,11 @@ when every `☐` item is ticked, its decisions **fold into** the canonical doc n
 `status` flips to `resolved` — moving it from *Open work* to *Archive*. The live set you actually track is just the
 *Open work* frontier below.
 
-## Open work — the live frontier (2 docs, 4 open items)
+## Open work — the live frontier (2 docs, 1 open items)
 
 | Doc | Open | Folds into | Summary |
 |---|---|---|---|
-| [v1 Pre-Build PM-Lens Gap Review, Round 4 (Handoff)](offbook-build-gaps-4.md) | 4 | — | Round-4 PM-lens gap review (P1–P9). P2/P3/P4/P5/P6 folded; P1 build-gate, P7–P9 open frontier. |
+| [v1 Pre-Build PM-Lens Gap Review, Round 4 (Handoff)](offbook-build-gaps-4.md) | 1 | — | Round-4 PM-lens gap review (P1–P9). P2–P9 folded; only P1 (spikes) remains a build-gate. |
 | [Agent Handoff](offbook-handoff.md) | 0 | — | What to build, in order — currently pointing at Step 2 (build the v1 core). |
 
 ## Reference — canonical & living
