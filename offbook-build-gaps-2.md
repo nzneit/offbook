@@ -264,6 +264,7 @@ supersedes: offbook-build-gaps
 - **Status:** ☑ **resolved** (2026-06-27) — see Decision log.
 
 ### F17 — By-SHA fetch depends on host `allowAnySHA1InWant`; the fallback is uncontracted
+> **⚠ Superseded by P5.2 (round 4 — `offbook-build-gaps-4.md`):** by-SHA fetch + this F17 history-walk fallback are **deferred to v2** (they exist only to fetch a specific historical SHA for the v2 `up --frozen` reader). v1 fetches the branch tip only. Canonical: contracts §6/§7 + design §11.
 - **Where:** `offbook-contracts.md` §6 (line ~293, `git fetch <repoUrl> <sha>` "relying on the host's `uploadpack.allowAnySHA1InWant`"); `offbook-build-gaps.md` residual (line ~321, "if disabled, fall back to fetching the branch ref and walking to the locked SHA").
 - **Problem:** the headline §6 reproducibility guarantee (`up --frozen`) hard-codes the by-SHA path, but the fallback exists only as a non-blocking residual — no interface, no acceptance, not in the `ingestion/` task.
 - **If unaddressed:** on a host with `allowAnySHA1InWant` disabled (common on GitHub Enterprise / internal hosts), `up --frozen` fails to fetch at all ⇒ the reproducibility guarantee — the whole reason the lockfile reader was wired (G4) — is inoperative, rediscovered per-adopter.
@@ -371,7 +372,7 @@ supersedes: offbook-build-gaps
 | F10 | Ticks scheduled on the **virtual** clock over a fixed virtual horizon; determinism gate runs in `passive` and **asserts `GET /mode==passive`** (assert-and-refuse) | offbook-contracts.md §3 | CodeReviewJoe | 2026-06-27 |
 | F11 | Control-plane reaches the L1 faker by **injection** (engine owns the one `Faker = (channel)=>unknown`; composition root wires it) — not a direct import; `/topics` example == `/publish {example:true}` *(↻ CR1/CR8: `Faker = (channel, instanceParams?)=>unknown`, homed in model/)* | offbook-contracts.md §3/§5; offbook-build-plan.md §3 | CodeReviewJoe | 2026-06-27 |
 | F14 | `topicOverrides` matched by **string-equality** on `channel.topic` (`{param}` form), not via `SpecRegistry.match`; `qos-overrides` added to the §4 gate | offbook-contracts.md §6; offbook-build-plan.md §4 | CodeReviewJoe | 2026-06-27 |
-| F17 | `GitRefResolver` by-SHA fetch gains a contracted fallback: branch-ref fetch + history-walk to the locked SHA when `allowAnySHA1InWant` is off | offbook-contracts.md §6; offbook-build-plan.md §3 | CodeReviewJoe | 2026-06-27 |
+| F17 | `GitRefResolver` by-SHA fetch gains a contracted fallback: branch-ref fetch + history-walk to the locked SHA when `allowAnySHA1InWant` is off **— [superseded by P5.2 (round 4): by-SHA + F17 → v2]** | offbook-contracts.md §6; offbook-build-plan.md §3 | CodeReviewJoe | 2026-06-27 |
 | F20 | **Keep** seam-visibility (override the defer rec): `environments.yaml` + `requested-version` + `VersionSource` stay for honest requested-vs-resolved provenance | offbook-contracts.md §6 (reaffirmed) | CodeReviewJoe | 2026-06-27 |
 | F12 | `Resolver` is per-call (stateless): `new GitRefResolver(config)` then `resolve(repo,ref,specPath)` per ref; build-plan corrected to match the frozen interface | offbook-build-plan.md §3 | CodeReviewJoe | 2026-06-27 |
 | F13 | Engine owns emit-completion via one `resolveEmit(partial, channel)→NormalizedMessage` choke-point (parse delay→keyed delayMs, fill qos/retain from Channel) | offbook-contracts.md §3 | CodeReviewJoe | 2026-06-27 |

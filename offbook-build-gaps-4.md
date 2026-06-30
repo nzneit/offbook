@@ -1,7 +1,7 @@
 ---
 type: decision-log
 status: open
-summary: Round-4 PM-lens gap review (P1–P9). P2/P3/P4/P6 folded this round; P1 build-gate, P5/P7–P9 open frontier.
+summary: Round-4 PM-lens gap review (P1–P9). P2/P3/P4/P5/P6 folded; P1 build-gate, P7–P9 open frontier.
 ---
 
 # Offbook — v1 Pre-Build PM-Lens Gap Review, Round 4 (Handoff)
@@ -14,7 +14,7 @@ summary: Round-4 PM-lens gap review (P1–P9). P2/P3/P4/P6 folded this round; P1
 
 **Convergence is the signal.** Five lenses run blind to each other collided on the same three themes: *stop planning and de-risk* (P1), *the user/persona is undefined* (P3), and *the first-value "aha" is never staged* (P4). Where independent lenses land on one spot, that is the load-bearing gap.
 
-This round **resolved P2, P3, P4, P6** — the actionable Tier-1/Tier-2 product calls, each decided one fork at a time in dialog and folded into the canonical docs. **P1** is a build-gate (= round-3 S1/S2 — no doc edit closes it). **P5/P7/P8/P9** are the recorded open frontier (next-dialog candidates, not v2 deferrals).
+This round **resolved P2, P3, P4, P5, P6** — the actionable Tier-1/Tier-2 product calls, each decided one fork at a time in dialog and folded into the canonical docs. **P1** is a build-gate (= round-3 S1/S2 — no doc edit closes it). **P7/P8/P9** are the recorded open frontier (next-dialog candidates, not v2 deferrals).
 
 > **Line numbers / section anchors cited below are as-of HEAD `e19f890` (2026-06-30) and drift once edits land.** Anchor by `§N` / type name / heading.
 
@@ -28,7 +28,7 @@ This round **resolved P2, P3, P4, P6** — the actionable Tier-1/Tier-2 product 
 | P2 | 1 | Value silently *inverts* under imperfect specs (false confidence) — no degraded-spec posture | ☑ **resolved** → design §7 (3-mode honesty) + contracts §5/§6 |
 | P3 | 1 | Primary user unnamed + "no MQTT knowledge" contradicts human-authored L2/L3 | ☑ **resolved** → design §1/§4/§9 |
 | P4 | 2 | No staged first-value "aha"; wedge diffuse (3 co-headliners); no dogfoodable milestone | ☑ **resolved** → design §1/§5/§6/§9 + contracts §5 + build-plan §3/§4 + handoff |
-| P5 | 2 | v1 over-scoped / mis-sequenced for value (DST engine + `--frozen`/F17 ahead of the wedge) | ☐ **partial** — P4's M0 + the §11 graded-coverage deferral took the biggest bites; the deeper DST-engine + `--frozen`/F17 re-cut is an open decision |
+| P5 | 2 | v1 over-scoped / mis-sequenced for value (DST engine + `--frozen`/F17 ahead of the wedge) | ☑ **resolved** — kept the DST engine in v1 post-M0 (founding pain #2 + moment-4); deferred the `--frozen` reader + F17 to v2 (contracts §6/§7 + design §9/§11 + build-plan) |
 | P6 | 2 | Success undefined; "loud" surface invites the alarm fatigue it fears | ☑ **resolved** → design §5 + contracts §5 + build-plan Tier 4 + ergonomics-cli-rendering |
 | P7 | 3 | Outer envelope hand-waved — client repoint, up/down lifecycle dead-ends, ports, install path | ☐ **open** — next-dialog candidate (adoption-2/3/4, G-UX-4) |
 | P8 | 3 | Control-surface holes — no seed CLI handle, no scenario discovery, no one-command CI gate | ☐ **open** — next-dialog candidate (G-UX-2/5/6) |
@@ -45,6 +45,7 @@ This round **resolved P2, P3, P4, P6** — the actionable Tier-1/Tier-2 product 
 | P3 | Named the **primary user** = MQTT-naive app developer; **staged the "no MQTT knowledge" promise** (value = L1 floor + automatic validation + discovery with zero authoring; L2/L3 authoring = progressive opt-in tier); named the **spec owner as a dependency persona** (not served/compellable; the tool's correctness rests on its hygiene) with an **opportunistic-use** path | offbook-design.md §1 (new "Who this is for") / §4 / §9 | CodeReviewJoe | 2026-06-30 |
 | P2 | **Spec trustworthiness on the content axis** (extended "never lie about fidelity" from version → quality): **Mode 1** spec-load failure = **fatal** (abort `up`, foreground named error, independent of `strict`); **Mode 2** vacuous schema = non-fatal `spec-load` Diagnostic (unambiguous `{}`/`true`/objectless-object shapes only, no grading); **Mode 3** staleness-vs-reality = undetectable → surface spec **provenance/age** (`SpecInfo.fetchedAt`) neutrally + honesty note. **§11 deferral:** graded spec-quality scoring + coverage instrumentation → v2 | offbook-design.md §7/§11; offbook-contracts.md §5 (Diagnostic, `SpecInfo.fetchedAt`, `GET /specs`) + §6 (fatal rule) | CodeReviewJoe | 2026-06-30 |
 | P4 | **Validation is the v1 wedge** (timing + discovery → *supporting*, not co-headliners); **`offbook demo`** = ephemeral bundled-spec scripted-catch (the run-#1 aha + zero-git on-ramp); explicit **M0 walking-skeleton milestone** (value checkpoint across Tiers 0–3; acceptance = `offbook demo` catches a break; needs no `ingestion/`) | offbook-design.md §1/§5/§6/§9; offbook-contracts.md §5; offbook-build-plan.md §3/§4; offbook-handoff.md Step 2 | CodeReviewJoe | 2026-06-30 |
+| P5 | **Sequencing vs scope, split.** The *sequencing* concern was already resolved by P4's M0 (the DST engine + ingestion + CLI now build *after* the validation wedge), so v1 **keeps the DST timing/determinism engine** (founding pain #2 + moment-4 CI). The one *scope* cut: **defer the `up --frozen` by-SHA reader + F17 history-walk to v2** (keep the `specs.lock` *writer* in v1; v1 records `resolved-sha` post-fetch but never reads it back) — reconciling contracts back to design §11 and **resolving a live contract contradiction** (§6 both shipped `--frozen`-by-SHA *and* claimed "v1 only ever hands it a branch tip"). Zero rework: the `Resolver` seam already accepts both ref kinds | offbook-contracts.md §5/§6/§7; offbook-design.md §9/§11; offbook-build-plan.md §2/§3 | CodeReviewJoe | 2026-06-30 |
 | P6 | **Validation must earn continued trust:** three **success criteria** (breaks-caught · **false-positive budget = 0** · time-to-first-value) + a **self-scoreboard** (`status` "caught N distinct breaks"); **read-side de-noising** via a `distinct` projection (`ValidationSummary.distinct`, keyed by structural signature) collapsing repeats to `×N` — the raw per-entry log / `seq` / F9 golden / `?sinceSeq=` / CI gate all **untouched** | offbook-design.md §5; offbook-contracts.md §5; offbook-build-plan.md Tier 4; offbook-ergonomics-cli-rendering.md (ER2 note) | CodeReviewJoe | 2026-06-30 |
 
 ---
@@ -54,5 +55,5 @@ This round **resolved P2, P3, P4, P6** — the actionable Tier-1/Tier-2 product 
 - **Method.** Five PM lenses (general-purpose agents) read the live corpus blind to each other; the five lens-reports were synthesized + deduplicated into P1–P9, tiered by product consequence. Each resolved item was then grounded against the live docs (not the synthesis) before folding, per the conflict rule.
 - **What the PM lens added.** The engineering/ergonomics rounds (G/F/R/S) hardened the *interfaces*; this round surfaced gaps at the *framing* layer (who/why/proof/success — P2/P3/P6) and the *outer envelope* (get-it-running, get-a-spec-in, witness-a-catch — P4/P7), which interface-correctness audits cannot see. All five lenses independently credited the prior work; this round is additive.
 - **P1 dominates.** The single most consequential finding is non-doc: the WS-fidelity + `connect()` spikes (round-3 S1/S2) remain unrun, and planning has outrun building. The strongest next action is to **run the spikes and stand up the M0 wedge** before building the timing/determinism engine and frozen-mode ingestion — i.e. resolve P1, then act on P5.
-- **Open frontier.** P5 (deeper scope re-cut), P7 (adoption envelope), P8 (control-surface holes), P9 (positioning) remain open product decisions — next-dialog candidates, not v2 deferrals.
+- **Open frontier.** P7 (adoption envelope), P8 (control-surface holes), P9 (positioning) remain open product decisions — next-dialog candidates, not v2 deferrals. (P5 resolved this session.)
 - This scaffold winds down at MVP with the rest (`bun scripts/docs-index.ts --teardown`).
