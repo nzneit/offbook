@@ -25,6 +25,7 @@ when every `☐` item is ticked, its decisions **fold into** the canonical doc n
 | Doc | Type | Summary |
 |---|---|---|
 | [AGENTS.md — Offbook](AGENTS.md) | meta | Guidance for agents/humans — doc-map, hard constraints, vocabulary, review angles. |
+| [External adversarial AsyncAPI sources](fixtures/asyncapi/EXTERNAL-SOURCES.md) | fixtures | Verified real-world AsyncAPI specs to pressure-test the parser/Ajv/faker pipeline, + the must-hand-author gaps. |
 | [AsyncAPI test fixtures](fixtures/asyncapi/README.md) | fixtures | AsyncAPI test fixtures + the §5 fixture quality bar. |
 | [v1 Build Plan (P2)](offbook-build-plan.md) | spec | Tech stack, repo scaffold, tiered dependency graph, per-module acceptance, spike specs. |
 | [Interface & API Contracts (v1)](offbook-contracts.md) | spec | Frozen v1 interfaces, HTTP control-plane API, and config schemas — the canonical authority (conflict rule). |
