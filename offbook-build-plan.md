@@ -63,7 +63,7 @@ offbook/
 
 **Distribution / install (P7.4):** primary is **install-from-repo** — `bunx <git-url>` to try, `bun add -d <git-url>` (or an internal registry) for project use; the **`Dockerfile`** (`oven/bun`) is the **secondary**, fully-self-contained option. Bun runs git deps directly, so **no public-npm publish is required**, and the constantly-invoked CLI stays fast (the reason Bun was chosen, §1).
 
-**README content (P9/DP5):** when the tool repo's `README.md` is written, lift the **design §12.6 "Unserved core" wedge** + the **MSW/Pact mental anchors (design §1)** into a "Why Offbook (and not Microcks/Specmatic/Glee/MSW/Pact)" section — the wedge currently lives only in the design §12 risk log, invisible at the adoption/contribution moment.
+**README content (P9/DP5):** when the tool repo's `README.md` is written, lift the **design §12.6 "Unserved core" differentiator** + the **MSW/Pact mental anchors (design §1)** into a "Why Offbook (and not Microcks/Specmatic/Glee/MSW/Pact)" section — the differentiator currently lives only in the design §12 risk log, invisible at the adoption/contribution moment.
 
 ### Port map (all configurable; defaults)
 | Listener | Default | Notes |
@@ -76,13 +76,13 @@ offbook/
 
 Behind the frozen contracts, work fans out in tiers. Each task lists its **dependencies** and a **self-checkable acceptance criterion**.
 
-### M0 — walking skeleton: the validation wedge, dogfoodable (value checkpoint)
+### M0 — walking skeleton: risk-first + floor-first, dogfoodable (value checkpoint)
 
-Before the tiers below complete, **M0** is the first dogfoodable milestone — the thinnest vertical slice that demonstrates the **validation wedge** (design §1/§5) end-to-end via **`offbook demo`**. It is a *value checkpoint drawn through* Tiers 0–3, **not a reordering**: the dependency graph below is unchanged; M0 just marks the thin path through it that ships the wedge first, with everything else enriching upward.
+Before the tiers below complete, **M0** is the first dogfoodable milestone — the thinnest vertical slice, **re-pointed risk-first + floor-first** (grilling realignment): it retires the *doable half* of the #1 hard gate (WS fidelity, §12.1) and stands up the zero-config **discovery floor** (design §1/§9), with `offbook demo` shipping as an *output* rather than the gate. It is a *value checkpoint drawn through* Tiers 0–3, **not a reordering**: the dependency graph below is unchanged; M0 just marks the thin path through it that de-risks and banks certain value first, with everything else enriching upward.
 
-- **In M0 (thin slices only):** `model/` (the types the slice uses) · `config/` (minimal) · `broker/` (ws+tcp, `onInbound`/`emit`/`getState`) · `registry/` (parse the **bundled** demo spec → channels + Ajv `validate` + `match`) · `validation/` (inbound `Violation` + the ring-buffer log) · the L1 floor (seeded faker, so the demo serves valid state) · a **minimal** control plane (`POST /publish` + `GET /validation` only) · the **`offbook demo`** command + the **bundled demo spec** (promote a fixture, e.g. `thermostat.yaml`, to a shipped demo asset).
-- **Explicitly NOT in M0 (post-M0 enrichment):** `ingestion/` (git) — the demo loads a bundled spec, so **no git is needed**; L2 scenarios + L3 handlers; timing beyond instant; the rest of the control plane (`/topics`, `/state`, `/trigger`, `/reset`, `/mode`, `/pending`, `/diagnostics`, `/specs`); the rest of the CLI.
-- **M0 acceptance:** `offbook demo` boots, publishes a deliberately off-contract payload, and surfaces it as a `schema`/`client` `Violation` in `GET /validation` — the wedge, witnessed, with zero git/specs/config (design §9). The first green dogfood signal; the §4 gate remains the full v1 bar.
+- **In M0 (thin slices only):** `model/` (the types the slice uses) · `config/` (minimal) · `broker/` (ws+tcp, `onInbound`/`emit`/`getState`) · `registry/` (parse the **bundled** demo spec → channels + Ajv `validate` + `match`) · `validation/` (inbound `Violation` + the ring-buffer log) · the L1 floor (seeded faker, so the demo serves valid state) · a **minimal** control plane (`POST /publish` + `GET /validation` + **`GET /topics`**) · **discovery** on the CLI (`offbook topics`) · the **`mqtt.js`⟷Aedes ws harness** (retained-receipt smoke test) · the **`offbook demo`** command + the **bundled demo spec** (promote a fixture, e.g. `thermostat.yaml`, to a shipped demo asset).
+- **Explicitly NOT in M0 (post-M0 enrichment):** `ingestion/` (git) — the demo loads a bundled spec, so **no git is needed**; L2 scenarios + L3 handlers; timing beyond instant; the rest of the control plane (`/state`, `/trigger`, `/reset`, `/mode`, `/pending`, `/diagnostics`, `/specs`); the rest of the CLI.
+- **M0 acceptance (two-part gate, risk-first + floor-first):** (i) a browser-style **`mqtt.js` client connects to the Aedes ws listener, subscribes, and receives a retained message** — retiring the doable half of the #1 hard gate (WS fidelity, §12.1 / §5.1) as the first artifact; and (ii) **`offbook topics` lists every topic/shape/direction** from the bundled spec — the zero-config discovery floor (design §1/§9). **`offbook demo`** also runs — boots, publishes a deliberately off-contract payload, surfaces it as a `schema`/`client` `Violation` in `GET /validation` — but as an **output, not the gate**: guaranteed-green by construction, it demonstrates the mechanism, and validation-as-value stays provisional until the §12 hard gates pass (design §1). The §4 gate remains the full v1 bar.
 
 ### Tier 0 — foundation (land first, then freeze)
 - **`model/`** — transcribe the P1 contract types verbatim. *Accept:* `tsc` clean; every type in `offbook-contracts.md` §1–6 present and exported. *(One agent, fast. Everything below imports this.)*
@@ -108,7 +108,7 @@ Before the tiers below complete, **M0** is the first dogfoodable milestone — t
 - `config/`, the `aedes`-import lint rule, the Dockerfile (`oven/bun` base), CI wiring (lint + `bun test` + the §5 fixture suite).
 
 ## 4. Acceptance gate for v1 (the scope line, from the handoff)
-**Intermediate gate (M0, §3):** `offbook demo` boots, publishes an off-contract payload, and surfaces the catch in `/validation` — the validation wedge dogfoodable before scenarios/timing/ingestion. The full v1 gate below remains the bar.
+**Intermediate gate (M0, §3):** the two-part M0 gate — (i) an `mqtt.js` client connects to Aedes over ws and receives a retained message (WS-fidelity doable half, §12.1), and (ii) `offbook topics` lists the spec's topics (discovery floor) — with `offbook demo`'s off-contract catch shipping as an output, not the gate. The full v1 gate below remains the bar.
 
 All of the handoff's v1 checklist, each with a passing test. The **non-negotiable** ones:
 - **§5 validation correctness** — registry + validation green against `external-ref`, `qos-retain`, **and `qos-overrides`** fixtures (false-positive/false-negative are tool-killers; `qos-overrides` guards the tier-2 `topicOverrides` string-equality resolution, F14).
