@@ -61,6 +61,35 @@ export function checkIds(entries: Entry[], prefix: string, getId: (e: Entry) => 
   return errs;
 }
 
+export function slugify(heading: string): string {
+  return heading.toLowerCase().replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-");
+}
+
+export function parseCovers(covers: string): { path: string; anchor?: string } {
+  const [path, anchor] = covers.split("#");
+  return anchor ? { path: path.trim(), anchor: anchor.trim() } : { path: path.trim() };
+}
+
+export function resolveAnchor(fileText: string, anchor: string): boolean {
+  if (fileText.includes(`<!-- anchor: ${anchor} -->`)) return true;
+  const headings = fileText.match(/^#{1,6}\s+.+$/gm) ?? [];
+  return headings.some((h) => slugify(h.replace(/^#{1,6}\s+/, "")) === anchor);
+}
+
+export function checkCovers(reqs: Entry[], readFile: (rel: string) => string | null): string[] {
+  const errs: string[] = [];
+  for (const r of reqs) {
+    const uid = r.meta.UID ?? "?";
+    const covers = r.meta.COVERS;
+    if (!covers) { errs.push(`${uid}: missing COVERS`); continue; }
+    const { path, anchor } = parseCovers(covers);
+    const text = readFile(path);
+    if (text == null) { errs.push(`${uid}: COVERS path not found: ${path}`); continue; }
+    if (anchor && !resolveAnchor(text, anchor)) errs.push(`${uid}: COVERS anchor not found: ${path}#${anchor}`);
+  }
+  return errs;
+}
+
 function read(rel: string): string | null {
   const p = join(ROOT, rel);
   return existsSync(p) ? readFileSync(p, "utf8") : null;
@@ -72,6 +101,7 @@ function main(): void {
   const errors = [
     ...checkIds(reqs, "R", (e) => e.meta.UID ?? ""),
     ...checkIds(decs, "D", (e) => e.title.match(/^(D-\d+)/)?.[1] ?? ""),
+    ...checkCovers(reqs, read),
   ];
   if (errors.length) {
     console.error(`check-docs: ${errors.length} problem(s):`);

@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { parseEntries, checkIds } from "./check-docs.ts";
+import { parseEntries, checkIds, parseCovers, resolveAnchor, checkCovers } from "./check-docs.ts";
 
 test("parseEntries reads UID meta and the statement body", () => {
   const t = `#### Seeded determinism\n**UID**: R-001\n**STATUS**: specified\nThe scheduler is deterministic.`;
@@ -58,4 +58,31 @@ test("checkIds does not emit a false gap when a duplicate is present", () => {
 test("checkIds flags a malformed id", () => {
   const entries = [{ title: "", meta: { UID: "R-1" }, body: "", line: 1 }];
   expect(checkIds(entries, "R", (e) => e.meta.UID).some((m) => m.includes("bad R id"))).toBe(true);
+});
+
+test("parseCovers splits path and anchor", () => {
+  expect(parseCovers("docs/specs/build-plan.md#tier-0")).toEqual({ path: "docs/specs/build-plan.md", anchor: "tier-0" });
+});
+
+test("resolveAnchor finds an explicit marker", () => {
+  expect(resolveAnchor("intro\n<!-- anchor: tier-0 -->\nbody", "tier-0")).toBe(true);
+});
+
+test("resolveAnchor finds a heading slug", () => {
+  expect(resolveAnchor("## Tier 0 foundation\n", "tier-0-foundation")).toBe(true);
+});
+
+test("checkCovers errors when the file is missing", () => {
+  const reqs = [{ title: "", meta: { UID: "R-001", COVERS: "docs/specs/nope.md#x" }, body: "", line: 1 }];
+  expect(checkCovers(reqs, () => null).some((m) => m.includes("path not found"))).toBe(true);
+});
+
+test("checkCovers errors when the anchor is missing", () => {
+  const reqs = [{ title: "", meta: { UID: "R-001", COVERS: "docs/specs/build-plan.md#ghost" }, body: "", line: 1 }];
+  expect(checkCovers(reqs, () => "no marker, no matching heading").some((m) => m.includes("anchor not found"))).toBe(true);
+});
+
+test("checkCovers errors when COVERS is absent", () => {
+  const reqs = [{ title: "", meta: { UID: "R-001" }, body: "", line: 1 }];
+  expect(checkCovers(reqs, () => "").some((m) => m.includes("missing COVERS"))).toBe(true);
 });
