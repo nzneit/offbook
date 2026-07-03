@@ -2,9 +2,9 @@
 
 *Knows every line. Needs no cast.*
 
-**Status:** Approved design, pre-migration. This doc is the spec for reorganizing Offbook's requirement/design corpus. It supersedes the temporary INDEX.md + per-doc frontmatter scaffold. Once the migration it describes is executed, this file moves into `docs/specs/` alongside the other specs and its "System" sections become the standing description of how the corpus is organized; its "Migration" section is then a resolved record.
+**Status:** Standing description of the documentation system. The migration in §6 has been executed (this file now lives in `docs/specs/`); §6 is retained as the historical record of the steps.
 
-**Companion to:** `AGENTS.md` (the entry point this design keeps canonical) and the four specs it reorganizes (`offbook-contracts.md`, `offbook-design.md`, `offbook-build-plan.md`, `offbook-l2-scenarios.md`).
+**Companion to:** `AGENTS.md` (the entry point this design keeps canonical) and the four specs it reorganizes (`contracts.md`, `design.md`, `build-plan.md`, `l2-scenarios.md`).
 
 ---
 
@@ -99,7 +99,7 @@ The engine's scheduler produces identical event ordering for a given seed.
 
 - **`**UID**`** is the load-bearing token: StrictDoc parses it, and the checker enforces its uniqueness and never-reuse.
 - The registry is an **index into the specs, not a competing source of truth.** The conflict rule survives: the one-line body is a summary, and `COVERS` anchors to the spec section that holds the normative text (`contracts.md` remains canonical on any interface detail).
-- **Lifecycle:** `specified` and `deferred` (v2 punt) are asserted; **`built` and `tested` are derived by the checker**, not written by hand. A requirement becomes `built` only when an implementation trace exists and `tested` only when a covering test exists. Pre-build, everything sits at `specified` and the registry already earns its keep as the single enumerable home; as the build lands, "are we done?" becomes a checker query.
+- **Lifecycle:** `specified` and `deferred` (v2 punt) are asserted; **`built` and `tested` are validated by `scripts/check-docs.ts`** — a hand-set `built`/`tested` STATUS must be backed by an `IMPL`/`TEST` trace or the checker errors. A requirement becomes `built` only when an implementation trace exists and `tested` only when a covering test exists. Pre-build, everything sits at `specified` and the registry already earns its keep as the single enumerable home; as the build lands, "are we done?" becomes a checker query.
 - **Never-reuse enforcement:** entries are never deleted. A withdrawn requirement gets `STATUS: retired` and stays in place, so its ID is visibly consumed. The checker reads the max allocated ID plus the retired set to allocate the next number.
 
 ### 4.4 DECISIONS.md, the ledger (capability 2, pain b)
@@ -139,18 +139,18 @@ Template shape:
 
 ### 4.7 check-docs.ts, the checker (pain e)
 
-`scripts/docs-index.ts` stops being teardown scaffolding and becomes `scripts/check-docs.ts`, a real validator run in CI and as an optional pre-commit hook. Its `--check` mode (already present) becomes the gate. It validates:
+`scripts/docs-index.ts` stops being teardown scaffolding and becomes `scripts/check-docs.ts`, a real validator run in CI and as an optional pre-commit hook. It is run as `bun scripts/check-docs.ts` (no flag) and exits nonzero on any problem; that invocation is the gate. It validates:
 
 - **Unique R- and D- IDs**, with a retired-IDs guard that enforces never-reuse.
 - **Every `COVERS` anchor resolves** to a live spec section (this is what makes the fragile `§N` web safe to evolve).
-- **Every derived lifecycle state matches reality:** no requirement claims `built`/`tested` without the corresponding implementation/test trace.
+- **Every `built`/`tested` STATUS matches reality:** no requirement claims `built`/`tested` without the corresponding implementation/test trace.
 - **Every open intake file is well-formed** against the template.
 
 Optionally it can emit a one-line dashboard (counts by lifecycle state) as a generated summary, but that is a nicety, not core.
 
 ### 4.8 Anchor mechanism (and why it makes pain d tractable)
 
-`COVERS` uses a `path#heading` reference, checker-verified to resolve. Where a spec section needs a guaranteed-stable target (especially inside frozen `contracts.md`), an explicit additive back-anchor (`<!-- R-014 -->`) may be added; this changes no normative content and does not touch the interface freeze. Bidirectional anchoring (the spec carries a matching `<!-- R-### -->` marker) is the hardening option that also makes a future monolith split safe: split the file, update anchors, and let the checker prove nothing broke.
+`COVERS` uses a `path#heading` reference, checker-verified to resolve. Where a spec section needs a guaranteed-stable target (especially inside frozen `contracts.md`), an explicit additive back-anchor (`<!-- anchor: R-014 -->`) may be added; this changes no normative content and does not touch the interface freeze. Bidirectional anchoring (the spec carries a matching `<!-- anchor: R-### -->` marker) is the hardening option that also makes a future monolith split safe: split the file, update anchors, and let the checker prove nothing broke.
 
 ## 5. Explicitly out of scope now
 
@@ -158,6 +158,8 @@ Optionally it can emit a one-line dashboard (counts by lifecycle state) as a gen
 - **Back-filling the roughly 120 historical decisions.** Archived intact instead. The ledger is authoritative from its creation date forward.
 
 ## 6. Migration plan (sequenced)
+
+*This migration has been executed; the steps below are retained as the historical record (they name pre-move filenames deliberately).*
 
 The target state is mechanical to reach except for one content task (step 5, seeding). The following order keeps the repo valid at each step.
 
