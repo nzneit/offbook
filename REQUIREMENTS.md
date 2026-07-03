@@ -20,7 +20,7 @@ Every type in contracts.md §1–6 is transcribed, `tsc`-clean, and exported fro
 **UID**: R-002
 **STATUS**: specified
 **COVERS**: docs/specs/build-plan.md#tier-0
-`config/` loads a `services.yaml` (including a `topicOverrides` entry) and `environments.yaml` into typed objects with no `ingestion/` import.
+`config/` loads a `services.yaml` (including a `topicOverrides` entry) and `environments.yaml` into typed objects, and `registry/`'s qos test runs against it with no `ingestion/` import (the F18 no-sibling-back-edge).
 
 #### broker/ ws connect, retained receipt, QoS-1 round-trip
 **UID**: R-003
@@ -46,7 +46,7 @@ A browser-style `mqtt.js` client connects to the Aedes ws listener over MQTT 3.1
 **COVERS**: docs/specs/build-plan.md#spikes
 The real browser application's `mqtt.js` connects+subscribes+receives-retained against a bare Aedes ws listener, finalizing the broker's listener config (subprotocol/path/auth).
 
-#### capture the browser application's connect()
+#### Capture the browser application's connect()
 **UID**: R-007
 **STATUS**: specified
 **COVERS**: docs/specs/build-plan.md#spikes
@@ -57,6 +57,6 @@ Seeding is staged (doc-system.md §7). Batch 1 (R-001..R-007): Tier 0/1 + spikes
 Next batches, allocated in order from R-008:
   - Tier 2 (engine/, validation/), Tier 3 (scenarios/, control-plane/), Tier 4 (cli/) acceptance criteria — build-plan.md §3.
   - The v1 acceptance gate items — build-plan.md §4 (add an anchor per section covered).
-  - Contract obligations and hard constraints — contracts.md, AGENTS.md (add explicit <!-- anchor: NAME --> markers; contract markers are additive and do not alter frozen interface content).
+  - Contract obligations and hard constraints — contracts.md, AGENTS.md (add explicit `anchor: NAME` markers; contract markers are additive and do not alter frozen interface content).
 Allocate the next id = max existing + 1; never reuse. Run `bun scripts/check-docs.ts` after each batch.
 -->
