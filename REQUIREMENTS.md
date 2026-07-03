@@ -10,4 +10,53 @@ The enumerable list of v1 requirements. Each entry is an atomic statement, a sta
 
 ## Registry
 
-<!-- entries seeded in the build phase; see docs/specs/doc-system.md §7 -->
+#### model/ contract types present and exported
+**UID**: R-001
+**STATUS**: specified
+**COVERS**: docs/specs/build-plan.md#tier-0
+Every type in contracts.md §1–6 is transcribed, `tsc`-clean, and exported from `src/model/`.
+
+#### config/ loads services + environments to typed objects
+**UID**: R-002
+**STATUS**: specified
+**COVERS**: docs/specs/build-plan.md#tier-0
+`config/` loads a `services.yaml` (including a `topicOverrides` entry) and `environments.yaml` into typed objects with no `ingestion/` import.
+
+#### broker/ ws connect, retained receipt, QoS-1 round-trip
+**UID**: R-003
+**STATUS**: specified
+**COVERS**: docs/specs/build-plan.md#tier-1
+A browser-style `mqtt.js` client connects to the Aedes ws listener over MQTT 3.1.1, subscribes, receives a retained message, and a QoS-1 publish round-trips.
+
+#### registry/ parses fixtures, matches topics, resolves qos/retain
+**UID**: R-004
+**STATUS**: specified
+**COVERS**: docs/specs/build-plan.md#tier-1
+`registry/` parses every `fixtures/asyncapi/*` (including external-ref, qos-retain, qos-overrides), resolves channel direction and the qos/retain precedence chain, and its `match`/`matchesFilter` behave per the §5 correctness bar.
+
+#### ingestion/ branch-tip fetch and lockfile writer
+**UID**: R-005
+**STATUS**: specified
+**COVERS**: docs/specs/build-plan.md#tier-1
+`ingestion/` resolves a fixture spec at a branch tip, records the post-fetch SHA + content-hash + declared-version to `specs.lock`, and imports no AsyncAPI parser.
+
+#### WS-fidelity spike is the authoritative connect gate
+**UID**: R-006
+**STATUS**: specified
+**COVERS**: docs/specs/build-plan.md#spikes
+The real browser application's `mqtt.js` connects+subscribes+receives-retained against a bare Aedes ws listener, finalizing the broker's listener config (subprotocol/path/auth).
+
+#### capture the browser application's connect()
+**UID**: R-007
+**STATUS**: specified
+**COVERS**: docs/specs/build-plan.md#spikes
+The client's `connect()` auth fields, ws URL/path, subprotocol, protocol level, and any QoS-2 use are captured into a config fixture + broker ws port default.
+
+<!--
+Seeding is staged (doc-system.md §7). Batch 1 (R-001..R-007): Tier 0/1 + spikes.
+Next batches, allocated in order from R-008:
+  - Tier 2 (engine/, validation/), Tier 3 (scenarios/, control-plane/), Tier 4 (cli/) acceptance criteria — build-plan.md §3.
+  - The v1 acceptance gate items — build-plan.md §4 (add an anchor per section covered).
+  - Contract obligations and hard constraints — contracts.md, AGENTS.md (add explicit <!-- anchor: NAME --> markers; contract markers are additive and do not alter frozen interface content).
+Allocate the next id = max existing + 1; never reuse. Run `bun scripts/check-docs.ts` after each batch.
+-->
