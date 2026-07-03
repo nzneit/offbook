@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { parseEntries, checkIds, parseCovers, resolveAnchor, checkCovers } from "./check-docs.ts";
+import { parseEntries, checkIds, parseCovers, resolveAnchor, checkCovers, slugify } from "./check-docs.ts";
 
 test("parseEntries reads UID meta and the statement body", () => {
   const t = `#### Seeded determinism\n**UID**: R-001\n**STATUS**: specified\nThe scheduler is deterministic.`;
@@ -85,4 +85,21 @@ test("checkCovers errors when the anchor is missing", () => {
 test("checkCovers errors when COVERS is absent", () => {
   const reqs = [{ title: "", meta: { UID: "R-001" }, body: "", line: 1 }];
   expect(checkCovers(reqs, () => "").some((m) => m.includes("missing COVERS"))).toBe(true);
+});
+
+test("checkCovers passes when path and anchor resolve", () => {
+  const reqs = [{ title: "", meta: { UID: "R-001", COVERS: "docs/specs/build-plan.md#tier-0" }, body: "", line: 1 }];
+  expect(checkCovers(reqs, () => "<!-- anchor: tier-0 -->")).toEqual([]);
+});
+
+test("resolveAnchor returns false for non-matching input", () => {
+  expect(resolveAnchor("no marker, no heading here", "ghost")).toBe(false);
+});
+
+test("slugify lowercases and hyphenates", () => {
+  expect(slugify("Tier 0 Foundation")).toBe("tier-0-foundation");
+});
+
+test("parseCovers with no anchor returns path only", () => {
+  expect(parseCovers("docs/specs/design.md")).toEqual({ path: "docs/specs/design.md" });
 });
