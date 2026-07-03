@@ -1,10 +1,3 @@
----
-type: handoff
-status: resolved
-summary: Synchronous-drain / quiescence signal for CI moment-4 (EC1); resolved + folded in.
-folds-into: [offbook-contracts, offbook-design, offbook-build-plan]
----
-
 # Offbook — CI Synchronous Drain / Quiescence (Handoff)
 
 *Knows every line. Needs no cast.*

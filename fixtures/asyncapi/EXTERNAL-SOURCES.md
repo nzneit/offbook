@@ -1,10 +1,3 @@
----
-type: fixtures
-status: living
-summary: Verified real-world AsyncAPI specs to pressure-test the parser/Ajv/faker pipeline, + the must-hand-author gaps.
-related: [fixtures/asyncapi/README.md, offbook-design.md, offbook-build-plan.md]
----
-
 # External adversarial AsyncAPI sources
 
 Companion to [`README.md`](./README.md) (the curated fixtures + the **§5 fixture quality bar**). The `README.md` fixtures are **hand-authored** and minimal — one deliberate edge each. **This memo lists real-world, public specs** to use as an *external pressure-test corpus*: run the `registry/` → Ajv → `json-schema-faker` pipeline against messy specs authored by other people, not just our clean curated set. It also records **what genuinely cannot be sourced** and therefore must stay hand-authored.

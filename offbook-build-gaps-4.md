@@ -1,9 +1,3 @@
----
-type: decision-log
-status: open
-summary: Round-4 PM-lens gap review (P1–P9). P2–P9 folded; only P1 (spikes) remains a build-gate.
----
-
 # Offbook — v1 Pre-Build PM-Lens Gap Review, Round 4 (Handoff)
 
 *Knows every line. Needs no cast.*

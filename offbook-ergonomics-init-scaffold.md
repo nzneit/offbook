@@ -1,10 +1,3 @@
----
-type: handoff
-status: resolved
-summary: offbook init onboarding scaffold + honest first-run orientation (EI1–EI2); resolved + folded in.
-folds-into: [offbook-design, offbook-contracts, offbook-build-plan]
----
-
 # Offbook — Onboarding Scaffold (`offbook init`) (Handoff)
 
 *Knows every line. Needs no cast.*

@@ -1,9 +1,3 @@
----
-type: decision-log
-status: resolved
-summary: Round-1 v1 pre-build gap resolution (G1–G25); resolved.
----
-
 # Offbook — v1 Pre-Build Gap Resolution (Handoff)
 
 *Knows every line. Needs no cast.*

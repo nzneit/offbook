@@ -1,9 +1,3 @@
----
-type: decision-log
-status: resolved
-summary: Round-3 standing-items audit (S1–S31); C-class doc-gaps folded, A-class build-gates, B-class deferrals; resolved.
----
-
 # Offbook — v1 Pre-Build Standing-Items Audit, Round 3 (Handoff)
 
 *Knows every line. Needs no cast.*

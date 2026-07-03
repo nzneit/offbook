@@ -1,10 +1,3 @@
----
-type: handoff
-status: resolved
-summary: L3 handler hot-reload parity decision (EH1); resolved + folded in.
-folds-into: [offbook-l2-scenarios, offbook-design, offbook-contracts, offbook-build-plan]
----
-
 # Offbook — L3 Handler Hot-Reload Parity (Handoff)
 
 *Knows every line. Needs no cast.*

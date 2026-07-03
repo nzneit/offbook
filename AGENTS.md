@@ -1,9 +1,3 @@
----
-type: meta
-status: living
-summary: Guidance for agents/humans — doc-map, hard constraints, vocabulary, review angles.
----
-
 # AGENTS.md — Offbook
 
 Guidance for any agent (or human) working in this repo. `CLAUDE.md` is a symlink to this file.

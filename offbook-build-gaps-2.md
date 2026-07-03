@@ -1,10 +1,3 @@
----
-type: decision-log
-status: resolved
-summary: Round-2 v1 pre-build gap resolution (F1–F21, R1–R5); resolved.
-supersedes: offbook-build-gaps
----
-
 # Offbook — v1 Pre-Build Gap Resolution, Round 2 (Handoff)
 
 *Knows every line. Needs no cast.*

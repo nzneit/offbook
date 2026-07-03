@@ -1,10 +1,3 @@
----
-type: handoff
-status: resolved
-summary: 7 quick ergonomics fixes (EQ1–EQ7) — small spec/CLI edits; resolved + folded in.
-folds-into: [offbook-contracts, offbook-design, offbook-l2-scenarios, offbook-build-plan]
----
-
 # Offbook — Ergonomics Quick Wins (Handoff)
 
 *Knows every line. Needs no cast.*

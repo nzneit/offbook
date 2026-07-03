@@ -1,10 +1,3 @@
----
-type: handoff
-status: resolved
-summary: Running-server observability — log destination, logs, watch, status (EO1–EO4); resolved + folded in.
-folds-into: [offbook-design, offbook-contracts, offbook-build-plan]
----
-
 # Offbook — Running-Server Observability (Handoff)
 
 *Knows every line. Needs no cast.*

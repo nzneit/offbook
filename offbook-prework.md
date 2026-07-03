@@ -1,9 +1,3 @@
----
-type: tracker
-status: resolved
-summary: Pre-work tracker (P0–P4); complete.
----
-
 # Offbook — Pre-Work Items
 
 *Knows every line. Needs no cast.*

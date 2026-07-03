@@ -1,10 +1,3 @@
----
-type: handoff
-status: resolved
-summary: Human-readable offbook topics / validation output (ER1–ER2); resolved + folded in.
-folds-into: [offbook-design, offbook-build-plan]
----
-
 # Offbook — Human-Readable CLI Rendering (Handoff)
 
 *Knows every line. Needs no cast.*

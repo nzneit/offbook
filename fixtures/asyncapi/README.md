@@ -1,9 +1,3 @@
----
-type: fixtures
-status: living
-summary: AsyncAPI test fixtures + the §5 fixture quality bar.
----
-
 # AsyncAPI test fixtures
 
 Representative specs for developing and testing `registry/`, `validation/`, and the L1 faker. Each exercises a deliberate edge — together they are the **§5 validation-correctness bar** the build must pass before CI trust.
