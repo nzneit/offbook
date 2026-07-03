@@ -103,3 +103,29 @@ test("slugify lowercases and hyphenates", () => {
 test("parseCovers with no anchor returns path only", () => {
   expect(parseCovers("docs/specs/design.md")).toEqual({ path: "docs/specs/design.md" });
 });
+
+import { checkLifecycle, checkIntake } from "./check-docs.ts";
+
+test("checkLifecycle rejects an unknown status", () => {
+  expect(checkLifecycle([{ title: "", meta: { UID: "R-001", STATUS: "done" }, body: "", line: 1 }]).some((m) => m.includes("invalid STATUS"))).toBe(true);
+});
+
+test("checkLifecycle requires IMPL for built", () => {
+  expect(checkLifecycle([{ title: "", meta: { UID: "R-001", STATUS: "built" }, body: "", line: 1 }]).some((m) => m.includes("IMPL"))).toBe(true);
+});
+
+test("checkLifecycle passes specified with no trace", () => {
+  expect(checkLifecycle([{ title: "", meta: { UID: "R-001", STATUS: "specified" }, body: "", line: 1 }])).toEqual([]);
+});
+
+test("checkIntake flags a resolved file left in intake", () => {
+  expect(checkIntake([{ name: "2026-07-10-x.md", content: "**Status**: resolved" }]).some((m) => m.includes("move to"))).toBe(true);
+});
+
+test("checkIntake flags a missing status line", () => {
+  expect(checkIntake([{ name: "2026-07-10-x.md", content: "no status here" }]).some((m) => m.includes("Status"))).toBe(true);
+});
+
+test("checkIntake ignores the template", () => {
+  expect(checkIntake([{ name: "_TEMPLATE.md", content: "no status" }])).toEqual([]);
+});

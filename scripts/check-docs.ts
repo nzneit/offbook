@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // check-docs.ts — validate the Offbook documentation-system invariants.
 // Zero dependencies: node:fs + hand-parsing, matching the retired docs-index.ts.
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
@@ -95,20 +95,56 @@ function read(rel: string): string | null {
   return existsSync(p) ? readFileSync(p, "utf8") : null;
 }
 
+const STATUSES = ["specified", "built", "tested", "deferred", "retired"];
+
+export function checkLifecycle(reqs: Entry[]): string[] {
+  const errs: string[] = [];
+  for (const r of reqs) {
+    const uid = r.meta.UID ?? "?";
+    const s = r.meta.STATUS;
+    if (!s) { errs.push(`${uid}: missing STATUS`); continue; }
+    if (!STATUSES.includes(s)) { errs.push(`${uid}: invalid STATUS "${s}" (allowed: ${STATUSES.join(", ")})`); continue; }
+    if (s === "built" && !r.meta.IMPL) errs.push(`${uid}: STATUS built requires an IMPL trace`);
+    if (s === "tested" && !r.meta.TEST) errs.push(`${uid}: STATUS tested requires a TEST trace`);
+  }
+  return errs;
+}
+
+export function checkIntake(files: { name: string; content: string }[]): string[] {
+  const errs: string[] = [];
+  for (const f of files) {
+    if (f.name === "_TEMPLATE.md") continue;
+    const m = f.content.match(/^\*\*Status\*\*:\s*(open|resolved)\s*$/m);
+    if (!m) { errs.push(`intake/${f.name}: missing or invalid **Status**: (open|resolved)`); continue; }
+    if (m[1] === "resolved") errs.push(`intake/${f.name}: resolved — move to docs/archive/intake/`);
+  }
+  return errs;
+}
+
 function main(): void {
   const reqs = parseEntries(read("REQUIREMENTS.md") ?? "", 4).filter((e) => e.meta.UID);
   const decs = parseEntries(read("DECISIONS.md") ?? "", 3).filter((e) => /^D-\d+/.test(e.title));
+
+  const intakeDir = join(ROOT, "docs/intake");
+  const intakeFiles = existsSync(intakeDir)
+    ? readdirSync(intakeDir).filter((n) => n.endsWith(".md")).map((n) => ({ name: n, content: readFileSync(join(intakeDir, n), "utf8") }))
+    : [];
+
   const errors = [
     ...checkIds(reqs, "R", (e) => e.meta.UID ?? ""),
     ...checkIds(decs, "D", (e) => e.title.match(/^(D-\d+)/)?.[1] ?? ""),
     ...checkCovers(reqs, read),
+    ...checkLifecycle(reqs),
+    ...checkIntake(intakeFiles),
   ];
+
   if (errors.length) {
     console.error(`check-docs: ${errors.length} problem(s):`);
     for (const e of errors) console.error(`  ✗ ${e}`);
     process.exit(1);
   }
-  console.log(`check-docs: ok — ${reqs.length} requirements, ${decs.length} decisions.`);
+  const intakeItems = intakeFiles.filter((f) => f.name !== "_TEMPLATE.md").length;
+  console.log(`check-docs: ok — ${reqs.length} requirements, ${decs.length} decisions, ${intakeItems} intake file(s).`);
 }
 
 if (import.meta.main) main();
