@@ -37,3 +37,25 @@ test("checkIds passes a clean contiguous set", () => {
   ];
   expect(checkIds(entries, "R", (e) => e.meta.UID)).toEqual([]);
 });
+
+test("parseEntries does not leak a foreign-level heading's meta into the previous entry", () => {
+  const t = `#### First\n**UID**: R-001\nstatement one.\n### A grouping header\n**UID**: R-999\n#### Second\n**UID**: R-002\nstatement two.`;
+  const entries = parseEntries(t, 4);
+  expect(entries.map((e) => e.meta.UID)).toEqual(["R-001", "R-002"]);
+});
+
+test("checkIds does not emit a false gap when a duplicate is present", () => {
+  const entries = [
+    { title: "", meta: { UID: "R-001" }, body: "", line: 1 },
+    { title: "", meta: { UID: "R-001" }, body: "", line: 3 },
+    { title: "", meta: { UID: "R-002" }, body: "", line: 5 },
+  ];
+  const errs = checkIds(entries, "R", (e) => e.meta.UID);
+  expect(errs.some((m) => m.includes("duplicate R-001"))).toBe(true);
+  expect(errs.some((m) => m.includes("contiguous"))).toBe(false);
+});
+
+test("checkIds flags a malformed id", () => {
+  const entries = [{ title: "", meta: { UID: "R-1" }, body: "", line: 1 }];
+  expect(checkIds(entries, "R", (e) => e.meta.UID).some((m) => m.includes("bad R id"))).toBe(true);
+});

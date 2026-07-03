@@ -12,6 +12,7 @@ export type Entry = { title: string; meta: Record<string, string>; body: string;
 // the pattern means a level-3 regex never matches a #### heading and vice-versa.
 export function parseEntries(text: string, level: 3 | 4): Entry[] {
   const head = new RegExp(`^#{${level}}\\s+(.+)$`);
+  const anyHead = /^#{1,6}\s+/;
   const out: Entry[] = [];
   let cur: Entry | null = null;
   text.split(/\r?\n/).forEach((line, i) => {
@@ -19,6 +20,13 @@ export function parseEntries(text: string, level: 3 | 4): Entry[] {
     if (h) {
       if (cur) out.push(cur);
       cur = { title: h[1].trim(), meta: {}, body: "", line: i + 1 };
+      return;
+    }
+    if (anyHead.test(line)) {
+      // a heading at any other level ends the current entry, so its meta/body
+      // cannot leak into the previous same-level entry
+      if (cur) out.push(cur);
+      cur = null;
       return;
     }
     if (!cur) return;
@@ -42,11 +50,11 @@ export function checkIds(entries: Entry[], prefix: string, getId: (e: Entry) => 
     if (!re.test(id)) { errs.push(`bad ${prefix} id: "${id}" (line ${e.line})`); continue; }
     if (seen.has(id)) errs.push(`duplicate ${id}`);
     seen.add(id);
-    nums.push(Number(id.slice(2)));
+    nums.push(Number(id.slice(prefix.length + 1)));
   }
-  nums.sort((a, b) => a - b);
-  for (let i = 0; i < nums.length; i++)
-    if (nums[i] !== i + 1) {
+  const uniq = [...new Set(nums)].sort((a, b) => a - b);
+  for (let i = 0; i < uniq.length; i++)
+    if (uniq[i] !== i + 1) {
       errs.push(`${prefix} ids not contiguous from 001 (missing ${prefix}-${String(i + 1).padStart(3, "0")}) — retire in place, never delete`);
       break;
     }
