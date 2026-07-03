@@ -5,7 +5,7 @@ info:
   description: >-
     Declares MQTT qos/retain via operation bindings. Tests the binding-precedence
     resolution (spec MQTT binding is authoritative → offbook override → per-service
-    default → global qos 1; P1.D2, offbook-contracts.md §2). The registry must
+    default → global qos 1; P1.D2, docs/specs/contracts.md §2). The registry must
     resolve presence emissions to qos 2 + retain true from the binding below — qos 2 and
     retain true BOTH differ from the global defaults (qos 1, retain false), so binding
     precedence is actually observable here (qos 1 would be vacuous — equal to the default).

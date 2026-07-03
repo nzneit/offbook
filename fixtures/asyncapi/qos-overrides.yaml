@@ -5,7 +5,7 @@ info:
   description: >-
     Two toClient channels that declare NO MQTT operation binding, so the spec-binding
     tier (tier 1) is silent and resolution falls to the offbook config tiers (P1.D2,
-    offbook-contracts.md §2/§6, gap G13). With services.yaml setting qosDefault: 2 +
+    docs/specs/contracts.md §2/§6, gap G13). With services.yaml setting qosDefault: 2 +
     retainDefault: true for this service, `alerts` must resolve to the per-service
     default (qos 2, retain true) while `telemetry/{deviceId}` is pinned to qos 0 +
     retain false by a topicOverrides entry — qos 0 differs from BOTH the global default

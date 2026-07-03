@@ -9,10 +9,10 @@ Representative specs for developing and testing `registry/`, `validation/`, and 
 | `external-ref.yaml` + `shared/common.yaml` | 3.0.0 | External `$ref` across files + `$id` base URI + a `$ref` **sibling keyword** (`minLength`) under the declared 2020-12 dialect — the parser bundling/dereference correctness bar (§5, §12.4) |
 | `v2-pubsub.yaml` | 2.6.0 | `publish`/`subscribe` — the perspective inversion on the **older** major |
 | `qos-retain.yaml` | 3.0.0 | MQTT operation bindings declaring qos/retain — the **binding** tier (tier 1) of the precedence chain (P1.D2) |
-| `qos-overrides.yaml` | 3.0.0 | toClient channels with **no** binding — the **config** tiers: a `topicOverrides` per-topic override (tier 2, here `qos 0` — distinct from both global `qos 1` and the per-service default `qos 2`) beats a `qosDefault`/`retainDefault` per-service default (tier 3), via a paired `services.yaml` (`offbook-contracts.md` §2/§6, gap G13) |
+| `qos-overrides.yaml` | 3.0.0 | toClient channels with **no** binding — the **config** tiers: a `topicOverrides` per-topic override (tier 2, here `qos 0` — distinct from both global `qos 1` and the per-service default `qos 2`) beats a `qosDefault`/`retainDefault` per-service default (tier 3), via a paired `services.yaml` (`docs/specs/contracts.md` §2/§6, gap G13) |
 
 ## Direction mapping the registry must produce
-Normalize once onto the `Channel` record (§5, `offbook-contracts.md` §1). Note the two majors feel opposite:
+Normalize once onto the `Channel` record (§5, `docs/specs/contracts.md` §1). Note the two majors feel opposite:
 
 - **v3** `send` → `toClient` · `receive` → `fromClient`
 - **v2** `subscribe` → `toClient` · `publish` → `fromClient`
