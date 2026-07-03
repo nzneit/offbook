@@ -129,3 +129,15 @@ test("checkIntake flags a missing status line", () => {
 test("checkIntake ignores the template", () => {
   expect(checkIntake([{ name: "_TEMPLATE.md", content: "no status" }])).toEqual([]);
 });
+
+test("checkLifecycle flags a missing STATUS", () => {
+  expect(checkLifecycle([{ title: "", meta: { UID: "R-001" }, body: "", line: 1 }]).some((m) => m.includes("missing STATUS"))).toBe(true);
+});
+
+test("checkLifecycle requires TEST for tested", () => {
+  expect(checkLifecycle([{ title: "", meta: { UID: "R-001", STATUS: "tested" }, body: "", line: 1 }]).some((m) => m.includes("TEST"))).toBe(true);
+});
+
+test("checkIntake passes an open item", () => {
+  expect(checkIntake([{ name: "2026-07-10-topic.md", content: "# topic\n**Status**: open\n" }])).toEqual([]);
+});
