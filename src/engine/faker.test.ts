@@ -40,6 +40,18 @@ test("faker is deterministic for a given seed + channel", async () => {
 	expect(JSON.stringify(p1)).toBe(JSON.stringify(p2));
 });
 
+test("faker output varies with the seed (config.seed is causal, not ignored)", async () => {
+	// Same-seed equality above is satisfied by a faker that ignores the seed and
+	// returns a constant. This pins the seed as the cause: across a batch of
+	// distinct seeds the high-entropy fields (deviceId, target) must diverge.
+	const ch = channel(stateSchema);
+	const outs: string[] = [];
+	for (const seed of [1, 2, 3, 7, 42, 999]) {
+		outs.push(JSON.stringify(await createFaker(loadConfig({ seed }))(ch)));
+	}
+	expect(new Set(outs).size).toBeGreaterThan(1);
+});
+
 test("l1Floor returns a schema-valid payload for a real channel", async () => {
 	const f = createFaker(loadConfig());
 	const ch = channel(stateSchema);

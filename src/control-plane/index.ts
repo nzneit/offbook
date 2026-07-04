@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { BrokerModule } from "../broker/index.ts";
 import { createBroker } from "../broker/index.ts";
+import { l1Floor } from "../engine/faker.ts";
 import type {
 	Config,
 	Faker,
@@ -21,6 +22,10 @@ export async function buildTopicInfo(
 ): Promise<TopicInfo[]> {
 	const infos: TopicInfo[] = [];
 	for (const c of registry.channels()) {
+		// F5: run the discovery example through the L1 floor. A schema-invalid
+		// draw or a rejecting faker degrades to an omitted example for that one
+		// channel rather than throwing and 500-ing the whole /topics response.
+		const floor = await l1Floor(c, faker);
 		infos.push({
 			topic: c.topic,
 			direction: c.direction,
@@ -28,7 +33,7 @@ export async function buildTopicInfo(
 			title: c.title,
 			description: c.description,
 			schema: c.schema,
-			example: await faker(c),
+			example: "payload" in floor ? floor.payload : undefined,
 			qos: c.qos,
 			retain: c.retain,
 		});
@@ -161,7 +166,25 @@ export function createServer(
 					),
 					400,
 				);
-			payload = await faker(m.channel);
+			// F5: generate through the L1 floor. If the draw fails its Ajv recheck
+			// (or the faker rejects), drop-and-surface — record the L1 mock
+			// violation and do NOT emit the invalid payload. `injected: false`
+			// truthfully reports that nothing reached the broker.
+			const floor = await l1Floor(m.channel, faker);
+			if ("violation" in floor) {
+				log.record(floor.violation);
+				return c.json(
+					{
+						topic: body.topic,
+						direction: m.channel.direction,
+						matched: true,
+						injected: false,
+						sinceSeq,
+					},
+					202,
+				);
+			}
+			payload = floor.payload;
 		} else {
 			payload = body.payload;
 		}

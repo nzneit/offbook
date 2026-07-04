@@ -1,8 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
+import Ajv2020 from "ajv/dist/2020";
 import { loadConfig } from "../config/index.ts";
 import { createFaker } from "../engine/faker.ts";
+import type { Channel, SpecRegistry } from "../model/index.ts";
 import { buildRegistry } from "../registry/index.ts";
-import { createServer } from "./index.ts";
+import { buildTopicInfo, createServer } from "./index.ts";
 
 const servers: Array<{ stop(): Promise<void> }> = [];
 afterEach(async () => {
@@ -27,6 +29,107 @@ async function boot(n: number) {
 		req: (path: string, init?: RequestInit) => s.app.request(path, init),
 	};
 }
+
+// --- hand-built registry fixtures (the demo spec is all-valid, so the L1-floor
+// failure path can only be exercised against a schema the faker can't satisfy) --
+const goodSchema = {
+	type: "object",
+	required: ["deviceId", "status", "target", "units"],
+	additionalProperties: false,
+	properties: {
+		deviceId: { type: "string" },
+		status: {
+			type: "string",
+			enum: ["accepted", "heating", "cooling", "idle", "offline"],
+		},
+		target: { type: "number" },
+		units: { type: "string", enum: ["C", "F"] },
+	},
+};
+// faker cannot satisfy const:"A" AND enum:["B"] at once → the Ajv recheck fails
+const impossibleSchema = {
+	type: "object",
+	required: ["x"],
+	additionalProperties: false,
+	properties: { x: { type: "string", const: "A", enum: ["B"] } },
+};
+
+function makeChannel(topic: string, schema: object): Channel {
+	const v = new Ajv2020({ allErrors: true, strict: false }).compile(schema);
+	return {
+		topic,
+		direction: "toClient",
+		service: "demo",
+		schema,
+		validate: (p) => (v(p) ? [] : (v.errors ?? [])),
+		qos: 1,
+		retain: false,
+	};
+}
+
+function fakeRegistry(channels: Channel[]): SpecRegistry {
+	return {
+		channels: () => channels,
+		match: (topic) => {
+			const c = channels.find((ch) => ch.topic === topic);
+			return c ? { channel: c, params: {} } : undefined;
+		},
+		matchesFilter: () => false,
+	};
+}
+
+async function bootWith(n: number, registry: SpecRegistry) {
+	const config = loadConfig({
+		brokerWsPort: 18000 + n,
+		brokerTcpPort: 12800 + n,
+		controlPlanePort: 18800 + n,
+	});
+	const s = createServer(config, { registry, faker: createFaker(config) });
+	servers.push(s);
+	await s.start();
+	return {
+		config,
+		req: (path: string, init?: RequestInit) => s.app.request(path, init),
+	};
+}
+
+test("buildTopicInfo omits the example when the L1 floor can't produce a schema-valid draw (F5) and never fails discovery", async () => {
+	const infos = await buildTopicInfo(
+		fakeRegistry([
+			makeChannel("good/topic", goodSchema),
+			makeChannel("bad/topic", impossibleSchema),
+		]),
+		createFaker(loadConfig()),
+	);
+	expect(infos.find((i) => i.topic === "good/topic")?.example).toBeDefined();
+	expect(infos.find((i) => i.topic === "bad/topic")?.example).toBeUndefined();
+});
+
+test("POST /v1/publish {example} drops-and-surfaces an L1 mock violation instead of emitting an invalid payload (F5)", async () => {
+	const { req } = await bootWith(
+		6,
+		fakeRegistry([makeChannel("bad/topic", impossibleSchema)]),
+	);
+	const res = await req("/v1/publish", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ topic: "bad/topic", example: true }),
+	});
+	expect(res.status).toBe(202);
+	const body = await res.json();
+	// F5 drop: nothing reached the broker, and the mock violation is surfaced
+	expect(body.injected).toBe(false);
+	expect(body.matched).toBe(true);
+	const after = await (
+		await req(`/v1/validation?sinceSeq=${body.sinceSeq}`)
+	).json();
+	const v = after.violations.find(
+		(x: { origin: string; kind: string }) =>
+			x.origin === "mock" && x.kind === "schema",
+	);
+	expect(v).toBeDefined();
+	expect(v.emitSource?.layer).toBe("L1");
+});
 
 test("POST /v1/publish of an off-contract fromClient payload is delivered AND surfaces a schema/client violation", async () => {
 	const { req } = await boot(1);
