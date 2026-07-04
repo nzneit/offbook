@@ -54,8 +54,10 @@ The client's `connect()` auth fields, ws URL/path, subprotocol, protocol level, 
 
 #### M0 walking-skeleton prototype: retained receipt + topic discovery
 **UID**: R-008
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#m0
+**IMPL**: src/broker/, src/registry/, src/validation/, src/engine/, src/control-plane/, src/cli/
+**TEST**: test/m0-acceptance.test.ts
 The thinnest dogfoodable slice ships: a browser-style `mqtt.js` client connects to the Aedes ws listener and receives a retained message, and `offbook topics` lists every topic/shape/direction from the bundled demo spec (with `offbook demo` booting and surfacing an off-contract publish as an output, not the gate).
 
 <!--
