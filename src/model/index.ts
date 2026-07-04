@@ -75,7 +75,7 @@ export const DEFAULT_CONFIG: Config = {
 export type Faker = (
 	channel: Channel,
 	instanceParams?: Record<string, string>,
-) => unknown;
+) => Promise<unknown>;
 
 export interface TopicInfo {
 	topic: string;
