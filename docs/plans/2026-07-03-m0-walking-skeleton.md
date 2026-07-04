@@ -930,6 +930,11 @@ git commit -m "validation: bounded violation log with monotonic seq + summary"
 
 ### Task 7: `engine/` — the L1 faker floor
 
+> **AMENDMENT (D-003, 2026-07-04): `Faker` is now ASYNC.** The `Faker` type is `(channel, params?) => Promise<unknown>` and json-schema-faker stays pinned at 0.6.2 (async-only). The sync code shown in this task below is SUPERSEDED; build the async version to this spec:
+> - `createFaker(config): Faker` returns an **async** function. Set static JSF options (`alwaysFakeOptionals`, `failOnInvalidTypes: false`, `failOnInvalidFormat: false`) ONCE at construction, and pass the **per-call seed** to `generate` itself: `await JSONSchemaFaker.generate(channel.schema, { seed })`, where `seed = hashToInt(config.seed + "|" + channel.topic + "|" + canonicalize(instanceParams))`. Do NOT set the seed via a module-global `option("random", ...)` before each `generate`: a per-call seed is concurrency-safe, a global mutation races (D-003 consequence #3). Adapt to 0.6.2's exact `generate` signature; the determinism assertion is the contract.
+> - `l1Floor(channel, faker): Promise<{ payload } | { violation }>` is **async**: `try { payload = await faker(channel) } catch (e) { return a mock/L1 schema Violation }` (catching the rejection closes the unhandled-rejection tail from the D-003 adversarial finding), then recheck with `channel.validate`; on recheck failure return a `mock`/L1 `Violation` (drop-and-surface), else `{ payload }`.
+> - Tests (all `await`ed): (1) determinism (two independent `createFaker(sameSeed)` produce byte-identical `await faker(ch)`); (2) `l1Floor` returns a schema-valid payload for a real channel; (3) `l1Floor` on an impossible schema returns `{ violation }` with `emitSource.layer === "L1"`; (4) `l1Floor(channel, async () => { throw new Error("boom") })` returns `{ violation }` L1 (rejection-catch). Use `Ajv2020` (from `ajv/dist/2020`) for the test channel's validator, matching the registry.
+
 **Files:**
 - Create: `src/engine/faker.ts`
 - Test: `src/engine/faker.test.ts`
@@ -1080,6 +1085,8 @@ git commit -m "engine: seeded L1 faker floor with Ajv-recheck drop-and-surface"
 ---
 
 ### Task 8: `control-plane/` — the three M0 endpoints + composition root
+
+> **AMENDMENT (D-003): `Faker` is async.** `buildTopicInfo` becomes `async` and must `await` each `faker(c)` **sequentially** (a for-of loop, NOT `Promise.all`, per D-003). Route handlers `await` it (Hono handlers are already async). Add a test asserting the `/topics` example is non-empty and carries the schema's required fields (not only `/topics` vs `/publish` byte-equality), so a missed `await` serializing to `{}` fails red (D-003 consequence #2).
 
 **Files:**
 - Create: `src/control-plane/index.ts`
@@ -1291,6 +1298,8 @@ git commit -m "control-plane: /v1/publish + /validation + /topics, composition r
 ---
 
 ### Task 9: `cli/` — `offbook topics` and `offbook demo`
+
+> **AMENDMENT (D-003): `Faker` is async.** `renderTopics` / `runDemo` must `await` `buildTopicInfo` / `l1Floor` (both async now). No other change.
 
 **Files:**
 - Create: `src/cli/index.ts`
