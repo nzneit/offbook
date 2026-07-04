@@ -6,6 +6,7 @@
 		"moduleResolution": "bundler",
 		"types": ["bun-types"],
 		"verbatimModuleSyntax": true,
+		"allowImportingTsExtensions": true,
 		"skipLibCheck": true,
 		"noEmit": true
 	},
