@@ -1,4 +1,9 @@
 #!/usr/bin/env bun
 import { run } from "../src/cli/index.ts";
 
-run(process.argv.slice(2)).then((code) => process.exit(code));
+run(process.argv.slice(2))
+	.then((code) => process.exit(code))
+	.catch((e) => {
+		console.error(e);
+		process.exit(1);
+	});

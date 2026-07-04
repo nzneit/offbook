@@ -4,7 +4,7 @@ import { createFaker } from "../engine/faker.ts";
 import type { TopicInfo, Violation } from "../model/index.ts";
 import { buildRegistry } from "../registry/index.ts";
 
-const DEMO_SPEC = "src/demo/thermostat.yaml";
+const DEMO_SPEC = `${import.meta.dir}/../demo/thermostat.yaml`;
 
 async function demoTopicInfo(): Promise<TopicInfo[]> {
 	const config = loadConfig();
