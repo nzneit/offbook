@@ -1,0 +1,32 @@
+{
+	"$schema": "https://biomejs.dev/schemas/1.9.0/schema.json",
+	"files": { "ignore": ["node_modules", "fixtures", "scripts", ".claude"] },
+	"linter": {
+		"enabled": true,
+		"rules": { "recommended": true }
+	},
+	"overrides": [
+		{
+			"include": ["src/**"],
+			"linter": {
+				"rules": {
+					"nursery": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"paths": {
+									"aedes": "Only src/broker/ may import aedes (transport isolation).",
+									"aedes-server-factory": "Only src/broker/ may import aedes-server-factory."
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"include": ["src/broker/**"],
+			"linter": { "rules": { "nursery": { "noRestrictedImports": "off" } } }
+		}
+	]
+}

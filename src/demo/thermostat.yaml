@@ -1,0 +1,83 @@
+asyncapi: 3.0.0
+info:
+  title: Thermostat Service
+  version: 1.4.0
+  description: >-
+    Controls and reports thermostat device state. The documented application is
+    the SERVICE; the browser application is the client. The running example across the docs.
+servers:
+  mosquitto:
+    host: localhost:1883
+    protocol: mqtt
+    protocolVersion: '3.1.1'
+channels:
+  setCommand:
+    address: command/{deviceId}/set
+    parameters:
+      deviceId:
+        description: Device identifier
+    messages:
+      SetTemperature:
+        $ref: '#/components/messages/SetTemperature'
+  state:
+    address: state/{deviceId}
+    parameters:
+      deviceId:
+        description: Device identifier
+    messages:
+      DeviceState:
+        $ref: '#/components/messages/DeviceState'
+operations:
+  receiveSet:
+    action: receive          # SERVICE receives ⇒ CLIENT publishes ⇒ fromClient
+    channel:
+      $ref: '#/channels/setCommand'
+  publishState:
+    action: send             # SERVICE sends ⇒ CLIENT receives ⇒ toClient
+    channel:
+      $ref: '#/channels/state'
+    bindings:
+      mqtt:
+        qos: 1
+        retain: true
+components:
+  messages:
+    SetTemperature:
+      name: SetTemperature
+      payload:
+        $ref: '#/components/schemas/SetTemperaturePayload'
+    DeviceState:
+      name: DeviceState
+      payload:
+        $ref: '#/components/schemas/DeviceStatePayload'
+  schemas:
+    SetTemperaturePayload:
+      type: object
+      required: [mode, target]
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+          enum: [heat, cool, off]
+        target:
+          type: number
+          minimum: 5
+          maximum: 35
+    DeviceStatePayload:
+      type: object
+      required: [deviceId, status, target, units]
+      additionalProperties: false
+      properties:
+        deviceId:
+          type: string
+        status:
+          type: string
+          enum: [accepted, heating, cooling, idle, offline]
+        target:
+          type: number
+        units:
+          type: string
+          enum: [C, F]
+        updatedAt:
+          type: string
+          format: date-time
