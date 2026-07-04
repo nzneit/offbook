@@ -32,6 +32,29 @@ test("emit(retain) is readable via getState, and clear-retain evicts the key", a
 	expect(state.has("state/x")).toBe(false);
 });
 
+test("getState skips a retained non-JSON payload (no StateEntry for an undecodable retained publish)", async () => {
+	const cfg = ports(3);
+	const b = track(createBroker(cfg));
+	await b.start();
+
+	const url = `ws://localhost:${cfg.brokerWsPort}`;
+	const pub = await connectAsync(url, {
+		forceNativeWebSocket: true,
+		reconnectPeriod: 0,
+	});
+	pub.on("error", () => {});
+	try {
+		await pub.publishAsync("state/bad-1", "not json {{", {
+			retain: true,
+			qos: 1,
+		});
+		const state = await b.getState();
+		expect(state.has("state/bad-1")).toBe(false);
+	} finally {
+		await pub.endAsync();
+	}
+});
+
 test("M0 gate (i): a browser-style mqtt.js client connects over ws, receives a retained message, and a QoS-1 publish round-trips", async () => {
 	const cfg = ports(2);
 	const b = track(createBroker(cfg));
@@ -44,8 +67,16 @@ test("M0 gate (i): a browser-style mqtt.js client connects over ws, receives a r
 	// client under test is a browser application (see AGENTS.md vocabulary),
 	// so exercising mqtt.js's actual browser transport is the closer emulation.
 	const url = `ws://localhost:${cfg.brokerWsPort}`;
-	const sub = await connectAsync(url, { forceNativeWebSocket: true });
-	const pub = await connectAsync(url, { forceNativeWebSocket: true });
+	const sub = await connectAsync(url, {
+		forceNativeWebSocket: true,
+		reconnectPeriod: 0,
+	});
+	const pub = await connectAsync(url, {
+		forceNativeWebSocket: true,
+		reconnectPeriod: 0,
+	});
+	sub.on("error", () => {});
+	pub.on("error", () => {});
 	try {
 		// retained receipt: publish retained BEFORE the subscriber subscribes
 		await pub.publishAsync(
@@ -53,11 +84,11 @@ test("M0 gate (i): a browser-style mqtt.js client connects over ws, receives a r
 			JSON.stringify({ status: "idle" }),
 			{ retain: true, qos: 1 },
 		);
-		const retained = await new Promise<string>((resolve) => {
-			sub.on("message", (_t, payload) => resolve(payload.toString()));
-			sub.subscribe("state/thermostat-1", { qos: 1 });
-		});
-		expect(JSON.parse(retained)).toEqual({ status: "idle" });
+		const retained = new Promise<string>((resolve) =>
+			sub.once("message", (_t, payload) => resolve(payload.toString())),
+		);
+		await sub.subscribeAsync("state/thermostat-1", { qos: 1 });
+		expect(JSON.parse(await retained)).toEqual({ status: "idle" });
 
 		// QoS-1 round-trip on a fresh topic
 		const rt = new Promise<string>((resolve) =>

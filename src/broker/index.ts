@@ -80,6 +80,25 @@ function createWsListener(aedes: Aedes): WsListener {
 				},
 				websocket: {
 					open(ws) {
+						let wsClosed = false;
+						const closeWs = () => {
+							if (wsClosed) return;
+							wsClosed = true;
+							// Deferred a tick: calling `ws.close()` synchronously/reentrantly
+							// from inside a duplex "close"/"error" event — which can itself
+							// fire synchronously from within Bun's own `message` callback,
+							// e.g. while aedes processes a DISCONNECT or a malformed packet
+							// — was observed by hand to leave the connection in a state
+							// where Bun's `server.stop()` never resolves. Deferring one
+							// tick avoids it.
+							setImmediate(() => {
+								try {
+									ws.close();
+								} catch {
+									// already closed
+								}
+							});
+						};
 						const duplex = new Duplex({
 							read() {
 								/* pushed externally from the `message` handler below */
@@ -89,14 +108,19 @@ function createWsListener(aedes: Aedes): WsListener {
 								callback();
 							},
 							final(callback) {
-								try {
-									ws.close();
-								} catch {
-									// already closed
-								}
+								closeWs();
 								callback();
 							},
 						});
+						// A malformed packet makes aedes `destroy(err)` the stream, which
+						// emits "error" (not just "close"/"final") — without a listener,
+						// that's an uncaught error that can crash the whole process.
+						duplex.on("error", () => closeWs());
+						// `destroy()` (e.g. a clientId-takeover/abort) skips `_final` and
+						// goes straight to "close", so the ws must be torn down there too;
+						// `closeWs` is idempotent so this is safe alongside the `_final`
+						// path above.
+						duplex.on("close", () => closeWs());
 						duplexes.set(ws, duplex);
 						aedes.handle(duplex);
 					},
@@ -117,7 +141,23 @@ function createWsListener(aedes: Aedes): WsListener {
 		},
 		close(cb) {
 			if (!server) return cb();
-			server.stop(true).then(() => cb());
+			// `server.stop()`'s promise can hang forever once this listener's
+			// bridge has force-closed a `ServerWebSocket` from the server side
+			// (the `closeWs` path above, needed for FIX2's error/close teardown)
+			// — confirmed against a minimal `Bun.serve` repro with no aedes/mqtt
+			// involved at all, so this is a Bun runtime quirk, not something
+			// fixable from inside the bridge. Race it against a short grace
+			// period so one poisoned connection can't wedge the whole shutdown;
+			// `server.stop(true)` has already force-closed every connection it
+			// can see well before this timeout would ever fire.
+			let settled = false;
+			const settle = () => {
+				if (settled) return;
+				settled = true;
+				cb();
+			};
+			server.stop(true).then(settle);
+			setTimeout(settle, 500);
 		},
 	};
 }
@@ -209,14 +249,15 @@ export function createBroker(config: Config): BrokerModule {
 				const map = new Map<string, NormalizedMessage>();
 				const stream = aedes.persistence.createRetainedStream("#");
 				stream.on("data", (p: RetainedPacket) => {
-					if (p.payload && p.payload.length > 0) {
-						map.set(p.topic, {
-							topic: p.topic,
-							payload: decode(p.payload).payload,
-							qos: p.qos,
-							retain: true,
-						});
-					}
+					if (!p.payload || p.payload.length === 0) return;
+					const { payload, decodeError } = decode(p.payload);
+					if (decodeError !== undefined) return; // non-decodable retained ⇒ no StateEntry (§2/§5)
+					map.set(p.topic, {
+						topic: p.topic,
+						payload,
+						qos: p.qos,
+						retain: true,
+					});
 				});
 				stream.on("end", () => resolve(map));
 			}),
