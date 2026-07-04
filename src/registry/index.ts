@@ -1,6 +1,6 @@
 import { Parser } from "@asyncapi/parser";
-import Ajv from "ajv";
 import addFormats from "ajv-formats";
+import Ajv2020 from "ajv/dist/2020";
 import { exec, matches } from "mqtt-pattern";
 import type {
 	Channel,
@@ -28,14 +28,17 @@ export async function buildRegistry(opts: {
 }): Promise<SpecRegistry> {
 	const { document } = await parser.parse(opts.specText);
 	if (!document) throw new Error("failed to parse spec");
-	const ajv = addFormats(new Ajv({ allErrors: true, strict: false }));
+	const ajv = addFormats(new Ajv2020({ allErrors: true, strict: false }));
 
 	const channels: Channel[] = [];
 	for (const op of document.operations().all()) {
 		const ch = op.channels().all()[0];
 		const address = ch.address() ?? "";
 		const msg = op.messages().all()[0];
-		const schema = (msg?.payload()?.json() ?? {}) as object;
+		const schema = {
+			$schema: "https://json-schema.org/draft/2020-12/schema",
+			...((msg?.payload()?.json() ?? {}) as object),
+		};
 		const validateFn = ajv.compile(schema);
 		const mqtt = op.bindings().get("mqtt")?.value<{
 			qos?: 0 | 1 | 2;
