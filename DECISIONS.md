@@ -12,3 +12,10 @@ Append-only. Each decision has a stable never-reused `D-###` id, what was decide
 **Why**: Enumerable requirements, durable decision provenance, a single agent entry point, and a standing intake path that ends the per-round ID alphabets, at low ceremony and zero present tool cost.
 **From**: docs/specs/doc-system.md (this design)
 **Folds into**: docs/specs/doc-system.md
+
+### D-002: Seed M0 as the week's prototype target; defer the batch-2+ pass
+**Date**: 2026-07-03
+**What**: Seed R-008 (the M0 walking-skeleton gate) now as the enumerable end-of-week deliverable and defer writing the rest of batches 2-4. The deferred pass's shape is decided (hybrid module carve, spikes 4/5 as their own entries, the §4 items as cross-cutting gate entries) but is post-prototype enrichment work.
+**Why**: Seeding the engine/cli/control-plane/contract entries buys nothing the M0 prototype needs and costs build hours; build-plan §M0 is already the complete spec for the slice, so the pragmatic move is one tracked target plus build.
+**From**: planning dialog (2026-07-03)
+**Folds into**: REQUIREMENTS.md (R-008 + the staged-seeding note), docs/specs/build-plan.md#m0

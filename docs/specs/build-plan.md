@@ -70,7 +70,7 @@ offbook/
 
 Behind the frozen contracts, work fans out in tiers. Each task lists its **dependencies** and a **self-checkable acceptance criterion**.
 
-### M0 — walking skeleton: risk-first + floor-first, dogfoodable (value checkpoint)
+### M0 — walking skeleton: risk-first + floor-first, dogfoodable (value checkpoint) <!-- anchor: m0 -->
 
 Before the tiers below complete, **M0** is the first dogfoodable milestone — the thinnest vertical slice, **re-pointed risk-first + floor-first** (grilling realignment): it retires the *doable half* of the #1 hard gate (WS fidelity, §12.1) and stands up the zero-config **discovery floor** (design §1/§9), with `offbook demo` shipping as an *output* rather than the gate. It is a *value checkpoint drawn through* Tiers 0–3, **not a reordering**: the dependency graph below is unchanged; M0 just marks the thin path through it that de-risks and banks certain value first, with everything else enriching upward.
 

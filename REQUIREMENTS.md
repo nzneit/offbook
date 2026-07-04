@@ -52,11 +52,21 @@ The real browser application's `mqtt.js` connects+subscribes+receives-retained a
 **COVERS**: docs/specs/build-plan.md#spikes
 The client's `connect()` auth fields, ws URL/path, subprotocol, protocol level, and any QoS-2 use are captured into a config fixture + broker ws port default.
 
+#### M0 walking-skeleton prototype: retained receipt + topic discovery
+**UID**: R-008
+**STATUS**: specified
+**COVERS**: docs/specs/build-plan.md#m0
+The thinnest dogfoodable slice ships: a browser-style `mqtt.js` client connects to the Aedes ws listener and receives a retained message, and `offbook topics` lists every topic/shape/direction from the bundled demo spec (with `offbook demo` booting and surfacing an off-contract publish as an output, not the gate).
+
 <!--
-Seeding is staged (doc-system.md §7). Batch 1 (R-001..R-007): Tier 0/1 + spikes.
-Next batches, allocated in order from R-008:
-  - Tier 2 (engine/, validation/), Tier 3 (scenarios/, control-plane/), Tier 4 (cli/) acceptance criteria — build-plan.md §3.
-  - The v1 acceptance gate items — build-plan.md §4 (add an anchor per section covered).
-  - Contract obligations and hard constraints — contracts.md, AGENTS.md (add explicit `anchor: NAME` markers; contract markers are additive and do not alter frozen interface content).
+Seeding is staged (doc-system.md §7). Batch 1 (R-001..R-007): Tier 0/1 modules + the two empirical spikes.
+R-008 (M0): the walking-skeleton prototype target, seeded ahead of the batch-2+ pass so the week's deliverable is enumerable. Build against build-plan.md#m0; rationale in DECISIONS.md D-002.
+
+The batch-2+ pass is decided in shape but deferred to post-prototype enrichment, allocated in order from R-009:
+  - Hybrid module carve of build-plan.md §3: validation/ and scenarios/ one entry each; engine/ split by layer (L1 floor, L3 dispatch, emit-completion, reset); control-plane/ (endpoints + envelope, plus the CI settlement flow if split); cli/ split along the ergonomics clusters (dispatch backbone, publish/scenario input, topics/validation rendering, up/ports, status/check, watch, init).
+  - Spikes 4 and 5 (mqtt-pattern parity, json-schema-faker fidelity) as their own `specified` entries under build-plan.md#spikes; spike 3 (adopt-vs-build) stays out, resolved.
+  - The v1 acceptance-gate items (build-plan.md §4: §5 correctness, determinism, transport isolation, observe-and-surface) as thin cross-cutting entries that cross-reference the module entries rather than restate them; add an `anchor: NAME` marker per section covered.
+  - Contract obligations and hard constraints (contracts.md, AGENTS.md); additive `anchor: NAME` markers only, no change to frozen interface content.
+  - design.md §1-12 rationale resolves case by case (mostly D-###, not R-###), not a bulk sweep.
 Allocate the next id = max existing + 1; never reuse. Run `bun scripts/check-docs.ts` after each batch.
 -->
