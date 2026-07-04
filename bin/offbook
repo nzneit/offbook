@@ -1,2 +1,4 @@
 #!/usr/bin/env bun
-import "../src/cli/index.ts";
+import { run } from "../src/cli/index.ts";
+
+run(process.argv.slice(2)).then((code) => process.exit(code));
