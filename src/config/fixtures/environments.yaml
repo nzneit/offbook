@@ -1,0 +1,6 @@
+# Example environments.yaml — env → { service: version } (contracts.md §6).
+# v1 reads `default`; --env selection is v2. Quote versions so YAML keeps them strings.
+environments:
+  default:
+    serviceA: "1.4.7"
+    serviceB: "2.0.1"

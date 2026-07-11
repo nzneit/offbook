@@ -72,6 +72,22 @@ export const DEFAULT_CONFIG: Config = {
 	runDir: ".offbook",
 };
 
+// contracts.md §6 — per-service spec location + qos/retain config tiers.
+// `name` is the services.yaml map key (injected by config/'s loader, not in the value).
+export interface ServiceConfig {
+	name: string;
+	repo: string; // full URL used as-is, OR an 'org/name' slug resolved against gitHost (G20)
+	gitHost?: string; // per-service base URL override for the slug form
+	specPath: string; // v1: a fixed path
+	branch?: string; // v1 ref selection; default 'main'
+	qosDefault?: 0 | 1 | 2; // per-service default qos — tier 3 of the §2 precedence chain
+	retainDefault?: boolean; // per-service default retain — tier 3
+	// per-topic override — tier 2; key = channel address (the {param} form), string-equality matched (F14)
+	topicOverrides?: Record<string, { qos?: 0 | 1 | 2; retain?: boolean }>;
+	// channel address → list of param-maps; pre-materializes a deterministic demo set (F1, §2)
+	seedInstances?: Record<string, Record<string, string>[]>;
+}
+
 export type Faker = (
 	channel: Channel,
 	instanceParams?: Record<string, string>,

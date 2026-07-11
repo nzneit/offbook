@@ -1,0 +1,14 @@
+# Example services.yaml — per-service spec location (contracts.md §6).
+# v1: repo + fixed specPath + optional branch; the qos/retain config tiers.
+gitHost: https://git.example.com   # global base URL for slug-form repos (G20)
+services:
+  serviceA: { repo: org/service-a, specPath: asyncapi.yaml }                  # slug → resolved against gitHost; branch defaults to main
+  serviceB: { repo: org/service-b, specPath: asyncapi.yaml, branch: dev }     # slug, deploys from dev
+  serviceC:                                        # drives fixtures/asyncapi/qos-overrides.yaml (G13)
+    repo: org/service-c
+    specPath: asyncapi.yaml
+    qosDefault: 2                                  # tier 3: unbound toClient channels default to qos 2 …
+    retainDefault: true                            #         … retain true
+    topicOverrides:                                # tier 2: a per-topic override beats the per-service default
+      telemetry/{deviceId}: { qos: 0, retain: false }
+  serviceD: { repo: https://other.example.com/org/service-d.git, specPath: asyncapi.yaml }  # full URL used as-is (ignores gitHost)

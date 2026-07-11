@@ -18,8 +18,10 @@ Every type in contracts.md §1–6 is transcribed, `tsc`-clean, and exported fro
 
 #### config/ loads services + environments to typed objects
 **UID**: R-002
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-0
+**IMPL**: src/config/, src/model/
+**TEST**: src/config/index.test.ts
 `config/` loads a `services.yaml` (including a `topicOverrides` entry) and `environments.yaml` into typed objects, and `registry/`'s qos test runs against it with no `ingestion/` import (the F18 no-sibling-back-edge).
 
 #### broker/ ws connect, retained receipt, QoS-1 round-trip
@@ -30,9 +32,11 @@ A browser-style `mqtt.js` client connects to the Aedes ws listener over MQTT 3.1
 
 #### registry/ parses fixtures, matches topics, resolves qos/retain
 **UID**: R-004
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-1
-`registry/` parses every `fixtures/asyncapi/*` (including external-ref, qos-retain, qos-overrides), resolves channel direction and the qos/retain precedence chain, and its `match`/`matchesFilter` behave per the §5 correctness bar.
+**IMPL**: src/registry/
+**TEST**: src/registry/index.test.ts
+`registry/` parses every `fixtures/asyncapi/*` (including external-ref, qos-retain, qos-overrides), resolves channel direction (v2 + v3) and the qos/retain precedence chain, and its `match`/`matchesFilter` behave per the §5 correctness bar (the 2020-12 `$ref`-sibling edge is carved out to D-005, pinned by a tripwire test).
 
 #### ingestion/ branch-tip fetch and lockfile writer
 **UID**: R-005

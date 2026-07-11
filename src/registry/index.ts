@@ -6,6 +6,7 @@ import type {
 	Channel,
 	Config,
 	SchemaError,
+	ServiceConfig,
 	SpecRegistry,
 } from "../model/index.ts";
 
@@ -17,17 +18,32 @@ function toPattern(address: string): string {
 }
 
 function directionOf(action: string): "toClient" | "fromClient" {
-	// v3: send→toClient, receive→fromClient.
-	return action === "send" ? "toClient" : "fromClient";
+	// v3: send→toClient, receive→fromClient. v2: subscribe→toClient, publish→fromClient
+	// (publish = the client publishes and the service receives ⇒ fromClient).
+	return action === "send" || action === "subscribe"
+		? "toClient"
+		: "fromClient";
 }
 
 export async function buildRegistry(opts: {
 	specText: string;
 	service: string;
 	config: Config;
+	// qos/retain tiers 2-3 (topicOverrides / qosDefault / retainDefault); absent ⇒ spec binding + global only
+	serviceConfig?: ServiceConfig;
+	// base path/URI so the parser can resolve external $refs (e.g. shared/common.yaml); omit for self-contained specs
+	source?: string;
 }): Promise<SpecRegistry> {
-	const { document } = await parser.parse(opts.specText);
-	if (!document) throw new Error("failed to parse spec");
+	const parsed = opts.source
+		? await parser.parse(opts.specText, { source: opts.source })
+		: await parser.parse(opts.specText);
+	const { document } = parsed;
+	if (!document) {
+		const errs = parsed.diagnostics
+			.filter((d) => d.severity === 0)
+			.map((d) => d.message);
+		throw new Error(`failed to parse spec: ${errs.join("; ")}`);
+	}
 	const ajv = addFormats(new Ajv2020({ allErrors: true, strict: false }));
 
 	const channels: Channel[] = [];
@@ -44,6 +60,17 @@ export async function buildRegistry(opts: {
 			qos?: 0 | 1 | 2;
 			retain?: boolean;
 		}>();
+		// §2 precedence, resolved per-field: spec MQTT binding → topicOverrides (tier 2,
+		// string-equality on the {param} address, F14) → per-service default (tier 3) → global.
+		// `??` (not `||`) so a legitimate qos 0 / retain false is not treated as "unset".
+		const override = opts.serviceConfig?.topicOverrides?.[address];
+		const qos =
+			mqtt?.qos ?? override?.qos ?? opts.serviceConfig?.qosDefault ?? 1;
+		const retain =
+			mqtt?.retain ??
+			override?.retain ??
+			opts.serviceConfig?.retainDefault ??
+			false;
 		channels.push({
 			topic: address,
 			direction: directionOf(op.action()),
@@ -51,8 +78,8 @@ export async function buildRegistry(opts: {
 			schema,
 			validate: (payload: unknown): SchemaError[] =>
 				validateFn(payload) ? [] : ((validateFn.errors ?? []) as SchemaError[]),
-			qos: mqtt?.qos ?? 1,
-			retain: mqtt?.retain ?? false,
+			qos,
+			retain,
 			title: msg?.title() ?? undefined,
 			description: ch.description() ?? msg?.description() ?? undefined,
 		});

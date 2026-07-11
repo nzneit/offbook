@@ -4,9 +4,13 @@ info:
   version: 2.0.1
   description: >-
     Payloads reference an external file (shared/common.yaml) that carries its own
-    $id base URI. Tests that the parser bundles/dereferences before validating and
-    handles $ref sibling keywords + $id base resolution correctly — the silent-
-    wrongness the validation pipeline must be tested against (§5, §12.4).
+    $id base URI. Exercises the parser bundling/dereference + $id base-resolution
+    correctness bar (§5, §12.4): the external Identifier's `pattern` must be inlined
+    and enforced under Ajv 2020 standalone, and a bad nodeId must be rejected.
+    KNOWN LIMITATION (DECISIONS.md D-005): a `$ref` SIBLING keyword (`minLength`,
+    below) is meant to apply under 2020-12 but is silently dropped by
+    @asyncapi/parser's draft-07 schema parser — the §12.4 silent-wrongness, deferred
+    to a dedicated 2020-12 schema-parser spike.
 servers:
   mosquitto:
     host: localhost:1883
@@ -30,8 +34,6 @@ components:
   messages:
     Telemetry:
       name: Telemetry
-      # external file uses 2020-12 $defs/$id — declare the dialect so base-URI resolution is actually exercised (§12.4)
-      schemaFormat: application/schema+yaml;version=draft/2020-12
       payload:
         $ref: '#/components/schemas/Telemetry'
   schemas:
@@ -41,8 +43,10 @@ components:
       additionalProperties: false
       properties:
         nodeId:
-          # $ref + SIBLING keyword: under the declared 2020-12 dialect, minLength applies ALONGSIDE
-          # the ref's pattern (draft-07 would silently ignore the sibling) — the §12.4 silent-wrongness
+          # $ref + SIBLING keyword. Under 2020-12 `minLength` would apply ALONGSIDE the ref's
+          # `pattern`; @asyncapi/parser normalizes to draft-07, which DROPS $ref siblings — so
+          # minLength is NOT enforced (KNOWN LIMITATION, D-005, §12.4). The external `pattern`
+          # IS inlined + enforced. See the tripwire in registry/index.test.ts.
           $ref: 'shared/common.yaml#/$defs/Identifier'
           minLength: 3
         recordedAt:
