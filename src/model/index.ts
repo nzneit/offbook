@@ -88,6 +88,49 @@ export interface ServiceConfig {
 	seedInstances?: Record<string, Record<string, string>[]>;
 }
 
+// contracts.md §6 — spec ingestion (design §7 seams, v1). GitRefResolver + StaticManifestSource
+// behind stable interfaces; semver→ref resolution + the by-SHA frozen reader are v2.
+export interface ResolvedSpec {
+	content: string; // raw spec text (YAML/JSON)
+	contentHash: string; // "sha256:…" — our byte fingerprint
+	specPath: string;
+	resolvedRef: string; // the selection input (branch in v1; tag/sha in v2)
+	resolvedSha: string; // FULL canonical commit sha — the pin, never abbreviated
+	source: string; // human origin, e.g. "dev@org/service-b:asyncapi.yaml"
+	declaredVersion?: string; // info.version — shallow parser-free read by ingestion/ (G12); best-effort
+	fetchedAt: string; // ISO8601
+}
+
+// v1+v2: GitRefResolver. The v1↔v2 difference is ref selection only — signature is stable (§6).
+export interface Resolver {
+	resolve(repo: string, ref: string, specPath: string): Promise<ResolvedSpec>;
+}
+
+// v1: StaticManifestSource (reads environments.yaml via config/'s loader). v2: ReleaseToolingSource.
+export interface VersionSource {
+	versions(environment: string | null): Promise<Record<string, string>>;
+}
+
+export interface Lockfile {
+	lockfileVersion: number;
+	environment: string;
+	resolutionMode: "branch" | "pinned";
+	generatedAt: string; // ISO8601
+	services: Record<string, LockEntry>;
+}
+
+export interface LockEntry {
+	requestedVersion: string; // from environments.yaml — recorded, UNHONORED in v1
+	resolutionStrategy: "branch"; // v2 adds git-tag | release-branch | manual | …
+	resolvedRef: string;
+	resolvedSha: string; // FULL canonical commit sha — never abbreviated
+	specPath: string;
+	declaredVersion?: string; // info.version
+	contentHash: string; // "sha256:…"
+	fetchedAt: string; // ISO8601
+	resolvedVersion?: string; // v2 only — semver after range policy
+}
+
 export type Faker = (
 	channel: Channel,
 	instanceParams?: Record<string, string>,

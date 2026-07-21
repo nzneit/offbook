@@ -40,8 +40,10 @@ A browser-style `mqtt.js` client connects to the Aedes ws listener over MQTT 3.1
 
 #### ingestion/ branch-tip fetch and lockfile writer
 **UID**: R-005
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-1
+**IMPL**: src/ingestion/, src/model/
+**TEST**: src/ingestion/index.test.ts
 `ingestion/` resolves a fixture spec at a branch tip, records the post-fetch SHA + content-hash + declared-version to `specs.lock`, and imports no AsyncAPI parser.
 
 #### WS-fidelity spike is the authoritative connect gate
