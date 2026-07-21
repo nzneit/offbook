@@ -12,9 +12,11 @@ The enumerable list of v1 requirements. Each entry is an atomic statement, a sta
 
 #### model/ contract types present and exported
 **UID**: R-001
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-0
-Every type in contracts.md §1–6 is transcribed, `tsc`-clean, and exported from `src/model/`.
+**IMPL**: src/model/
+**TEST**: src/model/index.test.ts
+Every type in contracts.md §1–6 is transcribed, `tsc`-clean, and exported from `src/model/` — with the sole exception of `BrokerModule`, homed in `broker/` as the transport module's own interface (build-plan §2); a compile-time exhaustiveness guard in the test fails `tsc` if any §1–6 type is missing or renamed.
 
 #### config/ loads services + environments to typed objects
 **UID**: R-002
@@ -26,9 +28,11 @@ Every type in contracts.md §1–6 is transcribed, `tsc`-clean, and exported fro
 
 #### broker/ ws connect, retained receipt, QoS-1 round-trip
 **UID**: R-003
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-1
-A browser-style `mqtt.js` client connects to the Aedes ws listener over MQTT 3.1.1, subscribes, receives a retained message, and a QoS-1 publish round-trips.
+**IMPL**: src/broker/
+**TEST**: src/broker/index.test.ts
+A browser-style `mqtt.js` client connects to the Aedes ws listener over MQTT 3.1.1, subscribes, receives a retained message, and a QoS-1 publish round-trips. (The fuller tier-1 broker bar — wildcard-retained replay, DUP-on-redelivery, raw delivery of a non-JSON publish — is beyond this statement and stays enumerable in the R-009+ batch, not implied by this flip.)
 
 #### registry/ parses fixtures, matches topics, resolves qos/retain
 **UID**: R-004

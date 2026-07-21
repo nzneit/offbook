@@ -188,3 +188,97 @@ export interface ValidationSummary {
 	oldestSeq: number;
 	distinct: { total: number; client: number; mock: number };
 }
+
+// contracts.md §2 — engine-owned instance lifecycle (F1). The materialization LEDGER, NOT a mirror
+// of current retained state (that is Aedes', read via getState / native delivery, R3). Declared in
+// model/, driven by the engine. (BrokerModule itself is homed in broker/ — build-plan §2.)
+export interface InstanceRegistry {
+	materialize(channelAddress: string, params: Record<string, string>): void; // idempotent
+	snapshot(): InstanceSnapshot; // captured at reset
+	restore(s: InstanceSnapshot): void; // re-materializes EXACTLY the snapshot set, re-seeded
+}
+
+export interface InstanceSnapshot {
+	instances: { channelAddress: string; params: Record<string, string> }[];
+}
+
+// contracts.md §3 — behavior-engine registration. A FACTORY — re-instantiated on reset for clean
+// deterministic state.
+export type HandlerFactory = () => Handler;
+
+export interface Handler {
+	onInbound?(event: InboundEvent, ctx: HandlerContext): void; // reactive
+	initialState?(topic: string, ctx: HandlerContext): void; // proactive (on subscribe)
+	tick?(ctx: HandlerContext): void; // autonomous mode
+}
+
+export interface HandlerContext {
+	publish(msg: Partial<NormalizedMessage> & { topic: string }): void; // routed through the scheduler
+	random(): number; // seeded PRNG draw (deterministic)
+	now(): number; // LOGICAL clock: fixedEpoch + Σ(seeded delays) — NOT wall-clock (G5)
+}
+
+// contracts.md §3a — the normalized, parsed shape of an L2 scenario (canonical type; transcribed
+// from l2-scenarios.md §9). scenarios/ and control-plane both import it.
+export interface Scenario {
+	name: string; // globally unique; keys POST /trigger/{name}, the validation log, and reset
+	when?: WhenClause; // present ⇒ reactive; absent ⇒ on-demand-only
+	then: EmitStep[]; // ordered, ≥1 step
+}
+
+export interface WhenClause {
+	topic: string; // {param} captures + MQTT +/#; must resolve to a fromClient channel
+	payloadMatch?: Record<string, unknown>; // subset equality; extra fields ignored
+}
+
+export interface EmitStep {
+	emit: {
+		topic: string; // {{substitution}}; must resolve to a toClient channel
+		payload: unknown; // {{substitution}}; omitted required fields seed-faked by L1, then Ajv-rechecked
+		delay?: string; // "<n>ms|s" or "<min>-<max>ms|s"; omitted ⇒ 0; relative/cumulative across steps
+	};
+}
+
+// contracts.md §5 — control-plane read DTOs.
+export interface SpecInfo {
+	service: string;
+	declaredVersion?: string; // info.version — parser-free shallow read by ingestion/ (G12); NOT requested
+	source: string;
+	contentHash: string;
+	channelCount: number;
+	fetchedAt: string; // ISO8601; spec provenance/age for trust calibration (design §7 Mode 3)
+}
+
+export interface ScenarioInfo {
+	name: string;
+	when?: string; // the reactive trigger topic (absent ⇒ on-demand/trigger-only)
+	stepCount: number;
+	source: string; // scenario file path
+}
+
+export interface Diagnostic {
+	kind: "scenario-load" | "overlap" | "spec-load" | "uninstantiated";
+	severity: "error" | "warning" | "info";
+	detail: string;
+	source?: string; // machine-filterable (channel address for uninstantiated/spec-load); no `channel` field
+	scenarioName?: string;
+}
+
+export interface DiagnosticSummary {
+	errors: number;
+	warnings: number;
+	info: number;
+	byKind: Record<
+		"scenario-load" | "overlap" | "spec-load" | "uninstantiated",
+		number
+	>; // all four keys always present, zero-filled
+}
+
+// Closed set of error-envelope codes; the CLI/CI branch on this union, no ad-hoc strings. NB there
+// is NO 'unknown-topic' code — an unmatched /publish returns 202 + raises an 'unknown-topic'
+// VIOLATION (§4), not an error envelope; that name lives only as a ViolationKind.
+export type ErrorCode =
+	| "unknown-scenario" // POST /trigger/{name} with no such scenario
+	| "bad-request" // malformed body / params (generic 400)
+	| "example-on-unknown-topic" // POST /publish { example: true } on an unknown topic
+	| "example-and-payload"; // POST /publish with BOTH payload and example present
