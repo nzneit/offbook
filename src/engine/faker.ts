@@ -1,17 +1,7 @@
 import { generate as jsfGenerate } from "json-schema-faker";
 import type { JsonSchema } from "json-schema-faker";
 import type { Channel, Config, Faker, Violation } from "../model/index.ts";
-
-// stable string -> uint32 (FNV-1a). Derives the single integer fed into JSF's
-// native per-call `seed` option; no second PRNG wraps its output (R4).
-function hashToInt(s: string): number {
-	let h = 2166136261;
-	for (let i = 0; i < s.length; i++) {
-		h ^= s.charCodeAt(i);
-		h = Math.imul(h, 16777619);
-	}
-	return h >>> 0;
-}
+import { hashToInt } from "./prng.ts";
 
 // stable sorted-key serialization; empty string when params are absent.
 function canonicalize(params?: Record<string, string>): string {
@@ -37,6 +27,8 @@ export function createFaker(config: Config): Faker {
 		channel: Channel,
 		instanceParams?: Record<string, string>,
 	): Promise<unknown> => {
+		// one keyed integer fed into JSF's native per-call `seed` option — no
+		// second PRNG wraps its output (R4)
 		const seed = hashToInt(
 			`${config.seed}|${channel.topic}|${canonicalize(instanceParams)}`,
 		);
