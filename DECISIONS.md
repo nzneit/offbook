@@ -55,3 +55,10 @@ Append-only. Each decision has a stable never-reused `D-###` id, what was decide
 **Obligations (deferred)**: when the broker adopts a persistence that redelivers in-flight QoS-1 on resume (or the WS-fidelity spike settles the redelivery contract), re-point the tripwire from `expect(redelivered).toBeUndefined()` to `expect(redelivered?.dup).toBe(true)`. Until then, R-009's DUP clause is explicitly **not** met.
 **From**: R-009 build (2026-07-21), empirical probe of Aedes redelivery; owner chose ship-achievable + tripwire over a persistence swap
 **Folds into**: src/broker/index.test.ts (the three R-009 tests + the DUP tripwire), REQUIREMENTS.md (R-009)
+
+### D-007: Batch-2+ carve refinements — a fifth engine entry (scheduler core) and a split control-plane
+**Date**: 2026-07-21
+**What**: Execute the D-002-deferred batch-2+ seeding as R-010..R-031, refining the recorded shape in two places: (1) `engine/` gets a fifth entry, the deterministic scheduler core (R-010: virtual-clock loop, Mulberry32 seeding, wallClock path), rather than folding the substrate into the §4 determinism gate entry; (2) `control-plane/` splits into endpoints + envelope (R-017) and the EC1 CI settlement flow (R-018). All 22 entries seed `specified`; reconciliation against existing M0 traces is follow-on work, per the batch-1 precedent.
+**Why**: The gate entries are thin and cross-referencing by design, so the determinism gate (R-029) needs a module entry to point at — and the scheduler is the first buildable unit of tier 2. The settlement flow leans on engine scheduler semantics and lands later than the plain endpoint contract tests, so splitting lets R-017 go `tested` without being held by its hardest clause. Statuses stay honest by seeding `specified` and flipping only with verified traces.
+**From**: docs/archive/intake/2026-07-21-batch-2-seeding-carve.md (forks a–f), dialog 2026-07-21
+**Folds into**: REQUIREMENTS.md (R-010..R-031 + the staged-seeding note), docs/specs/build-plan.md (anchors tier-2/tier-3/tier-4/v1-gate)
