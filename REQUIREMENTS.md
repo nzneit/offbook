@@ -188,9 +188,11 @@ The `{p}`→`+p` rewrite reproduces AsyncAPI single-segment capture exactly (mqt
 
 #### spike: json-schema-faker fidelity (F8)
 **UID**: R-027
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#spikes
-JSF 0.6.2 runs against every `fixtures/asyncapi/*` bundled `channel.schema` and the per-fixture Ajv-recheck failure rate is recorded; a nonzero rate on a §5-bar fixture (`external-ref`, `qos-retain`, `qos-overrides`) decides that F5's keyed-fallback re-draw is needed, else drop-and-surface stands (the verdict lands in the ledger).
+**IMPL**: scripts/spike-jsf-fidelity.ts
+**TEST**: test/spikes/jsf-fidelity.test.ts
+JSF 0.6.2 runs against every `fixtures/asyncapi/*` bundled `channel.schema` and the per-fixture Ajv-recheck failure rate is recorded; a nonzero rate on a §5-bar fixture (`external-ref`, `qos-retain`, `qos-overrides`) decides that F5's keyed-fallback re-draw is needed, else drop-and-surface stands (the verdict lands in the ledger). (Measured; verdict in D-008.)
 
 #### gate: §5 validation correctness
 **UID**: R-028

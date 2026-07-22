@@ -62,3 +62,10 @@ Append-only. Each decision has a stable never-reused `D-###` id, what was decide
 **Why**: The gate entries are thin and cross-referencing by design, so the determinism gate (R-029) needs a module entry to point at — and the scheduler is the first buildable unit of tier 2. The settlement flow leans on engine scheduler semantics and lands later than the plain endpoint contract tests, so splitting lets R-017 go `tested` without being held by its hardest clause. Statuses stay honest by seeding `specified` and flipping only with verified traces.
 **From**: docs/archive/intake/2026-07-21-batch-2-seeding-carve.md (forks a–f), dialog 2026-07-21
 **Folds into**: REQUIREMENTS.md (R-010..R-031 + the staged-seeding note), docs/specs/build-plan.md (anchors tier-2/tier-3/tier-4/v1-gate)
+
+### D-008: JSF-fidelity spike verdict — drop-and-surface stands
+**Date**: 2026-07-21
+**What**: Ran the R-027 (F8) spike: json-schema-faker 0.6.2 seeded draws over every bundled `channel.schema` in `fixtures/asyncapi/*`, Ajv-rechecked per draw (25 seeds per channel). Measured per-fixture recheck-failure rates: `composition.yaml: 0/50 failed (0.0%)`, `external-ref.yaml: 0/25 failed (0.0%)`, `qos-overrides.yaml: 0/50 failed (0.0%)`, `qos-retain.yaml: 0/25 failed (0.0%)`, `thermostat.yaml: 0/50 failed (0.0%)`, `v2-pubsub.yaml: 0/50 failed (0.0%)`. Verdict per the mechanical rule: no §5-bar fixture failed ⇒ F5's drop-and-surface stands and the L1 floor needs no keyed-fallback re-draw.
+**Why**: F5 tolerates an empty floor only if recheck failures are rare enough not to hollow out L1's CI reliance; the §5-bar fixtures are the correctness floor, so any failure there means the floor must re-draw rather than drop. The tripwire test pins the measured counts so drift is loud.
+**From**: R-027 spike run (2026-07-21), scripts/spike-jsf-fidelity.ts
+**Folds into**: REQUIREMENTS.md (R-027), test/spikes/jsf-fidelity.test.ts (tripwire), docs/specs/build-plan.md#spikes (spike 5 resolved)
