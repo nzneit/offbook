@@ -72,9 +72,11 @@ The thinnest dogfoodable slice ships: a browser-style `mqtt.js` client connects 
 
 #### broker/ fuller tier-1 acceptance: wildcard replay, raw non-JSON delivery, DUP-on-redelivery
 **UID**: R-009
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-1
-Beyond R-003's connect/retained/QoS-1 core: a wildcard subscribe (`state/+`, `state/#`) replays retained state for every matching topic straight from Aedes' store (the same set `getState()` returns), never a parallel ledger (R3/F6/CR11); a non-JSON publish surfaces (not crashes) and is still **delivered raw** to subscribers; and DUP-on-redelivery is exercised by a harness that suppresses PUBACK to force redelivery and assert `DUP=1` — absent that harness the DUP contract is delegated to the WS-fidelity spike / known-limitations (build-plan#tier-1). Raw delivery + wildcard replay largely ride the existing broker + Aedes-native behavior and need covering tests; DUP needs the dedicated PUBACK-suppressing harness.
+**IMPL**: src/broker/
+**TEST**: src/broker/index.test.ts
+Beyond R-003's connect/retained/QoS-1 core: a wildcard subscribe (`state/+`, `state/#`) replays retained state for every matching topic straight from Aedes' store (the same set `getState()` returns), never a parallel ledger (R3/F6/CR11); and a non-JSON publish surfaces (`payload: undefined` + `decodeError`) yet is still **delivered raw** to subscribers — both covered. DUP-on-redelivery is a **known limitation (D-006)**: the PUBACK-suppressing harness (persistent session + `manualAcks` + resume) confirms the session resumes but Aedes' default in-memory persistence does not redeliver the in-flight QoS-1 message, so `DUP=1` is delegated to the WS-fidelity spike / a redelivering persistence, pinned by a tripwire test.
 
 <!--
 Seeding is staged (doc-system.md §7). Batch 1 (R-001..R-007): Tier 0/1 modules + the two empirical spikes.
