@@ -86,8 +86,10 @@ A single virtual-clock event loop schedules all emissions and awaits `broker.emi
 
 #### engine/ L1 faker floor
 **UID**: R-011
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-2
+**IMPL**: src/engine/
+**TEST**: src/engine/faker.test.ts
 L1 emissions come from a seeded json-schema-faker draw that is Ajv-rechecked before emit — output is always Ajv-valid, and a recheck failure (or a rejecting faker) drops the emit and surfaces a `mock` violation with `emitSource.layer === 'L1'`, never silent (F5; the floor may be empty pending the F8 spike's keyed-fallback verdict, R-027).
 
 #### engine/ L3 dispatch
