@@ -219,7 +219,7 @@ The `aedes`-import lint rule passes repo-wide: no module but `broker/` imports `
 No validation path ever blocks delivery — validation observes and surfaces loudly at every tier while the broker stays payload-agnostic — the module bar lives in R-015; this entry is the cross-cutting v1 gate over it.
 
 <!--
-Seeding is staged (doc-system.md §7). Batch 1 (R-001..R-007) + R-008 (M0) + R-009 (broker tier-1 residual): seeded and reconciled. Batch 2+ (R-010..R-031): the full module/spike/gate carve per D-007 and docs/archive/intake/2026-07-21-batch-2-seeding-carve.md.
+Seeding is staged (doc-system.md §7). Batch 1 (R-001..R-007) + R-008 (M0) + R-009 (broker tier-1 residual): seeded; reconciled where traces exist (the R-006/R-007 spikes remain open). Batch 2+ (R-010..R-031): the full module/spike/gate carve per D-007 and docs/archive/intake/2026-07-21-batch-2-seeding-carve.md.
 What remains unseeded resolves case by case (not bulk):
   - Contract obligations and hard constraints (contracts.md, AGENTS.md): additive `anchor: NAME` markers only when an entry needs one; no change to frozen interface content.
   - design.md §1-12 rationale: mostly D-###, not R-###.

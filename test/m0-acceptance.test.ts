@@ -177,6 +177,10 @@ test("M0: a real mqtt.js client's off-contract publishes flow through onInbound 
 	const schemaV = violations.find((v) => v.kind === "schema");
 	expect(schemaV?.clientId).toBe("real-browser-1");
 	expect(schemaV?.clientId).not.toBe(config.injectedClientId);
+	// structured Ajv errors[] ride the violation over the real transport, not
+	// just a stringified message — "broil" isn't in the mode enum
+	expect(schemaV?.errors?.[0]?.instancePath).toBe("/mode");
+	expect(schemaV?.errors?.[0]?.keyword).toBe("enum");
 
 	// both the schema-invalid JSON and the undecodable bytes were delivered
 	// raw to the subscriber while their violations surfaced above
