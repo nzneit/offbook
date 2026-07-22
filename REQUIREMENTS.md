@@ -112,8 +112,10 @@ Every emission passes the single `resolveEmit(partial, channel)` choke-point (co
 
 #### engine/ reset
 **UID**: R-014
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-2
+**IMPL**: src/engine/index.ts, src/engine/scheduler.ts
+**TEST**: src/engine/reset.test.ts
 `reset` restores known state, re-seeds the PRNG, and re-instantiates L3 handler factories, so a post-reset run with the same seed reproduces the same emission stream.
 
 #### validation/ full bar
