@@ -114,6 +114,21 @@ test("M0: a real mqtt.js client's off-contract publishes flow through onInbound 
 	client.on("error", () => {});
 	cleanups.push(() => client.endAsync());
 
+	// observe-and-surface (R-015): a subscriber must still receive the
+	// off-contract publishes below — validation never blocks delivery
+	const observer = await connectAsync(`ws://localhost:${config.brokerWsPort}`, {
+		forceNativeWebSocket: true,
+		reconnectPeriod: 0,
+		clientId: "observer-1",
+	});
+	observer.on("error", () => {});
+	cleanups.push(() => observer.endAsync());
+	const observed: string[] = [];
+	observer.on("message", (_topic, payload) => {
+		observed.push(payload.toString());
+	});
+	await observer.subscribeAsync("command/thermostat-1/set", { qos: 1 });
+
 	// exercise every branch of validateClientPublish over the real transport
 	// (not the HTTP /publish re-impl): schema, direction, unknown-topic, decode
 	await client.publishAsync(
@@ -162,4 +177,10 @@ test("M0: a real mqtt.js client's off-contract publishes flow through onInbound 
 	const schemaV = violations.find((v) => v.kind === "schema");
 	expect(schemaV?.clientId).toBe("real-browser-1");
 	expect(schemaV?.clientId).not.toBe(config.injectedClientId);
+
+	// both the schema-invalid JSON and the undecodable bytes were delivered
+	// raw to the subscriber while their violations surfaced above
+	for (let i = 0; i < 80 && observed.length < 2; i++) await Bun.sleep(25);
+	expect(observed).toContain(JSON.stringify({ mode: "broil", target: 20 }));
+	expect(observed).toContain("not-json{");
 });

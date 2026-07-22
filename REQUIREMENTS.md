@@ -112,9 +112,11 @@ Every emission passes the single `resolveEmit(partial, channel)` choke-point (co
 
 #### validation/ full bar
 **UID**: R-015
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-2
-Validation produces `Violation` records for all four kinds (`schema` with structured `SchemaError[]`, `decode`, `direction`, `unknown-topic`) with `client`/`mock` origin, stores them in a bounded ring buffer (`config.maxViolations`, FIFO eviction, process-monotonic `seq` never reused, `summary.oldestSeq` advancing past the cap), and never blocks delivery (observe-and-surface).
+**IMPL**: src/validation/, src/control-plane/
+**TEST**: src/validation/index.test.ts, test/m0-acceptance.test.ts
+Validation produces `Violation` records for all four kinds (`schema` with structured `SchemaError[]`, `decode`, `direction`, `unknown-topic`) with `client`/`mock` origin, stores them in a bounded ring buffer (`config.maxViolations`, FIFO eviction, process-monotonic `seq` never reused, `summary.oldestSeq` advancing past the cap), and never blocks delivery (observe-and-surface). (IMPL spans both directories because the four-kind classification currently lives in `src/control-plane/index.ts` per M0 wiring; the ring buffer lives in `src/validation/`. The F11 injection cleanup is R-017's business, not R-015's.)
 
 #### scenarios/ (L2) authoring runtime
 **UID**: R-016
