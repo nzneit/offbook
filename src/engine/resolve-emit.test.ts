@@ -21,8 +21,19 @@ function channel(overrides: Partial<Channel> = {}): Channel {
 const key = { scenarioName: "warm-up", stepIndex: 0 };
 
 test("F13: an authored {topic, payload} fills qos/retain from the channel — never undefined", () => {
-	const out = resolveEmit({ topic: "state/d1", payload: { a: 1 } }, channel(), loadConfig(), key);
-	expect(out).toEqual({ topic: "state/d1", payload: { a: 1 }, qos: 2, retain: true, delayMs: 0 });
+	const out = resolveEmit(
+		{ topic: "state/d1", payload: { a: 1 } },
+		channel(),
+		loadConfig(),
+		key,
+	);
+	expect(out).toEqual({
+		topic: "state/d1",
+		payload: { a: 1 },
+		qos: 2,
+		retain: true,
+		delayMs: 0,
+	});
 });
 
 test("F13: an explicit qos/retain wins over the channel binding", () => {

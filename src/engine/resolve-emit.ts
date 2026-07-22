@@ -18,9 +18,16 @@ export interface DelayKey {
 
 const DELAY_RE = /^(\d+)(?:-(\d+))?(ms|s)$/;
 
-export function parseDelay(spec: string, config: Config, key: DelayKey): number {
+export function parseDelay(
+	spec: string,
+	config: Config,
+	key: DelayKey,
+): number {
 	const m = spec.match(DELAY_RE);
-	if (!m) throw new Error(`malformed delay "${spec}" (expected "<n>ms|s" or "<min>-<max>ms|s")`);
+	if (!m)
+		throw new Error(
+			`malformed delay "${spec}" (expected "<n>ms|s" or "<min>-<max>ms|s")`,
+		);
 	const unit = m[3] === "s" ? 1000 : 1;
 	const min = Number(m[1]) * unit;
 	if (m[2] === undefined) return min;
@@ -47,7 +54,9 @@ export function resolveEmit(
 				"emit carries both delay and delayMs — resolve to one before the choke-point",
 			);
 		if (!delayKey)
-			throw new Error("a delay string requires a scenario delayKey (L2-only field)");
+			throw new Error(
+				"a delay string requires a scenario delayKey (L2-only field)",
+			);
 		delayMs = parseDelay(partial.delay, config, delayKey);
 	}
 	return {

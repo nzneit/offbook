@@ -44,9 +44,9 @@ test("select routes through registry.match: literal channel beats {param} for th
 	d.register("command/{deviceId}/set", handlerTagged("param", log), "a.ts");
 	d.register("command/special/set", handlerTagged("literal", log), "b.ts");
 	d.instantiate();
-	expect(d.select("command/special/set", stubRegistry)?.registration.pattern).toBe(
-		"command/special/set",
-	);
+	expect(
+		d.select("command/special/set", stubRegistry)?.registration.pattern,
+	).toBe("command/special/set");
 	const generic = d.select("command/thermostat-1/set", stubRegistry);
 	expect(generic?.registration.pattern).toBe("command/{deviceId}/set");
 	expect(generic?.params).toEqual({ deviceId: "thermostat-1" });
@@ -81,7 +81,10 @@ test("same module path falls back to registration order", () => {
 	d.instantiate();
 	const sel = d.select("command/x/set", stubRegistry);
 	sel?.handler.onInbound?.(
-		{ message: { topic: "command/x/set", payload: {} }, meta: { clientId: "c", seq: 1, receivedAt: 0 } },
+		{
+			message: { topic: "command/x/set", payload: {} },
+			meta: { clientId: "c", seq: 1, receivedAt: 0 },
+		},
 		{ publish: () => {}, random: () => 0, now: () => 0 },
 	);
 	expect(log).toEqual(["first"]);

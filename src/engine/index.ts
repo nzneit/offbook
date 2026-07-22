@@ -16,7 +16,11 @@ import type {
 import { type DispatchRegistry, defaultDispatch } from "./dispatch.ts";
 import { createFaker, l1Floor } from "./faker.ts";
 import { hashToInt, mulberry32 } from "./prng.ts";
-import { type DelayKey, type EmitPartial, resolveEmit } from "./resolve-emit.ts";
+import {
+	type DelayKey,
+	type EmitPartial,
+	resolveEmit,
+} from "./resolve-emit.ts";
 import { createScheduler } from "./scheduler.ts";
 
 export type { DelayKey, EmitPartial };
@@ -60,7 +64,11 @@ export function createEngine(deps: EngineDeps): Engine {
 	}
 
 	// the one emit path — everything mock passes through here (G10/F5/F13)
-	function publish(partial: EmitPartial, source: EmitSource, delayKey?: DelayKey): void {
+	function publish(
+		partial: EmitPartial,
+		source: EmitSource,
+		delayKey?: DelayKey,
+	): void {
 		const m = registry().match(partial.topic);
 		if (!m) {
 			// surfaced loudly AND still delivered — observe-and-surface applies to

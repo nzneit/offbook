@@ -20,7 +20,11 @@ export interface DispatchRegistry {
 		topic: string,
 		registry: SpecRegistry,
 	):
-		| { handler: Handler; registration: Registration; params: Record<string, string> }
+		| {
+				handler: Handler;
+				registration: Registration;
+				params: Record<string, string>;
+		  }
 		| undefined;
 	all(): { handler: Handler; registration: Registration }[];
 }

@@ -109,7 +109,12 @@ export function createScheduler(config: Config): Scheduler {
 				}, delayMs);
 				wallTimers.add(timer);
 			} else {
-				timeline.push({ dueAt: logicalNow + delayMs, seq: insertionSeq++, run, epoch });
+				timeline.push({
+					dueAt: logicalNow + delayMs,
+					seq: insertionSeq++,
+					run,
+					epoch,
+				});
 				void pump();
 			}
 		},
