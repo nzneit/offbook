@@ -96,8 +96,10 @@ L1 emissions come from a seeded json-schema-faker draw that is Ajv-rechecked bef
 
 #### engine/ L3 dispatch
 **UID**: R-012
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-2
+**IMPL**: src/engine/dispatch.ts
+**TEST**: src/engine/dispatch.test.ts
 L3 handlers are discovered via glob `handlers/**/*.ts`, each module calling `register(pattern, factory)` on import where `pattern` is a channel address with `{param}` captures resolved by the registry's `SpecRegistry.match` (G1), and multi-match precedence (most-specific → sorted module path → registration order) picks the same winner across runs and file reordering.
 
 #### engine/ emit-completion choke-point
