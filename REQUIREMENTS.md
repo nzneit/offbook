@@ -180,8 +180,10 @@ The Bun CLI is a thin client over the HTTP API: every verb (`init/demo/up/down/t
 
 #### spike: mqtt-pattern parity (F6/R2)
 **UID**: R-026
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#spikes
+**IMPL**: src/registry/
+**TEST**: src/registry/index.test.ts
 The `{p}`→`+p` rewrite reproduces AsyncAPI single-segment capture exactly (mqtt-pattern reads `{param}` literally, so captures ride the rewrite with an identity back-map) and `matchesFilter` implements MQTT `+`/`#` exactly — including `#` matching zero trailing levels — on the fixture channel addresses, pure-string with no transport deps; the go/no-go artifact is the covering test, with a hand-rolled matcher as the fallback on no-go.
 
 #### spike: json-schema-faker fidelity (F8)

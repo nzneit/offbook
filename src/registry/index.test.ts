@@ -53,6 +53,13 @@ test("matchesFilter implements MQTT + / #", async () => {
 	expect(reg.matchesFilter("state/+", "state/a/b")).toBe(false);
 });
 
+test("matchesFilter: '#' matches zero trailing levels; '+' requires exactly one", async () => {
+	const reg = await demoRegistry();
+	// MQTT-3.1.1 §4.7.1.2: "sport/#" also matches "sport" — '#' includes the parent level
+	expect(reg.matchesFilter("state/#", "state")).toBe(true);
+	expect(reg.matchesFilter("state/+", "state")).toBe(false);
+});
+
 test("validate() rejects an off-contract payload and accepts a valid one", async () => {
 	const reg = await demoRegistry();
 	const cmd = reg.match("command/thermostat-1/set")?.channel;
