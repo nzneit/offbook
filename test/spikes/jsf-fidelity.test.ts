@@ -1,26 +1,37 @@
 import { expect, test } from "bun:test";
+import { readdirSync } from "node:fs";
 import {
 	measureFixture,
 	SPIKE_FIXTURES,
 } from "../../scripts/spike-jsf-fidelity.ts";
 
 // R-027 tripwire: pins the measured per-fixture recheck-failure counts so a
-// JSF/schema regression is loud, not silent. Update EXPECTED_FAILURES only
-// with a re-measurement + a D-### note (the D-008 verdict rests on these).
+// JSF/schema regression is loud, not silent. Update EXPECTED only with a
+// re-measurement + a D-### note (the D-008 verdict rests on these).
+// Pins { draws, failures } per fixture (not failures alone) so a fixture that
+// silently parsed to zero channels cannot vacuously pass as 0/0.
 const SEEDS = Array.from({ length: 10 }, (_, i) => i + 1);
-const EXPECTED_FAILURES: Record<string, number> = {
-	"composition.yaml": 0,
-	"external-ref.yaml": 0,
-	"qos-overrides.yaml": 0,
-	"qos-retain.yaml": 0,
-	"thermostat.yaml": 0,
-	"v2-pubsub.yaml": 0,
+const EXPECTED: Record<string, { draws: number; failures: number }> = {
+	"composition.yaml": { draws: 20, failures: 0 },
+	"external-ref.yaml": { draws: 10, failures: 0 },
+	"qos-overrides.yaml": { draws: 20, failures: 0 },
+	"qos-retain.yaml": { draws: 10, failures: 0 },
+	"thermostat.yaml": { draws: 20, failures: 0 },
+	"v2-pubsub.yaml": { draws: 20, failures: 0 },
 };
 
+test("SPIKE_FIXTURES covers exactly the fixtures/asyncapi/*.yaml directory listing", () => {
+	const onDisk = readdirSync(`${import.meta.dir}/../../fixtures/asyncapi`)
+		.filter((f) => f.endsWith(".yaml"))
+		.sort();
+	expect([...SPIKE_FIXTURES].sort()).toEqual(onDisk);
+});
+
 test("JSF recheck-failure rates match the D-008 measurement", async () => {
-	const measured: Record<string, number> = {};
+	const measured: Record<string, { draws: number; failures: number }> = {};
 	for (const fixture of SPIKE_FIXTURES) {
-		measured[fixture] = (await measureFixture(fixture, SEEDS)).failures;
+		const r = await measureFixture(fixture, SEEDS);
+		measured[fixture] = { draws: r.draws, failures: r.failures };
 	}
-	expect(measured).toEqual(EXPECTED_FAILURES);
+	expect(measured).toEqual(EXPECTED);
 });
