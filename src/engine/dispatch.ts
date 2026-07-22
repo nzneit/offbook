@@ -36,7 +36,11 @@ export function createDispatchRegistry(): DispatchRegistry {
 	let importingPath = ""; // set around each loadHandlers import; "" = direct registration
 
 	function precedence(a: Registration, b: Registration): number {
-		return a.modulePath.localeCompare(b.modulePath) || a.order - b.order;
+		// code-unit comparison, NOT localeCompare: precedence must be identical
+		// across machines/ICU builds and consistent with loadHandlers' path sort
+		if (a.modulePath < b.modulePath) return -1;
+		if (a.modulePath > b.modulePath) return 1;
+		return a.order - b.order;
 	}
 
 	return {

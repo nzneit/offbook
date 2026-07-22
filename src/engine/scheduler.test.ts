@@ -181,3 +181,40 @@ test("wall-paced ticks: startWallTicks fires on real cadence, advances now() per
 	expect(ticksAt.length).toBe(count); // nothing fires after stopTicks
 	await s.idle();
 });
+
+test("a throwing task is surfaced and does not strand the queue or deadlock idle()", async () => {
+	const errors: unknown[] = [];
+	const s = createScheduler(loadConfig({ seed: 1 }), (err) => {
+		errors.push(err);
+	});
+	const ran: string[] = [];
+	s.post(async () => {
+		throw new Error("broker.emit rejected");
+	});
+	s.post(() => {
+		ran.push("after-throw");
+	});
+	s.scheduleEmit(10, () => {
+		ran.push("emit");
+	});
+	await s.idle();
+	expect(ran).toEqual(["after-throw", "emit"]);
+	expect(errors.length).toBe(1);
+	expect((errors[0] as Error).message).toBe("broker.emit rejected");
+	expect(s.pending()).toEqual({ scheduled: 0, settled: true });
+});
+
+test("wall-paced overlapping delays stamp the same logical times as virtual mode (no double-count)", async () => {
+	const config = loadConfig({ seed: 1, wallClock: true });
+	const s = createScheduler(config);
+	const at: number[] = [];
+	s.scheduleEmit(40, () => {
+		at.push(s.now());
+	});
+	s.scheduleEmit(40, () => {
+		at.push(s.now());
+	});
+	await s.idle();
+	expect(at).toEqual([config.fixedEpoch + 40, config.fixedEpoch + 40]);
+	s.stopTicks();
+});

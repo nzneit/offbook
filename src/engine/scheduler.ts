@@ -24,7 +24,17 @@ interface TimelineEntry {
 	epoch: number;
 }
 
-export function createScheduler(config: Config): Scheduler {
+export function createScheduler(
+	config: Config,
+	onTaskError?: (err: unknown) => void,
+): Scheduler {
+	const reportTaskError =
+		onTaskError ??
+		((err: unknown) => {
+			// tier-3 surfacing (contracts §4): a task failure is surfaced-not-silent,
+			// and it must never strand the queue or deadlock idle()
+			console.error("[offbook] scheduler task failed:", err);
+		});
 	let logicalNow = config.fixedEpoch;
 	let insertionSeq = 0;
 	let inFlight = 0; // every accepted task, from enqueue until run() settles (D-003 span)
@@ -71,6 +81,10 @@ export function createScheduler(config: Config): Scheduler {
 					// run-to-completion: this await spans the task's own awaits
 					// (incl. `await faker()`), so no other task interleaves (G23/D-003)
 					await entry.run();
+				} catch (err) {
+					// a throwing task must not escape as an unhandled rejection: that
+					// would strand every queued task and deadlock idle() (review #1)
+					reportTaskError(err);
 				} finally {
 					// queued tasks are discarded; a mid-flight task finishes but its
 					// finally skips the decrement (stale epoch) — reset() already
@@ -99,11 +113,12 @@ export function createScheduler(config: Config): Scheduler {
 				// wall-paced interactive path (CR6): real elapsed wall time, and the
 				// logical clock still advances by the delay when it fires (G5)
 				const myEpoch = epoch;
+				const dueAt = logicalNow + delayMs;
 				const timer = setTimeout(() => {
 					// timers are cleared on reset(), so this is belt-and-braces
 					if (myEpoch !== epoch) return;
 					wallTimers.delete(timer);
-					logicalNow += delayMs;
+					logicalNow = Math.max(logicalNow, dueAt);
 					immediate.push({ run, epoch: myEpoch });
 					void pump();
 				}, delayMs);

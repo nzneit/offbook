@@ -130,3 +130,15 @@ register("command/{deviceId}/set", () => ({}));`,
 	const sel = defaultDispatch.select("command/d1/set", stubRegistry);
 	expect(sel?.registration.modulePath.endsWith("10-a.ts")).toBe(true);
 });
+
+test("precedence is code-unit ordered, not locale ordered ('B.ts' beats 'a.ts')", () => {
+	const d = createDispatchRegistry();
+	const log: string[] = [];
+	d.register("command/{deviceId}/set", handlerTagged("lower", log), "a.ts");
+	d.register("command/{deviceId}/set", handlerTagged("upper", log), "B.ts");
+	d.instantiate();
+	// 'B' (0x42) < 'a' (0x61) by code units; localeCompare would invert this
+	expect(d.select("command/x/set", stubRegistry)?.registration.modulePath).toBe(
+		"B.ts",
+	);
+});
