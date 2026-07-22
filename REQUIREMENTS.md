@@ -70,11 +70,18 @@ The client's `connect()` auth fields, ws URL/path, subprotocol, protocol level, 
 **TEST**: test/m0-acceptance.test.ts
 The thinnest dogfoodable slice ships: a browser-style `mqtt.js` client connects to the Aedes ws listener and receives a retained message, and `offbook topics` lists every topic/shape/direction from the bundled demo spec (with `offbook demo` booting and surfacing an off-contract publish as an output, not the gate).
 
+#### broker/ fuller tier-1 acceptance: wildcard replay, raw non-JSON delivery, DUP-on-redelivery
+**UID**: R-009
+**STATUS**: specified
+**COVERS**: docs/specs/build-plan.md#tier-1
+Beyond R-003's connect/retained/QoS-1 core: a wildcard subscribe (`state/+`, `state/#`) replays retained state for every matching topic straight from Aedes' store (the same set `getState()` returns), never a parallel ledger (R3/F6/CR11); a non-JSON publish surfaces (not crashes) and is still **delivered raw** to subscribers; and DUP-on-redelivery is exercised by a harness that suppresses PUBACK to force redelivery and assert `DUP=1` — absent that harness the DUP contract is delegated to the WS-fidelity spike / known-limitations (build-plan#tier-1). Raw delivery + wildcard replay largely ride the existing broker + Aedes-native behavior and need covering tests; DUP needs the dedicated PUBACK-suppressing harness.
+
 <!--
 Seeding is staged (doc-system.md §7). Batch 1 (R-001..R-007): Tier 0/1 modules + the two empirical spikes.
 R-008 (M0): the walking-skeleton prototype target, seeded ahead of the batch-2+ pass so the week's deliverable is enumerable. Build against build-plan.md#m0; rationale in DECISIONS.md D-002.
+R-009 (broker tier-1 residual): the fuller broker acceptance beyond R-003's core (wildcard replay, raw non-JSON delivery, DUP-on-redelivery), seeded ahead of the batch-2+ pass so the untested tier-1 broker surface stays enumerable. Build against build-plan.md#tier-1.
 
-The batch-2+ pass is decided in shape but deferred to post-prototype enrichment, allocated in order from R-009:
+The batch-2+ pass is decided in shape but deferred to post-prototype enrichment, allocated in order from R-010:
   - Hybrid module carve of build-plan.md §3: validation/ and scenarios/ one entry each; engine/ split by layer (L1 floor, L3 dispatch, emit-completion, reset); control-plane/ (endpoints + envelope, plus the CI settlement flow if split); cli/ split along the ergonomics clusters (dispatch backbone, publish/scenario input, topics/validation rendering, up/ports, status/check, watch, init).
   - Spikes 4 and 5 (mqtt-pattern parity, json-schema-faker fidelity) as their own `specified` entries under build-plan.md#spikes; spike 3 (adopt-vs-build) stays out, resolved.
   - The v1 acceptance-gate items (build-plan.md §4: §5 correctness, determinism, transport isolation, observe-and-surface) as thin cross-cutting entries that cross-reference the module entries rather than restate them; add an `anchor: NAME` marker per section covered.
