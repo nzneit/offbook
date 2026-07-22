@@ -232,3 +232,49 @@ test("passive mode fires no ticks (F10)", async () => {
 	await engine.idle();
 	expect(ticked).toBe(0);
 });
+
+test("an off-spec L1-sourced emit drops and surfaces with emitSource.layer === 'L1' (G10 via the one emit path)", async () => {
+	const { engine, emitted, violations } = harness();
+	engine.publish(
+		{ topic: "state/d1", payload: { status: "BOGUS" } },
+		{ layer: "L1" },
+	);
+	await engine.idle();
+	expect(emitted).toEqual([]);
+	expect(violations.length).toBe(1);
+	expect(violations[0]?.emitSource).toEqual({ layer: "L1" });
+});
+
+test("ctx.random streams are keyed per invocation: draws advance within one, distinct events get distinct streams (F7(ii))", async () => {
+	const config = loadConfig({ seed: 7 });
+	const d = createDispatchRegistry();
+	const engine = createEngine({
+		config,
+		broker: { emit: async () => {} },
+		registry: makeRegistry,
+		record: (v) => ({ ...v, seq: 1, observedAt: "t" }) as Violation,
+		dispatch: d,
+	});
+	const byEvent: Record<number, number[]> = {};
+	d.register(
+		"state/{deviceId}",
+		() => ({
+			onInbound(event, ctx) {
+				byEvent[event.meta.seq] = [ctx.random(), ctx.random()];
+			},
+		}),
+		"h.ts",
+	);
+	d.instantiate();
+	for (const seq of [1, 2]) {
+		engine.onInbound({
+			message: { topic: "state/d1", payload: { status: "warn" } },
+			meta: { clientId: "c1", seq, receivedAt: 0 },
+		});
+	}
+	await engine.idle();
+	const a = byEvent[1];
+	const b = byEvent[2];
+	expect(a?.[0]).not.toBe(a?.[1]); // the stream advances within one invocation
+	expect(a).not.toEqual(b); // a different invocationKey (meta.seq) yields a different stream
+});
