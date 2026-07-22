@@ -104,8 +104,10 @@ L3 handlers are discovered via glob `handlers/**/*.ts`, each module calling `reg
 
 #### engine/ emit-completion choke-point
 **UID**: R-013
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-2
+**IMPL**: src/engine/resolve-emit.ts, src/engine/index.ts
+**TEST**: src/engine/resolve-emit.test.ts, src/engine/index.test.ts
 Every emission passes the single `resolveEmit(partial, channel)` choke-point (contracts §3): an authored L3 `ctx.publish` with no qos/retain reaches `broker.emit` carrying the channel-resolved qos/retain (F13 — never `undefined`, so Aedes never falls back to QoS 0 and no `StateEntry.retain` is minted from `undefined`), an L2 step `delay: '150-300ms'` parses to a finite `delayMs` seeded by `(scenarioName, stepIndex)` (F7) yielding a finite `now()`, and each emit is stamped with `Violation.emitSource` (`L1` / `L2 {scenarioName, stepIndex}` / `L3`) since `broker.emit` is content-only (G10).
 
 #### engine/ reset
