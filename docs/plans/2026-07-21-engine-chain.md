@@ -859,7 +859,7 @@ export function parseDelay(spec: string, config: Config, key: DelayKey): number;
 export function resolveEmit(partial: EmitPartial, channel: Channel, config: Config, delayKey?: DelayKey): NormalizedMessage;
 ```
 
-Semantics (contracts §3, F13/F7/CR7): `qos = partial.qos ?? channel.qos ?? 1`; `retain = partial.retain ?? channel.retain ?? false`; `delayMs = partial.delayMs ?? (partial.delay ? parseDelay(...) : 0)`. Delay grammar `"<n>ms|s"` or `"<min>-<max>ms|s"`; a ranged delay draws once from `mulberry32(hashToInt(`${config.seed}|delay|${scenarioName}|${stepIndex}`))` and lands on an integer in `[min, max]` inclusive. A `delay` string without a `delayKey` throws (only the L2 runner produces delay strings and it always has the key; malformed grammar also throws — R-016's author-time validation catches both before dispatch, skipped-loud per its own statement).
+Semantics (contracts §3, F13/F7/CR7): `qos = partial.qos ?? channel.qos ?? 1`; `retain = partial.retain ?? channel.retain ?? false`; `delayMs` comes from `partial.delayMs`, or from `parseDelay` when a `delay` string is present; both set at once throws (no silent precedence). Delay grammar `"<n>ms|s"` or `"<min>-<max>ms|s"`; a ranged delay draws once from `mulberry32(hashToInt(`${config.seed}|delay|${scenarioName}|${stepIndex}`))` and lands on an integer in `[min, max]` inclusive. A `delay` string without a `delayKey` throws (only the L2 runner produces delay strings and it always has the key; malformed grammar also throws — R-016's author-time validation catches both before dispatch, skipped-loud per its own statement).
 
 - [ ] **Step 1: Write the failing tests**
 
