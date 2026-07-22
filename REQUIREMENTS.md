@@ -80,8 +80,10 @@ Beyond R-003's connect/retained/QoS-1 core: a wildcard subscribe (`state/+`, `st
 
 #### engine/ deterministic scheduler core
 **UID**: R-010
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-2
+**IMPL**: src/engine/scheduler.ts, src/engine/prng.ts
+**TEST**: src/engine/scheduler.test.ts
 A single virtual-clock event loop schedules all emissions and awaits `broker.emit` for ordered delivery, seeded by a Mulberry32 PRNG so the same seed yields the same event order, with a wall-paced interactive path gated on `config.wallClock` for emit delays + tick cadence (CR6) that is exercised only outside the determinism gate (which stays `passive`, F10).
 
 #### engine/ L1 faker floor
