@@ -218,7 +218,7 @@ Expected: PASS — every existing test plus the 6 new `scanArrowTags` tests, 0 f
 - [ ] **Step 5: Full suite + doc gate still green**
 
 Run: `bun test > /dev/null 2>&1; echo "exit=$?"; bun scripts/check-docs.ts`
-Expected: `exit=0` and `check-docs: ok — 31 requirements, 8 decisions, ...` (nothing is wired into `main()` yet).
+Expected: `exit=0` and `check-docs: ok — 32 requirements, 9 decisions, ...` (nothing is wired into `main()` yet).
 
 - [ ] **Step 6: Lint and commit**
 
@@ -440,7 +440,7 @@ And in `main()`, extend the `errors` array (after `...checkLifecycle(reqs),`):
 - [ ] **Step 3: Run the gate, expect green**
 
 Run: `bun scripts/check-docs.ts`
-Expected: `check-docs: ok — 31 requirements, 8 decisions, ...`. Any error here is a retrofit miss — the message names the file and UID; fix and rerun.
+Expected: `check-docs: ok — 32 requirements, 9 decisions, ...`. Any error here is a retrofit miss — the message names the file and UID; fix and rerun.
 
 - [ ] **Step 4: Prove the gate bites (negative check)**
 
@@ -545,10 +545,10 @@ git commit -m "tooling: stryker mutation harness for src/engine (manual bun run 
 
 ---
 
-### Task 6: Decision ledger entry (D-009)
+### Task 6: Decision ledger entry (D-010)
 
 **Files:**
-- Modify: `DECISIONS.md` (append; ledger currently ends at D-008)
+- Modify: `DECISIONS.md` (append; ledger currently ends at D-009)
 
 **Interfaces:**
 - Consumes: nothing; records what Tasks 1-5 adopted.
@@ -559,7 +559,7 @@ git commit -m "tooling: stryker mutation harness for src/engine (manual bun run 
 Append to the end of `DECISIONS.md`:
 
 ```markdown
-### D-009: Adopt a coverage gate, arrow-tag traceability, and a mutation-testing harness
+### D-010: Adopt a coverage gate, arrow-tag traceability, and a mutation-testing harness
 **Date**: 2026-07-22
 **What**: Three dev-tooling conventions: (1) `bun test` computes coverage on every run (`bunfig.toml`), emits lcov, and fails under ratcheted line/function floors — raise-only, never lowered to admit a regression; (2) a `tested` requirement's `TEST` files must carry OFT-style arrow-tag comments (`// [utest->R-###]`, also `itest`/`stest`), verified both directions by `check-docs.ts` (missing tag in a traced file, dangling/malformed/retired-target tags in the test tree); (3) mutation testing via Stryker + the Bun runner, scoped to `src/engine/`, run manually (`bun run mutate`), never a gate.
 **Why**: Bun has no branch coverage (bun#7100), so line/function floors + mutation testing stand in for test-strength measurement; the honor-system `TEST` trace fields were verifiable only by hand. Full OpenFastTrace adoption was rejected (JVM dependency, mandatory `type~name~revision` id grammar, no lifecycle model), but its tag syntax is kept verbatim-compatible so a later migration is mechanical. Provenance: two verified deep-research rounds, 2026-07-22.
@@ -570,9 +570,9 @@ Append to the end of `DECISIONS.md`:
 - [ ] **Step 2: Validate and commit**
 
 Run: `bun scripts/check-docs.ts`
-Expected: `check-docs: ok — 31 requirements, 9 decisions, ...`
+Expected: `check-docs: ok — 32 requirements, 10 decisions, ...`
 
 ```bash
 git add DECISIONS.md
-git commit -m "docs: D-009 — adopt coverage gate, arrow-tag traceability, mutation harness"
+git commit -m "docs: D-010 — adopt coverage gate, arrow-tag traceability, mutation harness"
 ```
