@@ -226,6 +226,12 @@ The `aedes`-import lint rule passes repo-wide: no module but `broker/` imports `
 **COVERS**: docs/specs/build-plan.md#v1-gate
 No validation path ever blocks delivery — validation observes and surfaces loudly at every tier while the broker stays payload-agnostic — the module bar lives in R-015; this entry is the cross-cutting v1 gate over it.
 
+#### engine/ instance materialization (InstanceRegistry)
+**UID**: R-032
+**STATUS**: specified
+**COVERS**: docs/specs/build-plan.md#tier-2
+The engine owns the instance-materialization ledger (contracts §2, F1): `InstanceRegistry.materialize` is idempotent, `snapshot()` is captured at reset and `restore()` re-materializes exactly the snapshot set re-seeded (a ledger, never a mirror of Aedes' retained store — that is `getState()`'s job, R3), `seedInstances` in `services.yaml` pre-materializes the deterministic demo set, and `reset` republishes initial state through it (contracts §5) — the materialization half of reset, extending R-014's engine-internal restore.
+
 <!--
 Seeding is staged (doc-system.md §7). Batch 1 (R-001..R-007) + R-008 (M0) + R-009 (broker tier-1 residual): seeded; reconciled where traces exist (the R-006/R-007 spikes remain open). Batch 2+ (R-010..R-031): the full module/spike/gate carve per D-007 and docs/archive/intake/2026-07-21-batch-2-seeding-carve.md.
 What remains unseeded resolves case by case (not bulk):
