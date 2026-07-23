@@ -1,0 +1,24 @@
+[test]
+coverage = true
+coverageSkipTestFiles = true
+coverageReporter = ["text", "lcov"]
+coverageDir = "coverage"
+# Coverage gate — ratchet policy: raise the floors as coverage grows; never
+# lower them to admit a regression.
+# Bun quirks (verified 2026-07): plural keys only ("lines"/"functions" —
+# singular keys are silently ignored and gate nothing); a failing gate prints
+# NO message, exit code 1 is the only signal; a "statements" key exists but no
+# statement metric is computed; branch coverage does not exist (bun#7100) —
+# test strength beyond lines/functions is mutation testing's job (bun run mutate).
+# Requires Bun >= 1.3.0 (older lcov understates coverage).
+# Threshold semantics on Bun 1.3.14, measured 2026-07-22: per-file. Evidence:
+# all-files was 94.81%/93.08% (lines/funcs); floors set to all-files minus
+# 2 pts, floored to 0.92/0.91, still failed (exit=1, 0 failing tests) because
+# the lowest single file (scripts/spike-jsf-fidelity.ts, 76.67%/66.67%) was
+# below those floors even though the aggregate cleared them (an
+# aggregate-only/repo-overall gate would have passed here), so the check is
+# per-file. Floors below are 2 pts below that lowest file's own numbers
+# (0.74/0.64, floored), which does pass (exit=0); this is the real ratchet
+# floor for a per-file gate. A temporary lines=0.99 was also proven to trip
+# the gate (exit=1, 0 failing tests, no printed message) before restoring.
+coverageThreshold = { lines = 0.74, functions = 0.64 }
