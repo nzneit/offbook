@@ -77,3 +77,10 @@ Append-only. Each decision has a stable never-reused `D-###` id, what was decide
 **Mitigations / UX note**: the "feels alive" experience stays **opt-in and one paste away** — the init scaffold / docs should ship a ready-made periodic-telemetry L3 `tick()` handler example (lands with the R-016/R-025-era work), and the fresh-project orientation banner (R-025, EI1–EI2) already signposts the L1-floor state.
 **From**: engine-chain final whole-branch review finding #5 (2026-07-22); owner chose amend-over-implement on UX grounds (dialog)
 **Folds into**: docs/specs/contracts.md §3 (trigger-table row), src/engine/index.ts (tick fan-out, unchanged — ratified)
+
+### D-010: Adopt a coverage gate, arrow-tag traceability, and a mutation-testing harness
+**Date**: 2026-07-22
+**What**: Three dev-tooling conventions: (1) `bun test` computes coverage on every run (`bunfig.toml`), emits lcov, and fails under ratcheted line/function floors — raise-only, never lowered to admit a regression; (2) a `tested` requirement's `TEST` files must carry OFT-style arrow-tag comments (`// [utest->R-###]`, also `itest`/`stest`), verified both directions by `check-docs.ts` (missing tag in a traced file, dangling/malformed/retired-target tags in the test tree); (3) mutation testing via Stryker + the Bun runner, scoped to `src/engine/`, run manually (`bun run mutate`, requires a Node >= 20 binary on `PATH` to host the Stryker CLI), never a gate.
+**Why**: Bun has no branch coverage (bun#7100), so line/function floors + mutation testing stand in for test-strength measurement; the honor-system `TEST` trace fields were verifiable only by hand. Full OpenFastTrace adoption was rejected (JVM dependency, mandatory `type~name~revision` id grammar, no lifecycle model), but its tag syntax is kept verbatim-compatible so a later migration is mechanical. Provenance: two verified deep-research rounds, 2026-07-22.
+**From**: docs/superpowers/specs/2026-07-22-coverage-traceability-tooling-design.md (brainstorm dialog, 2026-07-22)
+**Folds into**: AGENTS.md (doc-system gate paragraph)
