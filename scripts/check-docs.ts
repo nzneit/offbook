@@ -121,6 +121,35 @@ export function checkIntake(files: { name: string; content: string }[]): string[
   return errs;
 }
 
+export type ArrowTag = { type: "utest" | "itest" | "stest"; uid: string; line: number };
+export type TagScan = { tags: ArrowTag[]; malformed: { raw: string; line: number }[] };
+
+// A tag only counts inside a comment: `//` or `/*` earlier on the line, or a
+// block-comment continuation line (leading `*`). Line-based on purpose — the
+// checker stays a hand-parser, not a TS lexer.
+function inComment(line: string, idx: number): boolean {
+  const before = line.slice(0, idx);
+  return before.includes("//") || before.includes("/*") || /^\s*\*/.test(line);
+}
+
+// Arrow-shaped candidates that fail the strict grammar are surfaced as
+// malformed, never silently ignored — a typo must not leak a coverage claim.
+export function scanArrowTags(text: string): TagScan {
+  const tags: ArrowTag[] = [];
+  const malformed: { raw: string; line: number }[] = [];
+  const candidate = /\[[A-Za-z]*test->[^\]]*\]/g;
+  const strict = /^\[(utest|itest|stest)->(R-\d{3})\]$/;
+  text.split(/\r?\n/).forEach((line, i) => {
+    for (const m of line.matchAll(candidate)) {
+      if (!inComment(line, m.index)) continue;
+      const s = m[0].match(strict);
+      if (s) tags.push({ type: s[1] as ArrowTag["type"], uid: s[2], line: i + 1 });
+      else malformed.push({ raw: m[0], line: i + 1 });
+    }
+  });
+  return { tags, malformed };
+}
+
 function main(): void {
   const reqs = parseEntries(read("REQUIREMENTS.md") ?? "", 4).filter((e) => e.meta.UID);
   const decs = parseEntries(read("DECISIONS.md") ?? "", 3).filter((e) => /^D-\d+/.test(e.title));

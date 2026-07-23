@@ -141,3 +141,48 @@ test("checkLifecycle requires TEST for tested", () => {
 test("checkIntake passes an open item", () => {
   expect(checkIntake([{ name: "2026-07-10-topic.md", content: "# topic\n**Status**: open\n" }])).toEqual([]);
 });
+
+import { scanArrowTags } from "./check-docs.ts";
+
+// Fixture tags are built by concatenation so the repo-wide tag sweep (which
+// scans scripts/*.test.ts) never sees this file's fixtures as real tags.
+const mktag = (type: string, uid: string) => `[${type}` + `->${uid}]`;
+
+test("scanArrowTags finds a strict tag in a line comment", () => {
+  const { tags, malformed } = scanArrowTags(`// ${mktag("utest", "R-014")}\ntest("x", () => {});`);
+  expect(tags).toEqual([{ type: "utest", uid: "R-014", line: 1 }]);
+  expect(malformed).toEqual([]);
+});
+
+test("scanArrowTags accepts itest and stest and reports 1-based lines", () => {
+  const text = `line one\n// ${mktag("itest", "R-008")}\n/* ${mktag("stest", "R-027")} */`;
+  const { tags } = scanArrowTags(text);
+  expect(tags).toEqual([
+    { type: "itest", uid: "R-008", line: 2 },
+    { type: "stest", uid: "R-027", line: 3 },
+  ]);
+});
+
+test("scanArrowTags flags malformed tags instead of ignoring them", () => {
+  // two-digit uid, unknown type prefix, uppercase type — all arrow-shaped, all rejected
+  const text = `// ${mktag("utest", "R-14")}\n// ${mktag("test", "R-014")}\n// ${mktag("Utest", "R-014")}`;
+  const { tags, malformed } = scanArrowTags(text);
+  expect(tags).toEqual([]);
+  expect(malformed.map((m) => m.line)).toEqual([1, 2, 3]);
+});
+
+test("scanArrowTags ignores tag-shaped text outside comments", () => {
+  const { tags, malformed } = scanArrowTags(`const s = "${mktag("utest", "R-001")}";`);
+  expect(tags).toEqual([]);
+  expect(malformed).toEqual([]);
+});
+
+test("scanArrowTags reads a block-comment continuation line", () => {
+  const { tags } = scanArrowTags(`/*\n * ${mktag("utest", "R-002")}\n */`);
+  expect(tags).toEqual([{ type: "utest", uid: "R-002", line: 2 }]);
+});
+
+test("scanArrowTags finds multiple tags on one line", () => {
+  const { tags } = scanArrowTags(`// ${mktag("utest", "R-001")} ${mktag("utest", "R-002")}`);
+  expect(tags.map((t) => t.uid)).toEqual(["R-001", "R-002"]);
+});
