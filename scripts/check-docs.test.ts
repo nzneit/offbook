@@ -148,6 +148,8 @@ import { scanArrowTags } from "./check-docs.ts";
 // scans scripts/*.test.ts) never sees this file's fixtures as real tags.
 const mktag = (type: string, uid: string) => `[${type}` + `->${uid}]`;
 
+import { checkTestTraces, checkTagSweep } from "./check-docs.ts";
+
 test("scanArrowTags finds a strict tag in a line comment", () => {
   const { tags, malformed } = scanArrowTags(`// ${mktag("utest", "R-014")}\ntest("x", () => {});`);
   expect(tags).toEqual([{ type: "utest", uid: "R-014", line: 1 }]);
@@ -185,4 +187,61 @@ test("scanArrowTags reads a block-comment continuation line", () => {
 test("scanArrowTags finds multiple tags on one line", () => {
   const { tags } = scanArrowTags(`// ${mktag("utest", "R-001")} ${mktag("utest", "R-002")}`);
   expect(tags.map((t) => t.uid)).toEqual(["R-001", "R-002"]);
+});
+
+const tested = (uid: string, testField: string) =>
+  ({ title: "", meta: { UID: uid, STATUS: "tested", TEST: testField }, body: "", line: 1 });
+
+test("checkTestTraces passes when every TEST file carries the tag", () => {
+  const files: Record<string, string> = { "src/a.test.ts": `// ${mktag("utest", "R-001")}` };
+  expect(checkTestTraces([tested("R-001", "src/a.test.ts")], (p) => files[p] ?? null)).toEqual([]);
+});
+
+test("checkTestTraces errors when a TEST file exists but has no tag for the UID", () => {
+  const files: Record<string, string> = { "src/a.test.ts": `// ${mktag("utest", "R-002")}` };
+  const errs = checkTestTraces([tested("R-001", "src/a.test.ts")], (p) => files[p] ?? null);
+  expect(errs.some((m) => m.includes("R-001") && m.includes("no arrow tag"))).toBe(true);
+});
+
+test("checkTestTraces errors when a TEST path does not exist", () => {
+  const errs = checkTestTraces([tested("R-001", "src/gone.test.ts")], () => null);
+  expect(errs.some((m) => m.includes("TEST path not found"))).toBe(true);
+});
+
+test("checkTestTraces checks every comma-separated TEST file, not just one", () => {
+  const files: Record<string, string> = {
+    "src/a.test.ts": `// ${mktag("utest", "R-001")}`,
+    "src/b.test.ts": "no tag here",
+  };
+  const errs = checkTestTraces([tested("R-001", "src/a.test.ts, src/b.test.ts")], (p) => files[p] ?? null);
+  expect(errs.some((m) => m.includes("src/b.test.ts"))).toBe(true);
+  expect(errs.some((m) => m.includes("src/a.test.ts"))).toBe(false);
+});
+
+test("checkTestTraces ignores non-tested requirements", () => {
+  const req = { title: "", meta: { UID: "R-001", STATUS: "specified" }, body: "", line: 1 };
+  expect(checkTestTraces([req], () => null)).toEqual([]);
+});
+
+test("checkTagSweep flags a dangling tag", () => {
+  const files = [{ path: "src/a.test.ts", content: `// ${mktag("utest", "R-999")}` }];
+  const errs = checkTagSweep(files, [tested("R-001", "x")]);
+  expect(errs.some((m) => m.includes("dangling") && m.includes("R-999") && m.includes("src/a.test.ts:1"))).toBe(true);
+});
+
+test("checkTagSweep flags a tag on a retired requirement", () => {
+  const files = [{ path: "src/a.test.ts", content: `// ${mktag("utest", "R-001")}` }];
+  const retired = { title: "", meta: { UID: "R-001", STATUS: "retired" }, body: "", line: 1 };
+  expect(checkTagSweep(files, [retired]).some((m) => m.includes("retired"))).toBe(true);
+});
+
+test("checkTagSweep accepts a tag on a built requirement (early coverage)", () => {
+  const files = [{ path: "src/a.test.ts", content: `// ${mktag("utest", "R-001")}` }];
+  const built = { title: "", meta: { UID: "R-001", STATUS: "built", IMPL: "src/" }, body: "", line: 1 };
+  expect(checkTagSweep(files, [built])).toEqual([]);
+});
+
+test("checkTagSweep surfaces malformed tags with file:line", () => {
+  const files = [{ path: "src/a.test.ts", content: `// ${mktag("utest", "R-14")}` }];
+  expect(checkTagSweep(files, []).some((m) => m.includes("malformed") && m.includes("src/a.test.ts:1"))).toBe(true);
 });

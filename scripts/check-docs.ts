@@ -150,6 +150,44 @@ export function scanArrowTags(text: string): TagScan {
   return { tags, malformed };
 }
 
+// Forward direction: a `tested` STATUS is only as good as its TEST trace, so
+// every listed file must exist and carry an arrow tag for the UID — a listed
+// file that never mentions the requirement is the honor system, and an error.
+export function checkTestTraces(reqs: Entry[], readFile: (rel: string) => string | null): string[] {
+  const errs: string[] = [];
+  for (const r of reqs) {
+    if (r.meta.STATUS !== "tested") continue;
+    const uid = r.meta.UID ?? "?";
+    const files = (r.meta.TEST ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    for (const f of files) {
+      const text = readFile(f);
+      if (text == null) { errs.push(`${uid}: TEST path not found: ${f}`); continue; }
+      if (!scanArrowTags(text).tags.some((t) => t.uid === uid))
+        errs.push(`${uid}: no arrow tag for ${uid} in TEST file ${f} (expected e.g. // [utest->${uid}])`);
+    }
+  }
+  return errs;
+}
+
+// Reverse direction: every tag in the test tree must point at a live
+// requirement. Tags on built/specified requirements are early coverage — fine.
+export function checkTagSweep(files: { path: string; content: string }[], reqs: Entry[]): string[] {
+  const errs: string[] = [];
+  const byUid = new Map(reqs.map((r) => [r.meta.UID ?? "", r]));
+  for (const f of files) {
+    const { tags, malformed } = scanArrowTags(f.content);
+    for (const m of malformed)
+      errs.push(`${f.path}:${m.line}: malformed arrow tag ${m.raw} (expected [utest|itest|stest->R-###])`);
+    for (const t of tags) {
+      const req = byUid.get(t.uid);
+      if (!req) errs.push(`${f.path}:${t.line}: dangling arrow tag [${t.type}->${t.uid}] — no such requirement`);
+      else if (req.meta.STATUS === "retired")
+        errs.push(`${f.path}:${t.line}: arrow tag [${t.type}->${t.uid}] targets a retired requirement — retire or retarget the test`);
+    }
+  }
+  return errs;
+}
+
 function main(): void {
   const reqs = parseEntries(read("REQUIREMENTS.md") ?? "", 4).filter((e) => e.meta.UID);
   const decs = parseEntries(read("DECISIONS.md") ?? "", 3).filter((e) => /^D-\d+/.test(e.title));
