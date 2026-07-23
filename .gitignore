@@ -2,3 +2,5 @@ node_modules/
 .offbook/
 *.log
 coverage/
+.stryker-tmp/
+reports/
