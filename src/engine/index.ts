@@ -55,6 +55,7 @@ export function createEngine(deps: EngineDeps): Engine {
 	let seed = config.seed;
 	let faker = createFaker(config);
 	let tickIndex = 0;
+	let inboundSeq = 0;
 
 	function stampViolation(
 		v: Omit<Violation, "seq" | "observedAt" | "emitSource">,
@@ -149,14 +150,20 @@ export function createEngine(deps: EngineDeps): Engine {
 		},
 
 		onInbound(event) {
+			// meta.seq is engine-owned (contracts §1): re-stamp at arrival so the
+			// counter is reset-scoped and replay survives broker-side seq drift
+			const stamped: InboundEvent = {
+				...event,
+				meta: { ...event.meta, seq: ++inboundSeq },
+			};
 			scheduler.post(() => {
-				const sel = dispatch.select(event.message.topic, registry());
+				const sel = dispatch.select(stamped.message.topic, registry());
 				// L3 → [L2 seam: the scenario runner slots in here, R-016] ; no L1 on
 				// the reactive path (contracts §3 trigger table)
 				sel?.handler.onInbound?.(
-					event,
+					stamped,
 					makeCtx(
-						`inbound|${event.meta.seq}|${sel.registration.modulePath}|${sel.registration.order}`,
+						`inbound|${stamped.meta.seq}|${sel.registration.modulePath}|${sel.registration.order}`,
 					),
 				);
 			});
@@ -214,6 +221,7 @@ export function createEngine(deps: EngineDeps): Engine {
 			if (newSeed !== undefined) seed = newSeed;
 			faker = createFaker({ ...config, seed });
 			tickIndex = 0;
+			inboundSeq = 0;
 			dispatch.instantiate(); // fresh L3 instances — factories, not reused state
 		},
 	};

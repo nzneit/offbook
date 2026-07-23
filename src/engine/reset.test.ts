@@ -161,3 +161,48 @@ test("R-014: reset re-keys the L1 faker — same seed replays the floor draw, a 
 	await engine.idle();
 	expect(JSON.stringify(emitted)).not.toBe(first); // re-keyed faker ⇒ divergent draw
 });
+
+test("meta.seq is engine-owned: re-stamped on arrival, zeroed by reset — replay survives broker-side seq drift", async () => {
+	const config = loadConfig({ seed: 7 });
+	const d = createDispatchRegistry();
+	const engine = createEngine({
+		config,
+		broker: { emit: async () => {} },
+		registry: makeRegistry,
+		record: (v) => ({ ...v, seq: 1, observedAt: "t" }) as Violation,
+		dispatch: d,
+	});
+	const seen: { seq: number; draw: number }[] = [];
+	d.register(
+		"state/{id}",
+		() => ({
+			onInbound(event, ctx) {
+				seen.push({ seq: event.meta.seq, draw: ctx.random() });
+			},
+		}),
+		"h.ts",
+	);
+	d.instantiate();
+	// broker-minted seqs are arbitrary (a long-lived broker session)
+	engine.onInbound({
+		message: { topic: "state/a", payload: { n: 1 } },
+		meta: { clientId: "c", seq: 41, receivedAt: 0 },
+	});
+	engine.onInbound({
+		message: { topic: "state/a", payload: { n: 1 } },
+		meta: { clientId: "c", seq: 99, receivedAt: 0 },
+	});
+	await engine.idle();
+	expect(seen.map((s) => s.seq)).toEqual([1, 2]); // engine re-stamped in arrival order
+	const firstDraw = seen[0]?.draw;
+
+	engine.reset();
+	seen.length = 0;
+	engine.onInbound({
+		message: { topic: "state/a", payload: { n: 1 } },
+		meta: { clientId: "c", seq: 123, receivedAt: 0 },
+	});
+	await engine.idle();
+	expect(seen[0]?.seq).toBe(1); // counter zeroed by reset
+	expect(seen[0]?.draw).toBe(firstDraw); // same invocation key ⇒ same ctx stream despite drift
+});
