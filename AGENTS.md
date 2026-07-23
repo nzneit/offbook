@@ -42,4 +42,5 @@ Pre-work complete (L2 format, frozen contracts, build plan, fixtures, doc-system
 
 ## Working notes
 - **Git identity is the user's to set** — don't run `git config user.*` on their behalf. Commit/push **only when asked**.
-- **`bun run mutate` (Stryker) needs a Node >= 20 binary on `PATH`** to host the Stryker CLI process itself — Bun cannot (a `@babel/generator` CJS/ESM-interop crash: `TypeError: generator is not a function`); the runner plugin itself still drives `bun test`. Mutation testing is manual and never a gate.
+- **`bun run mutate` (Stryker) needs a Node >= 20 binary on `PATH`** to host the Stryker CLI process itself — Bun cannot (a `@babel/generator` CJS/ESM-interop crash: `TypeError: generator is not a function`); the runner plugin itself still drives `bun test`. Mutation testing is manual and never a gate. The runner sanitizes bunfig.toml for its child runs (forces coverage=false), which is why the always-on gate and mutation runs compose safely.
+- **`bun test <single-file>` may exit 1 with zero failures** — the per-file coverage floor (bunfig.toml) judges partially-imported files. Exit 1 with 0 fails = coverage floor, not a test failure; gate on full `bun test` runs.

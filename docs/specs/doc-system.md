@@ -144,6 +144,7 @@ Template shape:
 - **Unique R- and D- IDs**, with a retired-IDs guard that enforces never-reuse.
 - **Every `COVERS` anchor resolves** to a live spec section (this is what makes the fragile `§N` web safe to evolve).
 - **Every `built`/`tested` STATUS matches reality:** no requirement claims `built`/`tested` without the corresponding implementation/test trace.
+- **Bidirectional arrow-tag traceability:** forward, every `TEST` file listed on a `tested` requirement must contain a matching `[utest|itest|stest->R-###]` comment tag; reverse, every `*.test.ts` under `src/`, `test/`, and `scripts/` is swept, and malformed, dangling, or retired-target tags are errors.
 - **Every open intake file is well-formed** against the template.
 
 Optionally it can emit a one-line dashboard (counts by lifecycle state) as a generated summary, but that is a nicety, not core.

@@ -1,7 +1,7 @@
 # Coverage gate + tag-verified traceability — design
 
 **Date**: 2026-07-22
-**Status**: draft, pending user review
+**Status**: implemented 2026-07-22 (commits 3e26e4d..469da4b + fix rounds; see D-010)
 **Provenance**: two deep-research rounds (2026-07-22) on Bun-era coverage tooling and requirements-traceability tooling; all load-bearing tool claims below were adversarially verified against live primary sources in those rounds.
 
 ## Problem

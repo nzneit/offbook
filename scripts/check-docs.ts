@@ -92,7 +92,12 @@ export function checkCovers(reqs: Entry[], readFile: (rel: string) => string | n
 
 function read(rel: string): string | null {
   const p = join(ROOT, rel);
-  return existsSync(p) ? readFileSync(p, "utf8") : null;
+  if (!existsSync(p)) return null;
+  try {
+    return readFileSync(p, "utf8");
+  } catch {
+    return null;
+  }
 }
 
 function listTestFiles(): { path: string; content: string }[] {

@@ -21,4 +21,7 @@ coverageDir = "coverage"
 # (0.74/0.64, floored), which does pass (exit=0); this is the real ratchet
 # floor for a per-file gate. A temporary lines=0.99 was also proven to trip
 # the gate (exit=1, 0 failing tests, no printed message) before restoring.
+# Focused runs (bun test <one-file>) may exit 1 with ZERO test failures: the
+# per-file floor judges files the run only partially imports. Trust the printed
+# fail count for focused runs; the gate is authoritative on full `bun test` only.
 coverageThreshold = { lines = 0.74, functions = 0.64 }
