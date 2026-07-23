@@ -4,6 +4,8 @@ import { loadConfig } from "../config/index.ts";
 import type { Channel } from "../model/index.ts";
 import { createFaker, l1Floor } from "./faker.ts";
 
+// [utest->R-011]
+
 const stateSchema = {
 	type: "object",
 	required: ["deviceId", "status", "target", "units"],

@@ -86,6 +86,7 @@ type _R001Coverage = {
 	LockEntry: LockEntry;
 };
 
+// [utest->R-001]
 test("model/ exports every contracts.md §1–6 type (R-001, compile-time exhaustiveness)", () => {
 	// The assertion lives in `tsc --noEmit`: the `import type` block + this reference force every
 	// §1–6 type to resolve, so a missing/renamed export fails the typecheck. This runtime line just

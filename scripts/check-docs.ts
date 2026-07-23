@@ -95,6 +95,20 @@ function read(rel: string): string | null {
   return existsSync(p) ? readFileSync(p, "utf8") : null;
 }
 
+function listTestFiles(): { path: string; content: string }[] {
+  const out: { path: string; content: string }[] = [];
+  for (const dir of ["src", "test", "scripts"]) {
+    const abs = join(ROOT, dir);
+    if (!existsSync(abs)) continue;
+    for (const rel of readdirSync(abs, { recursive: true }) as string[]) {
+      if (!rel.endsWith(".test.ts")) continue;
+      const p = join(dir, rel);
+      out.push({ path: p, content: readFileSync(join(ROOT, p), "utf8") });
+    }
+  }
+  return out;
+}
+
 const STATUSES = ["specified", "built", "tested", "deferred", "retired"];
 
 export function checkLifecycle(reqs: Entry[]): string[] {
@@ -203,6 +217,8 @@ function main(): void {
     ...checkCovers(reqs, read),
     ...checkLifecycle(reqs),
     ...checkIntake(intakeFiles),
+    ...checkTestTraces(reqs, read),
+    ...checkTagSweep(listTestFiles(), reqs),
   ];
 
   if (errors.length) {

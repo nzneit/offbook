@@ -19,7 +19,7 @@ Guidance for any agent (or human) working in this repo. `CLAUDE.md` is a symlink
 
 **Conflict rule:** if any doc disagrees with `docs/specs/contracts.md` on an interface/API detail, the contract wins — fix the other doc. `REQUIREMENTS.md` indexes the specs; it is never a competing source of truth.
 
-**Doc-system gate.** The corpus is validated by `bun scripts/check-docs.ts`: unique/contiguous `R-###`/`D-###` ids, resolvable `COVERS` anchors, lifecycle consistency (`built`/`tested` require a trace), and well-formed intake. Run it before committing; it is the CI/pre-commit gate. See `docs/specs/doc-system.md` for the full design.
+**Doc-system gate.** The corpus is validated by `bun scripts/check-docs.ts`: unique/contiguous `R-###`/`D-###` ids, resolvable `COVERS` anchors, lifecycle consistency (`built`/`tested` require a trace), and well-formed intake. A `tested` requirement's `TEST` files must carry a matching arrow-tag comment (`// [utest->R-###]`, or `itest`/`stest`); the checker verifies tags in both directions (missing and dangling). Run it before committing; it is the CI/pre-commit gate. See `docs/specs/doc-system.md` for the full design.
 
 ## Hard constraints (violating these defeats the purpose)
 - **Transport isolation.** Only `src/broker/` may import `aedes` (or any MQTT/transport package); everything else operates on the normalized message model. A lint rule enforces this.

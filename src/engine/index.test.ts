@@ -71,6 +71,7 @@ function harness(seed = 1) {
 	return { config, engine, emitted, violations };
 }
 
+// [utest->R-013]
 test("R-013: an authored {topic, payload} reaches broker.emit with channel-resolved qos/retain — never undefined", async () => {
 	const { engine, emitted } = harness();
 	engine.publish(
@@ -89,6 +90,7 @@ test("R-013: an authored {topic, payload} reaches broker.emit with channel-resol
 	]);
 });
 
+// [utest->R-013]
 test("R-013/G10: an off-spec L2-sourced emit drops (F5) and surfaces a mock violation stamped with scenarioName/stepIndex", async () => {
 	const { engine, emitted, violations } = harness();
 	engine.publish(
@@ -109,6 +111,7 @@ test("R-013/G10: an off-spec L2-sourced emit drops (F5) and surfaces a mock viol
 	expect(v?.errors?.[0]?.keyword).toBe("enum");
 });
 
+// [utest->R-013]
 test("R-013: an L2 ranged delay flows keyed through the choke-point and advances logical now() finitely", async () => {
 	const { config, engine, emitted } = harness(7);
 	const before = engine.now();

@@ -3,6 +3,8 @@ import { loadConfig } from "../config/index.ts";
 import { hashToInt, mulberry32 } from "./prng.ts";
 import { createScheduler } from "./scheduler.ts";
 
+// [utest->R-010]
+
 // Records (label, logicalTime) tuples — the emission-stream projection the
 // determinism assertions compare.
 async function runScript(seed: number): Promise<[string, number][]> {

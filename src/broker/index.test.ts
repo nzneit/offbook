@@ -4,6 +4,8 @@ import { loadConfig } from "../config/index.ts";
 import type { InboundEvent } from "../model/index.ts";
 import { createBroker } from "./index.ts";
 
+// [utest->R-003]
+
 const brokers: Array<{ stop(): Promise<void> }> = [];
 function track<T extends { stop(): Promise<void> }>(b: T): T {
 	brokers.push(b);
@@ -146,6 +148,7 @@ test("M0 gate (i): a browser-style mqtt.js client connects over ws, receives a r
 
 // --- R-009: fuller tier-1 broker acceptance ---
 
+// [utest->R-009]
 test("R-009: a non-JSON publish surfaces via onInbound (decodeError) and is still delivered raw", async () => {
 	const cfg = ports(4);
 	const b = track(createBroker(cfg));
@@ -187,6 +190,7 @@ test("R-009: a non-JSON publish surfaces via onInbound (decodeError) and is stil
 	}
 });
 
+// [utest->R-009]
 test("R-009: wildcard subscribe replays retained state from Aedes' store — matches getState(), excludes evicted, respects +/#", async () => {
 	const cfg = ports(5);
 	const b = track(createBroker(cfg));
@@ -210,6 +214,7 @@ test("R-009: wildcard subscribe replays retained state from Aedes' store — mat
 	);
 });
 
+// [utest->R-009]
 test("R-009 (known limitation — D-006): Aedes' in-memory persistence does not redeliver an unacked QoS-1 message on session resume", async () => {
 	const cfg = ports(6);
 	const b = track(createBroker(cfg));

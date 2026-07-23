@@ -6,6 +6,8 @@ import { createFaker } from "../src/engine/faker.ts";
 import type { Violation } from "../src/model/index.ts";
 import { buildRegistry } from "../src/registry/index.ts";
 
+// [itest->R-008]
+
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
 	while (cleanups.length) await cleanups.pop()?.();
@@ -103,6 +105,7 @@ test("M0 output: an off-contract client publish is delivered and surfaced (valid
 	).toBe(true);
 });
 
+// [itest->R-015]
 test("M0: a real mqtt.js client's off-contract publishes flow through onInbound → validateClientPublish and surface as client violations", async () => {
 	const { server, config } = await bootFullStack(4);
 

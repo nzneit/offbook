@@ -4,6 +4,8 @@ import { loadConfig } from "../config/index.ts";
 import type { Channel } from "../model/index.ts";
 import { parseDelay, resolveEmit } from "./resolve-emit.ts";
 
+// [utest->R-013]
+
 function channel(overrides: Partial<Channel> = {}): Channel {
 	const v = new Ajv2020({ allErrors: true, strict: false }).compile({});
 	return {

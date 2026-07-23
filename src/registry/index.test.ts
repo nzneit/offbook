@@ -4,6 +4,9 @@ import { loadConfig, loadServices } from "../config/index.ts";
 import type { ServiceConfig } from "../model/index.ts";
 import { buildRegistry } from "./index.ts";
 
+// [utest->R-004]
+// [utest->R-026]
+
 const FIXTURE_DIR = `${import.meta.dir}/../../fixtures/asyncapi`;
 
 async function demoRegistry() {

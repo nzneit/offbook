@@ -10,6 +10,8 @@ import {
 	serializeLockfile,
 } from "./index.ts";
 
+// [utest->R-005]
+
 const SPEC = `asyncapi: 3.0.0
 info:
   title: Widget

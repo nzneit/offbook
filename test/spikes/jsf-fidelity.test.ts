@@ -5,6 +5,7 @@ import {
 	measureFixture,
 } from "../../scripts/spike-jsf-fidelity.ts";
 
+// [stest->R-027]
 // R-027 tripwire: pins the measured per-fixture recheck-failure counts so a
 // JSF/schema regression is loud, not silent. Update EXPECTED only with a
 // re-measurement + a D-### note (the D-008 verdict rests on these).

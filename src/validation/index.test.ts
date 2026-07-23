@@ -2,6 +2,8 @@ import { expect, test } from "bun:test";
 import { loadConfig } from "../config/index.ts";
 import { createValidationLog } from "./index.ts";
 
+// [utest->R-015]
+
 function base(
 	origin: "client" | "mock",
 	kind: "schema" | "direction" | "unknown-topic" | "decode",

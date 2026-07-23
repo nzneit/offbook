@@ -54,6 +54,7 @@ test("parseServices leaves absent optional fields undefined", () => {
 	expect(a.topicOverrides).toBeUndefined();
 });
 
+// [utest->R-002]
 test("parseServices carries a topicOverrides entry through as typed qos/retain (R-002)", () => {
 	const cfg = parseServices(SERVICES_YAML);
 	expect(cfg.services.serviceC.topicOverrides).toEqual({

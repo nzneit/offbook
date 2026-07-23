@@ -5,6 +5,8 @@ import { join } from "node:path";
 import type { Handler, SpecRegistry } from "../model/index.ts";
 import { createDispatchRegistry, defaultDispatch } from "./dispatch.ts";
 
+// [utest->R-012]
+
 // A minimal SpecRegistry stub: two channels, one literal and one {param}, the
 // literal winning the shared concrete topic — the matcher's most-specific rule
 // (the real matcher behavior is R-004-tested in registry/; dispatch only

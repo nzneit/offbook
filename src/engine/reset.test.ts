@@ -90,6 +90,7 @@ async function script(
 	await engine.idle();
 }
 
+// [utest->R-014]
 test("R-014: reset + same seed replays the same script to a byte-identical emission stream", async () => {
 	const { engine, emitted } = build(7);
 	await script(engine);
@@ -103,6 +104,7 @@ test("R-014: reset + same seed replays the same script to a byte-identical emiss
 	// pure (seed, invocationKey) functions with no cross-reset state to restore
 });
 
+// [utest->R-014]
 test("R-014: reset(newSeed) re-keys the PRNGs — the same script diverges", async () => {
 	const { engine, emitted } = build(7);
 	await script(engine);
@@ -114,6 +116,7 @@ test("R-014: reset(newSeed) re-keys the PRNGs — the same script diverges", asy
 	expect(JSON.stringify(emitted)).not.toBe(first);
 });
 
+// [utest->R-014]
 test("R-014: reset clears pending scheduled work and re-epochs now()", async () => {
 	const { engine, emitted } = build(1);
 	engine.publish(
@@ -128,6 +131,7 @@ test("R-014: reset clears pending scheduled work and re-epochs now()", async () 
 	expect(engine.now()).toBe(loadConfig({ seed: 1 }).fixedEpoch);
 });
 
+// [utest->R-014]
 test("R-014: reset re-instantiates factories — handler instance state does not survive", async () => {
 	const { engine, emitted } = build(7);
 	await script(engine); // counter reached 2
@@ -142,6 +146,7 @@ test("R-014: reset re-instantiates factories — handler instance state does not
 	expect((last?.[1] as { n: number }).n).toBeLessThan(2);
 });
 
+// [utest->R-014]
 test("R-014: reset re-keys the L1 faker — same seed replays the floor draw, a new seed diverges", async () => {
 	const { engine, emitted } = build(7);
 	engine.onSubscribe("state/a");
