@@ -159,7 +159,7 @@ interface InstanceSnapshot { instances: { channelAddress: string; params: Record
 | Trigger | Layers (first-match-wins) |
 |---|---|
 | **Reactive** — client publishes (inbound) | **L3 → L2** (no L1) |
-| **Proactive** — subscribe (initial state) / autonomous tick | **L3 → L1** (L1 is the floor) |
+| **Proactive** — subscribe (initial state) / autonomous tick | **L3 → L1** on subscribe (L1 is the floor); tick is **L3-only** in v1 (L1 has no tick leg — D-009) |
 | **Explicit** — `POST /trigger/{name}` | the named **L2** scenario (or an L3 action) |
 
 So **L1 = proactive floor, L2 = reactive/triggered, L3 = both.** "Works day one" = the UI renders from L1 initial state; behavior is authored on top in L2/L3.
