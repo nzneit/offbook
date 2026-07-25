@@ -9,12 +9,14 @@ import type {
 	EmitSource,
 	Faker,
 	InboundEvent,
+	InstanceRegistry,
 	NormalizedMessage,
 	SpecRegistry,
 	Violation,
 } from "../model/index.ts";
 import { type DispatchRegistry, defaultDispatch } from "./dispatch.ts";
 import { createFaker, l1Floor } from "./faker.ts";
+import { createInstanceRegistry } from "./instances.ts";
 import { hashToInt, mulberry32 } from "./prng.ts";
 import {
 	type DelayKey,
@@ -31,10 +33,13 @@ export interface EngineDeps {
 	registry: () => SpecRegistry;
 	record: (v: Omit<Violation, "seq" | "observedAt">) => Violation;
 	dispatch?: DispatchRegistry;
+	// merged across services by the composition root: channel address → param-maps (F1, §2)
+	seedInstances?: Record<string, Record<string, string>[]>;
 }
 
 export interface Engine {
 	loadHandlers(dir: string): Promise<string[]>;
+	start(): void;
 	onInbound(event: InboundEvent): void;
 	onSubscribe(topic: string): void;
 	tick(): void;
@@ -42,16 +47,26 @@ export interface Engine {
 	stopTicks(): void;
 	publish(partial: EmitPartial, source: EmitSource, delayKey?: DelayKey): void;
 	faker: Faker;
+	instances: InstanceRegistry;
 	now(): number;
 	pending(): { scheduled: number; settled: boolean };
 	idle(): Promise<void>;
 	reset(seed?: number): void;
 }
 
+const isWildcardFilter = (topic: string): boolean =>
+	topic.split("/").some((level) => level === "+" || level === "#");
+
+const isParametrized = (address: string): boolean => /\{[^}]+\}/.test(address);
+
+const bindAddress = (address: string, params: Record<string, string>): string =>
+	address.replace(/\{([^}]+)\}/g, (whole, name) => params[name] ?? whole);
+
 export function createEngine(deps: EngineDeps): Engine {
 	const { config, broker, registry, record } = deps;
 	const dispatch = deps.dispatch ?? defaultDispatch;
 	const scheduler = createScheduler(config);
+	const instances = createInstanceRegistry();
 	let seed = config.seed;
 	let faker = createFaker(config);
 	let tickIndex = 0;
@@ -98,6 +113,11 @@ export function createEngine(deps: EngineDeps): Engine {
 			return;
 		}
 		const channel = m.channel;
+		// materialization rule (ii): any mock emit that binds concrete params on a
+		// parametrized toClient channel records the instance — this is how a
+		// fromClient command's reactive state publish lands in the ledger (§2/F1)
+		if (channel.direction === "toClient" && Object.keys(m.params).length > 0)
+			instances.materialize(channel.topic, m.params);
 		const msg = resolveEmit(partial, channel, { ...config, seed }, delayKey);
 		scheduler.scheduleEmit(msg.delayMs ?? 0, async () => {
 			const errors = channel.validate(msg.payload);
@@ -142,11 +162,89 @@ export function createEngine(deps: EngineDeps): Engine {
 		}
 	}
 
+	// The one initial-state task (§2/G3): record the instance in the ledger when
+	// the concrete topic binds params, then publish via L3 initialState if
+	// registered, else the L1 floor. Used by concrete subscribes, startup
+	// (eager + seedInstances), and the reset republish — same keyed draws
+	// everywhere, so every path replays byte-identically under one seed (F7).
+	function materializeAndPublish(topic: string): void {
+		scheduler.post(async () => {
+			const reg = registry();
+			const m = reg.match(topic);
+			// initial state is a toClient concept — a subscribe on a fromClient
+			// channel gets nothing from the mock
+			if (!m || m.channel.direction !== "toClient") return;
+			if (Object.keys(m.params).length > 0)
+				instances.materialize(m.channel.topic, m.params);
+			const sel = dispatch.select(topic, reg);
+			if (sel?.handler.initialState) {
+				sel.handler.initialState(
+					topic,
+					makeCtx(
+						`subscribe|${topic}|${sel.registration.modulePath}|${sel.registration.order}`,
+					),
+				);
+				return;
+			}
+			// L1 is the proactive floor: keyed per instance params (F7)
+			const out = await l1Floor(m.channel, (ch) => faker(ch, m.params));
+			if ("violation" in out) {
+				record(out.violation); // already L1-stamped by l1Floor
+				return; // floor stays empty on failure (F5, D-008)
+			}
+			publish({ topic, payload: out.payload }, { layer: "L1" });
+		});
+	}
+
+	// Initial-state sweep (§2): eager non-parametrized toClient channels first
+	// (spec-derived each time, never ledger entries), then the ledger's recorded
+	// set in materialization order — deterministic for a fixed script.
+	function republishInitialState(): void {
+		for (const ch of registry().channels()) {
+			if (ch.direction === "toClient" && !isParametrized(ch.topic))
+				materializeAndPublish(ch.topic);
+		}
+		for (const inst of instances.snapshot().instances)
+			materializeAndPublish(bindAddress(inst.channelAddress, inst.params));
+	}
+
 	return {
 		async loadHandlers(dir) {
 			const paths = await dispatch.loadHandlers(dir);
 			dispatch.instantiate();
 			return paths;
+		},
+
+		start() {
+			// seedInstances pre-materializes the deterministic demo set (§2/F1);
+			// an entry that doesn't resolve to a toClient channel instance is
+			// surfaced loudly, never skipped silent (tier-3 /diagnostics adds the
+			// config-lint view, R-017)
+			const reg = registry();
+			for (const [address, paramList] of Object.entries(
+				deps.seedInstances ?? {},
+			)) {
+				for (const params of paramList) {
+					const topic = bindAddress(address, params);
+					const m = isWildcardFilter(topic) ? undefined : reg.match(topic);
+					if (!m || m.channel.direction !== "toClient") {
+						stampViolation(
+							{
+								origin: "mock",
+								kind: "unknown-topic",
+								severity: "error",
+								topic,
+								detail: `seedInstances: '${address}' with ${JSON.stringify(params)} does not resolve to a toClient channel instance`,
+							},
+							{ layer: "L1" },
+						);
+						continue;
+					}
+					if (Object.keys(m.params).length > 0)
+						instances.materialize(m.channel.topic, m.params);
+				}
+			}
+			republishInitialState();
 		},
 
 		onInbound(event) {
@@ -170,28 +268,10 @@ export function createEngine(deps: EngineDeps): Engine {
 		},
 
 		onSubscribe(topic) {
-			scheduler.post(async () => {
-				const reg = registry();
-				const m = reg.match(topic);
-				if (!m) return;
-				const sel = dispatch.select(topic, reg);
-				if (sel?.handler.initialState) {
-					sel.handler.initialState(
-						topic,
-						makeCtx(
-							`subscribe|${topic}|${sel.registration.modulePath}|${sel.registration.order}`,
-						),
-					);
-					return;
-				}
-				// L1 is the proactive floor: keyed per instance params (F7)
-				const out = await l1Floor(m.channel, (ch) => faker(ch, m.params));
-				if ("violation" in out) {
-					record(out.violation); // already L1-stamped by l1Floor
-					return; // floor stays empty on failure (F5, D-008)
-				}
-				publish({ topic, payload: out.payload }, { layer: "L1" });
-			});
+			// a wildcard subscribe never invents params (§2/F6): replay is Aedes'
+			// native retained delivery from its own store (R3), not engine work
+			if (isWildcardFilter(topic)) return;
+			materializeAndPublish(topic);
 		},
 
 		tick() {
@@ -212,17 +292,25 @@ export function createEngine(deps: EngineDeps): Engine {
 			return faker;
 		},
 
+		instances,
+
 		now: () => scheduler.now(),
 		pending: () => scheduler.pending(),
 		idle: () => scheduler.idle(),
 
 		reset(newSeed) {
+			const snap = instances.snapshot(); // captured at reset (§2)
 			scheduler.reset();
 			if (newSeed !== undefined) seed = newSeed;
 			faker = createFaker({ ...config, seed });
 			tickIndex = 0;
 			inboundSeq = 0;
 			dispatch.instantiate(); // fresh L3 instances — factories, not reused state
+			// the materialization half (§2/§5): restore EXACTLY the recorded set —
+			// seed instances + those materialized since — then republish its initial
+			// state re-seeded, so post-reset /state is deterministic by construction
+			instances.restore(snap);
+			republishInitialState();
 		},
 	};
 }

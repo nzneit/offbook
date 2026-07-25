@@ -228,8 +228,10 @@ No validation path ever blocks delivery — validation observes and surfaces lou
 
 #### engine/ instance materialization (InstanceRegistry)
 **UID**: R-032
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-2
+**IMPL**: src/engine/instances.ts, src/engine/index.ts
+**TEST**: src/engine/instances.test.ts, src/engine/reset.test.ts
 The engine owns the instance-materialization ledger (contracts §2, F1): `InstanceRegistry.materialize` is idempotent, `snapshot()` is captured at reset and `restore()` re-materializes exactly the snapshot set re-seeded (a ledger, never a mirror of Aedes' retained store — that is `getState()`'s job, R3), `seedInstances` in `services.yaml` pre-materializes the deterministic demo set, and `reset` republishes initial state through it (contracts §5) — the materialization half of reset, extending R-014's engine-internal restore.
 
 <!--

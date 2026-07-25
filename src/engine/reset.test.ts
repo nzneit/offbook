@@ -90,15 +90,21 @@ async function script(
 	await engine.idle();
 }
 
-// [utest->R-014]
+// [utest->R-014] [utest->R-032]
 test("R-014: reset + same seed replays the same script to a byte-identical emission stream", async () => {
 	const { engine, emitted } = build(7);
+	await script(engine); // boot window: the emit path materializes state/replay
+
+	// compare reset-window to reset-window: each opens with the R-032 republish
+	// of the recorded set's initial state, then the scripted replays
+	engine.reset();
+	emitted.length = 0;
 	await script(engine);
 	const first = JSON.stringify(emitted);
-	expect(emitted.length).toBe(2);
+	expect(emitted.length).toBe(3); // republished state/replay + 2 scripted emits
 
-	emitted.length = 0;
 	engine.reset();
+	emitted.length = 0;
 	await script(engine);
 	expect(JSON.stringify(emitted)).toBe(first); // handler state (fresh factory instance) + clock restored; ctx streams are
 	// pure (seed, invocationKey) functions with no cross-reset state to restore
@@ -116,7 +122,7 @@ test("R-014: reset(newSeed) re-keys the PRNGs — the same script diverges", asy
 	expect(JSON.stringify(emitted)).not.toBe(first);
 });
 
-// [utest->R-014]
+// [utest->R-014] [utest->R-032]
 test("R-014: reset clears pending scheduled work and re-epochs now()", async () => {
 	const { engine, emitted } = build(1);
 	engine.publish(
@@ -126,7 +132,11 @@ test("R-014: reset clears pending scheduled work and re-epochs now()", async () 
 	);
 	engine.reset();
 	await engine.idle();
-	expect(emitted).toEqual([]); // the in-flight step never fires post-reset
+	// the in-flight step never fires post-reset — but its emit already
+	// materialized state/x, so the one emission is the R-032 republished
+	// initial-state floor, not the scripted {n: 1} payload
+	expect(emitted.map(([topic]) => topic)).toEqual(["state/x"]);
+	expect(emitted[0]?.[1]).not.toEqual({ n: 1 });
 	expect(engine.pending()).toEqual({ scheduled: 0, settled: true });
 	expect(engine.now()).toBe(loadConfig({ seed: 1 }).fixedEpoch);
 });
@@ -146,23 +156,23 @@ test("R-014: reset re-instantiates factories — handler instance state does not
 	expect((last?.[1] as { n: number }).n).toBeLessThan(2);
 });
 
-// [utest->R-014]
-test("R-014: reset re-keys the L1 faker — same seed replays the floor draw, a new seed diverges", async () => {
+// [utest->R-014] [utest->R-032]
+test("R-014: reset re-keys the L1 faker — the republished floor replays the same-seed draw, a new seed diverges", async () => {
 	const { engine, emitted } = build(7);
-	engine.onSubscribe("state/a");
+	engine.onSubscribe("state/a"); // materializes {id: a} and emits its floor
 	await engine.idle();
 	const first = JSON.stringify(emitted);
 	expect(emitted.length).toBe(1);
 
+	// the reset republish IS the re-keyed floor draw for the recorded instance:
+	// same seed ⇒ byte-identical to the original subscribe-time emission
 	emitted.length = 0;
 	engine.reset();
-	engine.onSubscribe("state/a");
 	await engine.idle();
-	expect(JSON.stringify(emitted)).toBe(first); // same seed ⇒ identical keyed draw
+	expect(JSON.stringify(emitted)).toBe(first);
 
 	emitted.length = 0;
 	engine.reset(9);
-	engine.onSubscribe("state/a");
 	await engine.idle();
 	expect(JSON.stringify(emitted)).not.toBe(first); // re-keyed faker ⇒ divergent draw
 });
