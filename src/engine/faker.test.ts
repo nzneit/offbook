@@ -122,6 +122,22 @@ test("canonicalize is the exact F7 identity string: '' for absent/empty, sorted 
 	expect(canonicalize({ b: "2", a: "1" })).toBe("a=1&b=2");
 });
 
+test("canonicalize percent-encodes params so distinct maps never collide (D-012)", () => {
+	// the intake item's collision pair: previously both canonicalized to
+	// "a=x&b=y&b=z" via naive string joining; now exactly pinned and distinct.
+	const first = canonicalize({ a: "x&b=y", b: "z" });
+	const second = canonicalize({ a: "x", b: "y&b=z" });
+	expect(first).toBe("a=x%26b%3Dy&b=z");
+	expect(second).toBe("a=x&b=y%26b%3Dz");
+	expect(first).not.toBe(second);
+
+	// key-side encoding
+	expect(canonicalize({ "a&b": "c" })).toBe("a%26b=c");
+
+	// the escape character itself is escaped, so encoding round-trips
+	expect(canonicalize({ a: "50%" })).toBe("a=50%25");
+});
+
 test("the faker seed key is (config.seed, channel address, canonical params): each axis shifts the draw", async () => {
 	const intSchema = { type: "integer", minimum: 0, maximum: 1_000_000 };
 	const faker = createFaker(loadConfig({ seed: 7 }));

@@ -3,14 +3,16 @@ import type { JsonSchema } from "json-schema-faker";
 import type { Channel, Config, Faker, Violation } from "../model/index.ts";
 import { hashToInt } from "./prng.ts";
 
-// stable sorted-key serialization; empty string when params are absent.
+// Stable sorted-key serialization, percent-encoded so the identity is
+// injective (no `&`/`=`/`%` collisions between distinct param maps); empty
+// string when params are absent.
 // Shared F7 identity: the faker's seed key and the InstanceRegistry ledger key
 // must agree on what "the same instance" is.
 export function canonicalize(params?: Record<string, string>): string {
 	if (!params) return "";
 	return Object.keys(params)
 		.sort()
-		.map((k) => `${k}=${params[k]}`)
+		.map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`)
 		.join("&");
 }
 
