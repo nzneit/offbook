@@ -220,3 +220,57 @@ test("wall-paced overlapping delays stamp the same logical times as virtual mode
 	expect(at).toEqual([config.fixedEpoch + 40, config.fixedEpoch + 40]);
 	s.stopTicks();
 });
+
+test("default reporter: a throwing task without onTaskError surfaces via console.error and never strands idle()", async () => {
+	const s = createScheduler(loadConfig({ seed: 1 })); // no onTaskError arg
+	const calls: unknown[][] = [];
+	const orig = console.error;
+	console.error = (...args: unknown[]) => {
+		calls.push(args);
+	};
+	try {
+		s.post(() => {
+			throw new Error("task boom");
+		});
+		await s.idle();
+	} finally {
+		console.error = orig;
+	}
+	expect(calls.length).toBe(1);
+	expect(calls[0]?.[0]).toBe("[offbook] scheduler task failed:");
+	expect((calls[0]?.[1] as Error).message).toBe("task boom");
+	expect(s.pending()).toEqual({ scheduled: 0, settled: true });
+});
+
+test("startWallTicks is re-entrant-safe: a second call must not add a second interval", async () => {
+	const config = loadConfig({ seed: 1, wallClock: true, tickIntervalMs: 20 });
+	const s = createScheduler(config);
+	let ticks = 0;
+	s.startWallTicks(() => {
+		ticks++;
+	});
+	s.startWallTicks(() => {
+		ticks += 100; // must be ignored by the tickTimer guard
+	});
+	const wallStart = Date.now();
+	while (ticks < 2 && Date.now() - wallStart < 1000) await Bun.sleep(5);
+	s.stopTicks();
+	expect(ticks).toBeGreaterThanOrEqual(2);
+	expect(ticks).toBeLessThan(100); // the second ticker never fired
+});
+
+test("reset() stops a running wall ticker: nothing fires after reset", async () => {
+	const config = loadConfig({ seed: 1, wallClock: true, tickIntervalMs: 10 });
+	const s = createScheduler(config);
+	let ticks = 0;
+	s.startWallTicks(() => {
+		ticks++;
+	});
+	const wallStart = Date.now();
+	while (ticks < 1 && Date.now() - wallStart < 1000) await Bun.sleep(5);
+	s.reset();
+	const seen = ticks;
+	await Bun.sleep(50);
+	expect(ticks).toBeLessThanOrEqual(seen + 1); // tolerance for one already-queued fire; the interval itself is gone
+	expect(s.now()).toBe(config.fixedEpoch);
+});

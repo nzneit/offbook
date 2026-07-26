@@ -8,7 +8,9 @@ import type {
 	Violation,
 } from "../model/index.ts";
 import { createDispatchRegistry } from "./dispatch.ts";
+import type { DispatchRegistry } from "./dispatch.ts";
 import { createEngine } from "./index.ts";
+import { hashToInt, mulberry32 } from "./prng.ts";
 
 const stateSchema = {
 	type: "object",
@@ -69,6 +71,38 @@ function harness(seed = 1) {
 		dispatch: createDispatchRegistry(),
 	});
 	return { config, engine, emitted, violations };
+}
+
+function buildEngine(
+	overrides: Parameters<typeof loadConfig>[0] = {},
+	registry: SpecRegistry = makeRegistry(),
+	seedInstances?: Record<string, Record<string, string>[]>,
+) {
+	const config = loadConfig(overrides);
+	const emitted: NormalizedMessage[] = [];
+	const violations: Omit<Violation, "seq" | "observedAt">[] = [];
+	const dispatch = createDispatchRegistry();
+	const engine = createEngine({
+		config,
+		broker: {
+			emit: async (m) => {
+				emitted.push(m);
+			},
+		},
+		registry: () => registry,
+		record: (v) => {
+			violations.push(v);
+			return { ...v, seq: violations.length, observedAt: "t" } as Violation;
+		},
+		dispatch,
+		seedInstances,
+	});
+	return { config, engine, emitted, violations, dispatch };
+}
+
+async function pollUntil(cond: () => boolean, timeoutMs = 1000): Promise<void> {
+	const start = Date.now();
+	while (!cond() && Date.now() - start < timeoutMs) await Bun.sleep(5);
 }
 
 // [utest->R-013]
@@ -280,4 +314,200 @@ test("ctx.random streams are keyed per invocation: draws advance within one, dis
 	const b = byEvent[2];
 	expect(a?.[0]).not.toBe(a?.[1]); // the stream advances within one invocation
 	expect(a).not.toEqual(b); // a different invocationKey (meta.seq) yields a different stream
+});
+
+function tickCounter(d: DispatchRegistry): () => number {
+	let ticked = 0;
+	d.register(
+		"state/{deviceId}",
+		() => ({
+			tick() {
+				ticked++;
+			},
+		}),
+		"h.ts",
+	);
+	d.instantiate();
+	return () => ticked;
+}
+
+test("startTicks in passive mode is a no-op even with wallClock on (F10)", async () => {
+	const { engine, dispatch } = buildEngine({
+		mode: "passive",
+		wallClock: true,
+		tickIntervalMs: 10,
+	});
+	const ticks = tickCounter(dispatch);
+	engine.startTicks();
+	await Bun.sleep(40);
+	engine.stopTicks();
+	expect(ticks()).toBe(0);
+});
+
+test("startTicks without wallClock is a no-op (virtual ticks are driven via tick())", async () => {
+	const { engine, dispatch } = buildEngine({
+		wallClock: false,
+		tickIntervalMs: 10,
+	});
+	const ticks = tickCounter(dispatch);
+	engine.startTicks();
+	await Bun.sleep(40);
+	engine.stopTicks();
+	expect(ticks()).toBe(0);
+});
+
+test("startTicks in autonomous wall mode fires handler ticks on real cadence; stopTicks halts them", async () => {
+	const { config, engine, dispatch } = buildEngine({
+		wallClock: true,
+		tickIntervalMs: 10,
+	});
+	const ticks = tickCounter(dispatch);
+	engine.startTicks();
+	await pollUntil(() => ticks() >= 2);
+	engine.stopTicks();
+	const seen = ticks();
+	expect(seen).toBeGreaterThanOrEqual(2);
+	await Bun.sleep(40);
+	expect(ticks()).toBeLessThanOrEqual(seen + 1); // one already-queued fire tolerated; the interval is gone
+	await engine.idle();
+	expect(engine.now()).toBeGreaterThanOrEqual(
+		config.fixedEpoch + 2 * config.tickIntervalMs,
+	);
+});
+
+test("tick() dispatches every handler in precedence order; the tick index advances the keyed streams", async () => {
+	const { config, engine, dispatch } = buildEngine({ seed: 7 });
+	const calls: [string, number][] = [];
+	dispatch.register("state/{deviceId}", () => ({}), "0-none.ts"); // no tick method
+	dispatch.register(
+		"state/{deviceId}",
+		() => ({
+			tick(ctx) {
+				calls.push(["b-mod", ctx.random()]);
+			},
+		}),
+		"b-mod.ts",
+	);
+	dispatch.register(
+		"state/{deviceId}",
+		() => ({
+			tick(ctx) {
+				calls.push(["a-mod", ctx.random()]);
+			},
+		}),
+		"a-mod.ts",
+	);
+	dispatch.instantiate();
+	engine.tick();
+	engine.tick();
+	await engine.idle();
+	expect(calls.map((c) => c[0])).toEqual(["a-mod", "b-mod", "a-mod", "b-mod"]);
+	// exact keyed draws: tick|<idx>|<modulePath>|<order>; a-mod registered third (order 2), b-mod second (order 1)
+	const draw = (idx: number, path: string, order: number) =>
+		mulberry32(hashToInt(`${config.seed}|ctx|tick|${idx}|${path}|${order}`))();
+	expect(calls[0]?.[1]).toBe(draw(0, "a-mod.ts", 2));
+	expect(calls[1]?.[1]).toBe(draw(0, "b-mod.ts", 1));
+	expect(calls[2]?.[1]).toBe(draw(1, "a-mod.ts", 2));
+	expect(calls[3]?.[1]).toBe(draw(1, "b-mod.ts", 1));
+});
+
+function permissiveRegistry(): SpecRegistry {
+	const ch = makeChannel("thing/{id}", { type: "object" }, 1, false);
+	return {
+		match(topic: string) {
+			const m = topic.match(/^thing\/([^/]+)$/);
+			if (m?.[1]) return { channel: ch, params: { id: m[1] } };
+			return undefined;
+		},
+		matchesFilter: () => false,
+		channels: () => [ch],
+	};
+}
+
+function brokenRegistry(): SpecRegistry {
+	const ch = makeChannel("broken/{id}", { not: {} }, 1, true);
+	return {
+		match(topic: string) {
+			const m = topic.match(/^broken\/([^/]+)$/);
+			if (m?.[1]) return { channel: ch, params: { id: m[1] } };
+			return undefined;
+		},
+		matchesFilter: () => false,
+		channels: () => [ch],
+	};
+}
+
+test("subscribe with a registered initialState handler wins over the L1 floor and draws its keyed stream", async () => {
+	const { config, engine, emitted, dispatch } = buildEngine(
+		{},
+		permissiveRegistry(),
+	);
+	let draw = -1;
+	dispatch.register(
+		"thing/{id}",
+		() => ({
+			initialState(topic, ctx) {
+				draw = ctx.random();
+				ctx.publish({ topic, payload: { marker: "authored" } });
+			},
+		}),
+		"h.ts",
+	);
+	dispatch.instantiate();
+	engine.onSubscribe("thing/t1");
+	await engine.idle();
+	expect(emitted.length).toBe(1);
+	expect(emitted[0]?.payload).toEqual({ marker: "authored" }); // authored, not an L1 fake
+	expect(draw).toBe(
+		mulberry32(hashToInt(`${config.seed}|ctx|subscribe|thing/t1|h.ts|0`))(),
+	);
+});
+
+test("the L1 floor on an unsatisfiable schema stays empty and surfaces the recheck violation (F5)", async () => {
+	const { engine, emitted, violations } = buildEngine({}, brokenRegistry());
+	engine.onSubscribe("broken/b1");
+	await engine.idle();
+	expect(emitted).toEqual([]);
+	expect(violations.length).toBe(1);
+	expect(violations[0]?.detail).toBe("/: not"); // root instancePath "" falls back to "/"
+	expect(violations[0]?.topic).toBe("broken/{id}"); // the floor stamps the channel address; publish()'s recheck would stamp the concrete topic
+	expect(violations[0]?.kind).toBe("schema");
+	expect(violations[0]?.emitSource).toEqual({ layer: "L1" });
+});
+
+test("loadHandlers delegates to the dispatch registry and then instantiates", async () => {
+	const calls: string[] = [];
+	const stub: DispatchRegistry = {
+		register() {},
+		loadHandlers: async (dir) => {
+			calls.push(`load:${dir}`);
+			return ["/x/10-a.ts"];
+		},
+		instantiate: () => {
+			calls.push("instantiate");
+		},
+		select: () => undefined,
+		all: () => [],
+	};
+	const config = loadConfig({});
+	const engine = createEngine({
+		config,
+		broker: { emit: async () => {} },
+		registry: makeRegistry,
+		record: (v) => ({ ...v, seq: 1, observedAt: "t" }) as Violation,
+		dispatch: stub,
+	});
+	expect(await engine.loadHandlers("/handlers")).toEqual(["/x/10-a.ts"]);
+	expect(calls).toEqual(["load:/handlers", "instantiate"]);
+});
+
+test("engine.faker exposes the seeded faker: same channel+params reproduce, output is schema-valid", async () => {
+	const { engine } = buildEngine();
+	const m = makeRegistry().match("state/d1");
+	if (!m)
+		throw new Error("unreachable: fixture registry always matches state/d1");
+	const a = await engine.faker(m.channel, m.params);
+	const b = await engine.faker(m.channel, m.params);
+	expect(b).toEqual(a);
+	expect(m.channel.validate(a)).toEqual([]);
 });
