@@ -91,3 +91,10 @@ Append-only. Each decision has a stable never-reused `D-###` id, what was decide
 **Why**: Mutation runs are manual with no baseline diffing (D-010), so residue makes every future run a re-triage; a clean report makes "survivor = news" the reading. Structural message asserts keep wording editable while pinning the diagnostic content that "observe and surface loudly" promises. Two comparator seams (`timelineOrder` in scheduler, `precedence` in dispatch, both exported pure functions) were pre-authorized because JS engine sort internals hide tie-break defects from behavioral tests.
 **From**: docs/superpowers/specs/2026-07-25-mutation-kill-design.md (brainstorm dialog, 2026-07-25)
 **Folds into**: src/engine/*.test.ts, Stryker disable comments in src/engine/{dispatch,scheduler,instances,index,faker}.ts, AGENTS.md working notes
+
+### D-012: canonicalize percent-encodes the F7 instance identity
+**Date**: 2026-07-26
+**What**: `canonicalize` percent-encodes keys and values (encodeURIComponent) before the sorted `k=v&k=v` join, making the shared F7 identity injective for both consumers (faker seed key, InstanceRegistry ledger key). Plain alphanumeric/`-_.!~*'()` params serialize byte-identically to before, so ordinary identities and their seeded draws are unchanged; only params containing reserved characters (`&`, `=`, `%`, `+`, etc.) change identity, which alters their keyed draws once.
+**Why**: distinct param maps could previously collide into one identity (the archived intake item's example), silently conflating instances in both the ledger and the faker seeding; injectivity is the property the F7 identity exists to provide. Escape chosen over document-the-limitation by owner ruling.
+**From**: docs/archive/intake/2026-07-26-canonicalize-param-escaping.md (final-review finding, owner ruling 2026-07-26)
+**Folds into**: src/engine/faker.ts (canonicalize), src/engine/faker.test.ts
