@@ -8,7 +8,7 @@ import type {
 	SchemaError,
 	ServiceConfig,
 	SpecRegistry,
-} from "../model/index.ts";
+} from "#src/model/index.ts";
 
 const parser = new Parser();
 

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { loadConfig } from "../config/index.ts";
+import { loadConfig } from "#src/config/index.ts";
 import { createValidationLog } from "./index.ts";
 
 // [utest->R-015]

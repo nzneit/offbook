@@ -3,7 +3,7 @@
 // NEVER a mirror of current retained state (that is Aedes', read via getState /
 // native delivery, R3). The engine drives it: materialize on concrete
 // subscribe/emit, snapshot+restore around reset, seedInstances at startup.
-import type { InstanceRegistry, InstanceSnapshot } from "../model/index.ts";
+import type { InstanceRegistry, InstanceSnapshot } from "#src/model/index.ts";
 import { canonicalize } from "./faker.ts";
 
 type Instance = InstanceSnapshot["instances"][number];

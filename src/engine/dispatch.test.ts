@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Handler, SpecRegistry } from "../model/index.ts";
+import type { Handler, SpecRegistry } from "#src/model/index.ts";
 import {
 	type Registration,
 	createDispatchRegistry,

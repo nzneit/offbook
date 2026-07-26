@@ -13,7 +13,7 @@ import type {
 	NormalizedMessage,
 	SpecRegistry,
 	Violation,
-} from "../model/index.ts";
+} from "#src/model/index.ts";
 import { type DispatchRegistry, defaultDispatch } from "./dispatch.ts";
 import { createFaker, l1Floor } from "./faker.ts";
 import { createInstanceRegistry } from "./instances.ts";

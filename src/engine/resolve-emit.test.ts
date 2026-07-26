@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import Ajv2020 from "ajv/dist/2020";
-import { loadConfig } from "../config/index.ts";
-import type { Channel } from "../model/index.ts";
+import { loadConfig } from "#src/config/index.ts";
+import type { Channel } from "#src/model/index.ts";
 import { parseDelay, resolveEmit } from "./resolve-emit.ts";
 
 // [utest->R-013]

@@ -3,7 +3,7 @@
 // authored {topic, payload} always reaches the broker at the channel-resolved
 // qos/retain (never undefined — Aedes must never fall back to QoS 0 by
 // accident) and every L2 ranged delay is a keyed, reproducible draw.
-import type { Channel, Config, NormalizedMessage } from "../model/index.ts";
+import type { Channel, Config, NormalizedMessage } from "#src/model/index.ts";
 import { hashToInt, mulberry32 } from "./prng.ts";
 
 export interface EmitPartial extends Partial<NormalizedMessage> {

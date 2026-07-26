@@ -1,8 +1,8 @@
-import { loadConfig } from "../config/index.ts";
-import { buildTopicInfo, createServer } from "../control-plane/index.ts";
-import { createFaker } from "../engine/faker.ts";
-import type { TopicInfo, Violation } from "../model/index.ts";
-import { buildRegistry } from "../registry/index.ts";
+import { loadConfig } from "#src/config/index.ts";
+import { buildTopicInfo, createServer } from "#src/control-plane/index.ts";
+import { createFaker } from "#src/engine/faker.ts";
+import type { TopicInfo, Violation } from "#src/model/index.ts";
+import { buildRegistry } from "#src/registry/index.ts";
 
 const DEMO_SPEC = `${import.meta.dir}/../demo/thermostat.yaml`;
 

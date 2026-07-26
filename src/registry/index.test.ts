@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
-import { loadConfig, loadServices } from "../config/index.ts";
-import type { ServiceConfig } from "../model/index.ts";
+import { loadConfig, loadServices } from "#src/config/index.ts";
+import type { ServiceConfig } from "#src/model/index.ts";
 import { buildRegistry } from "./index.ts";
 
 // [utest->R-004]

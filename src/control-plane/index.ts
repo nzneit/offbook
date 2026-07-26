@@ -1,18 +1,18 @@
 import { Hono } from "hono";
-import type { BrokerModule } from "../broker/index.ts";
-import { createBroker } from "../broker/index.ts";
-import { l1Floor } from "../engine/faker.ts";
+import type { BrokerModule } from "#src/broker/index.ts";
+import { createBroker } from "#src/broker/index.ts";
+import { l1Floor } from "#src/engine/faker.ts";
 import type {
 	Config,
 	Faker,
 	SpecRegistry,
 	TopicInfo,
 	Violation,
-} from "../model/index.ts";
+} from "#src/model/index.ts";
 import {
 	type ValidationLog,
 	createValidationLog,
-} from "../validation/index.ts";
+} from "#src/validation/index.ts";
 
 // D-003: Faker is async — await each faker(c) sequentially (a for-of loop,
 // NOT Promise.all) so buildTopicInfo itself must be async too.

@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { loadEnvironments } from "../config/index.ts";
+import { loadEnvironments } from "#src/config/index.ts";
 import type {
 	LockEntry,
 	Lockfile,
@@ -10,7 +10,7 @@ import type {
 	Resolver,
 	ServiceConfig,
 	VersionSource,
-} from "../model/index.ts";
+} from "#src/model/index.ts";
 
 // ingestion/ imports NO @asyncapi/parser (G12). It shells out to `git` for fetch, and uses `yaml`
 // only for (a) a shallow info.version read of the fetched spec and (b) serializing the lockfile.

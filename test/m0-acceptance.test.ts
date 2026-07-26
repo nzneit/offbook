@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
 import { connectAsync } from "mqtt";
-import { loadConfig } from "../src/config/index.ts";
-import { createServer } from "../src/control-plane/index.ts";
-import { createFaker } from "../src/engine/faker.ts";
-import type { Violation } from "../src/model/index.ts";
-import { buildRegistry } from "../src/registry/index.ts";
+import { loadConfig } from "#src/config/index.ts";
+import { createServer } from "#src/control-plane/index.ts";
+import { createFaker } from "#src/engine/faker.ts";
+import type { Violation } from "#src/model/index.ts";
+import { buildRegistry } from "#src/registry/index.ts";
 
 // [itest->R-008]
 

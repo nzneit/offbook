@@ -3,7 +3,11 @@
 // resolved AT DISPATCH by the registry's own matcher — never an MQTT filter,
 // never resolved at import time (a handler needs no specs loaded to register,
 // and a spec hot-swap never leaves it bound to a stale channel set).
-import type { Handler, HandlerFactory, SpecRegistry } from "../model/index.ts";
+import type {
+	Handler,
+	HandlerFactory,
+	SpecRegistry,
+} from "#src/model/index.ts";
 
 export interface Registration {
 	pattern: string;

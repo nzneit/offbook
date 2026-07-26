@@ -1,7 +1,7 @@
 // R-010 — the deterministic scheduler core (contracts §3, G5/G23/F7/D-003).
 // Owns the virtual clock and the single event loop. `broker.emit` stays
 // publish-now; ALL delay/ordering semantics live here, never in transport.
-import type { Config } from "../model/index.ts";
+import type { Config } from "#src/model/index.ts";
 
 export type Task = () => void | Promise<void>;
 

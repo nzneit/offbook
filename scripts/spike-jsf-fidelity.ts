@@ -1,9 +1,9 @@
 // R-027 (F8): measure json-schema-faker fidelity — per-fixture Ajv-recheck
 // failure rates for seeded draws over every bundled channel.schema.
 // Verdict rule (D-008): nonzero on a §5-bar fixture ⇒ F5 keyed-fallback needed.
-import { loadConfig } from "../src/config/index.ts";
-import { createFaker } from "../src/engine/faker.ts";
-import { buildRegistry } from "../src/registry/index.ts";
+import { loadConfig } from "#src/config/index.ts";
+import { createFaker } from "#src/engine/faker.ts";
+import { buildRegistry } from "#src/registry/index.ts";
 
 export const SPIKE_FIXTURES = [
 	"composition.yaml",

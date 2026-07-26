@@ -6,7 +6,7 @@ import type {
 	Config,
 	InboundEvent,
 	NormalizedMessage,
-} from "../model/index.ts";
+} from "#src/model/index.ts";
 
 export interface BrokerModule {
 	start(): Promise<void>;

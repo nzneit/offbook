@@ -3,7 +3,7 @@ import type {
 	ValidationSummary,
 	Violation,
 	ViolationKind,
-} from "../model/index.ts";
+} from "#src/model/index.ts";
 
 const KINDS: ViolationKind[] = [
 	"schema",

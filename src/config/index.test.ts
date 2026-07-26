@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { DEFAULT_CONFIG } from "../model/index.ts";
+import { DEFAULT_CONFIG } from "#src/model/index.ts";
 import {
 	loadConfig,
 	loadEnvironments,

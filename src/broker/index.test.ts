@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { connect, connectAsync } from "mqtt";
-import { loadConfig } from "../config/index.ts";
-import type { InboundEvent } from "../model/index.ts";
+import { loadConfig } from "#src/config/index.ts";
+import type { InboundEvent } from "#src/model/index.ts";
 import { createBroker } from "./index.ts";
 
 // [utest->R-003]

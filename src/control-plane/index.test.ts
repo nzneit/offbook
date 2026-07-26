@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
 import Ajv2020 from "ajv/dist/2020";
-import { loadConfig } from "../config/index.ts";
-import { createFaker } from "../engine/faker.ts";
-import type { Channel, SpecRegistry } from "../model/index.ts";
-import { buildRegistry } from "../registry/index.ts";
+import { loadConfig } from "#src/config/index.ts";
+import { createFaker } from "#src/engine/faker.ts";
+import type { Channel, SpecRegistry } from "#src/model/index.ts";
+import { buildRegistry } from "#src/registry/index.ts";
 import { buildTopicInfo, createServer } from "./index.ts";
 
 const servers: Array<{ stop(): Promise<void> }> = [];

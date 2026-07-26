@@ -1,14 +1,14 @@
 // [utest->R-032]
 import { expect, test } from "bun:test";
 import Ajv2020 from "ajv/dist/2020";
-import { loadConfig } from "../config/index.ts";
+import { loadConfig } from "#src/config/index.ts";
 import type {
 	Channel,
 	Direction,
 	NormalizedMessage,
 	SpecRegistry,
 	Violation,
-} from "../model/index.ts";
+} from "#src/model/index.ts";
 import { createDispatchRegistry } from "./dispatch.ts";
 import { createEngine } from "./index.ts";
 import { createInstanceRegistry } from "./instances.ts";

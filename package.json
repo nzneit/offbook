@@ -6,6 +6,10 @@
 	"bin": {
 		"offbook": "bin/offbook"
 	},
+	"imports": {
+		"#src/*": "./src/*",
+		"#scripts/*": "./scripts/*"
+	},
 	"scripts": {
 		"test": "bun test",
 		"lint": "biome check .",

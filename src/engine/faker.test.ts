@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import Ajv2020 from "ajv/dist/2020";
-import { loadConfig } from "../config/index.ts";
-import type { Channel, SchemaError } from "../model/index.ts";
+import { loadConfig } from "#src/config/index.ts";
+import type { Channel, SchemaError } from "#src/model/index.ts";
 import { canonicalize, createFaker, l1Floor } from "./faker.ts";
 
 // [utest->R-011]

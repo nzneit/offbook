@@ -3,7 +3,7 @@ import {
 	type Config,
 	DEFAULT_CONFIG,
 	type ServiceConfig,
-} from "../model/index.ts";
+} from "#src/model/index.ts";
 
 export function loadConfig(overrides: Partial<Config> = {}): Config {
 	return { ...DEFAULT_CONFIG, ...overrides };
