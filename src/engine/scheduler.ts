@@ -75,10 +75,12 @@ export function createScheduler(
 				// of the timeline even for a zero-delay emission
 				await Promise.resolve();
 				let entry = immediate.shift();
+				// Stryker disable next-line ConditionalExpression,EqualityOperator: popping an empty timeline is harmless — sort is a no-op and shift() yields undefined, guarded by `if (next)` below
 				if (!entry && timeline.length > 0) {
 					// pop the earliest (dueAt, insertionSeq) — the seeded timeline order
 					timeline.sort(timelineOrder);
 					const next = timeline.shift();
+					// Stryker disable next-line ConditionalExpression: shift() on a length-guarded timeline is always defined
 					if (next) {
 						logicalNow = Math.max(logicalNow, next.dueAt);
 						entry = next;
@@ -125,6 +127,7 @@ export function createScheduler(
 				const dueAt = logicalNow + delayMs;
 				const timer = setTimeout(() => {
 					// timers are cleared on reset(), so this is belt-and-braces
+					// Stryker disable next-line ConditionalExpression: belt-and-braces only; reset() clears wall timers before bumping epoch, so a stale fire is unreachable
 					if (myEpoch !== epoch) return;
 					wallTimers.delete(timer);
 					logicalNow = Math.max(logicalNow, dueAt);
@@ -176,6 +179,7 @@ export function createScheduler(
 		},
 
 		stopTicks() {
+			// Stryker disable next-line ConditionalExpression: clearInterval(undefined) is a harmless no-op
 			if (tickTimer) clearInterval(tickTimer);
 			tickTimer = undefined;
 		},
@@ -188,11 +192,13 @@ export function createScheduler(
 		},
 
 		reset() {
+			// Stryker disable next-line UpdateOperator: epoch is an identity token; any never-reused value works, direction is irrelevant
 			epoch++; // invalidates any task already dequeued and mid-flight in pump()
 			immediate.length = 0;
 			timeline.length = 0;
 			for (const t of wallTimers) clearTimeout(t);
 			wallTimers.clear();
+			// Stryker disable next-line ConditionalExpression: clearInterval(undefined) is a harmless no-op; the stop-on-reset behavior itself is test-pinned
 			if (tickTimer) clearInterval(tickTimer);
 			tickTimer = undefined;
 			logicalNow = config.fixedEpoch;

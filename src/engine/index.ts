@@ -131,6 +131,7 @@ export function createEngine(deps: EngineDeps): Engine {
 						severity: "error",
 						topic: msg.topic,
 						channel: channel.topic,
+						// Stryker disable next-line OptionalChaining,StringLiteral: errors[0] is defined under the length > 0 guard (the ?. exists for noUncheckedIndexedAccess), and the ?? "unknown" fallback literal is unreachable because Ajv errors always carry a keyword; the detail format itself is pinned exactly by tests
 						detail: `${first?.instancePath || "/"}: ${first?.keyword ?? "unknown"}`,
 						payload: msg.payload,
 						errors,
@@ -192,6 +193,7 @@ export function createEngine(deps: EngineDeps): Engine {
 				record(out.violation); // already L1-stamped by l1Floor
 				return; // floor stays empty on failure (F5, D-008)
 			}
+			// Stryker disable next-line ObjectLiteral,StringLiteral: the floor payload was already Ajv-rechecked by l1Floor with the same validate, so this source stamp can only surface via a violation that is unreachable here
 			publish({ topic, payload: out.payload }, { layer: "L1" });
 		});
 	}
@@ -201,6 +203,7 @@ export function createEngine(deps: EngineDeps): Engine {
 	// set in materialization order — deterministic for a fixed script.
 	function republishInitialState(): void {
 		for (const ch of registry().channels()) {
+			// Stryker disable next-line ConditionalExpression: the direction half is masked, materializeAndPublish re-checks direction and returns for non-toClient channels; the parametrization half and the whole condition are pinned by the start() tests
 			if (ch.direction === "toClient" && !isParametrized(ch.topic))
 				materializeAndPublish(ch.topic);
 		}

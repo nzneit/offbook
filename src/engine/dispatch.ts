@@ -86,6 +86,7 @@ export function createDispatchRegistry(): DispatchRegistry {
 				.filter((r) => r.pattern === m.channel.topic)
 				.sort(precedence);
 			const winner = candidates[0];
+			// Stryker disable next-line ConditionalExpression: with no winner, instances.get(undefined) is undefined and the !handler guard below returns the same undefined
 			if (!winner) return undefined;
 			const handler = instances.get(winner);
 			if (!handler) return undefined; // instantiate() not yet called

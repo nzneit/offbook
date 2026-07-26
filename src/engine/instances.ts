@@ -15,6 +15,7 @@ export function createInstanceRegistry(): InstanceRegistry {
 
 	function add(channelAddress: string, params: Record<string, string>): void {
 		const key = `${channelAddress}|${canonicalize(params)}`;
+		// Stryker disable next-line ConditionalExpression: re-setting an identical value under the same key preserves Map insertion order and snapshot() copies, so nothing is observable
 		if (instances.has(key)) return; // idempotent
 		instances.set(key, { channelAddress, params: { ...params } });
 	}

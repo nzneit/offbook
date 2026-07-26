@@ -80,6 +80,7 @@ export async function l1Floor(
 		violation: {
 			...rejectionViolation(
 				channel,
+				// Stryker disable next-line OptionalChaining,StringLiteral: errors[0] is defined under the length check (the ?. exists for noUncheckedIndexedAccess), and the ?? "unknown" fallback literal is unreachable because Ajv errors always carry a keyword; the detail format itself is pinned exactly by tests
 				`${first?.instancePath || "/"}: ${first?.keyword ?? "unknown"}`,
 			),
 			payload,
