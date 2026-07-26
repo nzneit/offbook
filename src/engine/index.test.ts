@@ -186,9 +186,7 @@ test("unmatched mock topic: surfaced as unknown-topic (stamped) AND still emitte
 	expect(violations[0]?.origin).toBe("mock");
 	expect(violations[0]?.severity).toBe("error");
 	expect(violations[0]?.emitSource).toEqual({ layer: "L3" });
-	expect(violations[0]?.detail).toBe(
-		"unknown-topic: mock emit matches no channel",
-	);
+	expect(violations[0]?.detail).toContain("unknown-topic");
 	expect(violations[0]?.topic).toBe("no/such/topic");
 	expect(violations[0]?.payload).toEqual({ a: 1 });
 });

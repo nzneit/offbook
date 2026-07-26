@@ -193,7 +193,7 @@ export function createEngine(deps: EngineDeps): Engine {
 				record(out.violation); // already L1-stamped by l1Floor
 				return; // floor stays empty on failure (F5, D-008)
 			}
-			// Stryker disable next-line ObjectLiteral,StringLiteral: the floor payload was already Ajv-rechecked by l1Floor with the same validate, so this source stamp can only surface via a violation that is unreachable here
+			// Stryker disable next-line ObjectLiteral,StringLiteral: the floor payload was already Ajv-rechecked by l1Floor with the same validate, so this source stamp can only surface via a violation that is unreachable here; the emission shape itself is pinned by the floor-path tests
 			publish({ topic, payload: out.payload }, { layer: "L1" });
 		});
 	}

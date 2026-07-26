@@ -127,7 +127,7 @@ export function createScheduler(
 				const dueAt = logicalNow + delayMs;
 				const timer = setTimeout(() => {
 					// timers are cleared on reset(), so this is belt-and-braces
-					// Stryker disable next-line ConditionalExpression: belt-and-braces only; reset() clears wall timers before bumping epoch, so a stale fire is unreachable
+					// Stryker disable next-line ConditionalExpression: reset() bumps epoch and clears every wall timer in the same synchronous block, so a stale callback can never fire
 					if (myEpoch !== epoch) return;
 					wallTimers.delete(timer);
 					logicalNow = Math.max(logicalNow, dueAt);
