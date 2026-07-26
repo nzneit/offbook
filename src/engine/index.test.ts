@@ -51,28 +51,6 @@ function makeRegistry(): SpecRegistry {
 	};
 }
 
-function harness(seed = 1) {
-	const config = loadConfig({ seed });
-	const emitted: NormalizedMessage[] = [];
-	const violations: Omit<Violation, "seq" | "observedAt">[] = [];
-	let seq = 0;
-	const engine = createEngine({
-		config,
-		broker: {
-			emit: async (m) => {
-				emitted.push(m);
-			},
-		},
-		registry: makeRegistry,
-		record: (v) => {
-			violations.push(v);
-			return { ...v, seq: ++seq, observedAt: "t" } as Violation;
-		},
-		dispatch: createDispatchRegistry(),
-	});
-	return { config, engine, emitted, violations };
-}
-
 function buildEngine(
 	overrides: Parameters<typeof loadConfig>[0] = {},
 	registry: SpecRegistry = makeRegistry(),
@@ -107,7 +85,7 @@ async function pollUntil(cond: () => boolean, timeoutMs = 1000): Promise<void> {
 
 // [utest->R-013]
 test("R-013: an authored {topic, payload} reaches broker.emit with channel-resolved qos/retain — never undefined", async () => {
-	const { engine, emitted } = harness();
+	const { engine, emitted } = buildEngine();
 	engine.publish(
 		{ topic: "state/d1", payload: { status: "ok" } },
 		{ layer: "L3" },
@@ -126,7 +104,7 @@ test("R-013: an authored {topic, payload} reaches broker.emit with channel-resol
 
 // [utest->R-013]
 test("R-013/G10: an off-spec L2-sourced emit drops (F5) and surfaces a mock violation stamped with scenarioName/stepIndex", async () => {
-	const { engine, emitted, violations } = harness();
+	const { engine, emitted, violations } = buildEngine();
 	engine.publish(
 		{ topic: "state/d1", payload: { status: "BOGUS" } },
 		{ layer: "L2", scenarioName: "warm-up", stepIndex: 2 },
@@ -150,7 +128,7 @@ test("R-013/G10: an off-spec L2-sourced emit drops (F5) and surfaces a mock viol
 
 // [utest->R-013]
 test("R-013: an L2 ranged delay flows keyed through the choke-point and advances logical now() finitely", async () => {
-	const { config, engine, emitted } = harness(7);
+	const { config, engine, emitted } = buildEngine({ seed: 7 });
 	const before = engine.now();
 	engine.publish(
 		{ topic: "state/d1", payload: { status: "ok" }, delay: "150-300ms" },
@@ -167,7 +145,7 @@ test("R-013: an L2 ranged delay flows keyed through the choke-point and advances
 });
 
 test("unmatched mock topic: surfaced as unknown-topic (stamped) AND still emitted at defaults — observe-and-surface", async () => {
-	const { engine, emitted, violations } = harness();
+	const { engine, emitted, violations } = buildEngine();
 	engine.publish(
 		{ topic: "no/such/topic", payload: { a: 1 } },
 		{ layer: "L3" },
@@ -234,7 +212,7 @@ test("reactive path: inbound dispatches the matched L3 handler; ctx.publish is s
 });
 
 test("proactive path: subscribe with no L3 handler falls to the L1 floor and emits a valid retained payload", async () => {
-	const { engine, emitted, violations } = harness();
+	const { engine, emitted, violations } = buildEngine();
 	engine.onSubscribe("state/d7");
 	await engine.idle();
 	expect(violations).toEqual([]);
@@ -278,7 +256,7 @@ test("passive mode fires no ticks (F10)", async () => {
 });
 
 test("an off-spec L1-sourced emit drops and surfaces with emitSource.layer === 'L1' (G10 via the one emit path)", async () => {
-	const { engine, emitted, violations } = harness();
+	const { engine, emitted, violations } = buildEngine();
 	engine.publish(
 		{ topic: "state/d1", payload: { status: "BOGUS" } },
 		{ layer: "L1" },
