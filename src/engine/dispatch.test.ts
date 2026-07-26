@@ -3,7 +3,12 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Handler, SpecRegistry } from "../model/index.ts";
-import { createDispatchRegistry, defaultDispatch } from "./dispatch.ts";
+import {
+	type Registration,
+	createDispatchRegistry,
+	defaultDispatch,
+	precedence,
+} from "./dispatch.ts";
 
 // [utest->R-012]
 
@@ -143,4 +148,78 @@ test("precedence is code-unit ordered, not locale ordered ('B.ts' beats 'a.ts')"
 	expect(d.select("command/x/set", stubRegistry)?.registration.modulePath).toBe(
 		"B.ts",
 	);
+});
+
+test("all() returns the full precedence sequence: sorted module path, then registration order within a module", () => {
+	const d = createDispatchRegistry();
+	d.register("p", () => ({}), "z.ts"); // order 0
+	d.register("p", () => ({}), "a.ts"); // order 1
+	d.register("p", () => ({}), "m.ts"); // order 2
+	d.register("p", () => ({}), "a.ts"); // order 3
+	d.register("p", () => ({}), "z.ts"); // order 4
+	d.instantiate();
+	expect(
+		d.all().map((x) => [x.registration.modulePath, x.registration.order]),
+	).toEqual([
+		["a.ts", 1],
+		["a.ts", 3],
+		["m.ts", 2],
+		["z.ts", 0],
+		["z.ts", 4],
+	]);
+});
+
+test("select before instantiate() returns undefined, never a registration without an instance", () => {
+	const d = createDispatchRegistry();
+	d.register("command/{deviceId}/set", () => ({}), "m.ts");
+	expect(d.select("command/x/set", stubRegistry)).toBeUndefined();
+});
+
+test("a fresh registry stamps direct registrations with the '' sentinel, which wins precedence by code unit", () => {
+	const d = createDispatchRegistry();
+	d.register("command/{deviceId}/set", () => ({}), "z.ts");
+	d.register("command/{deviceId}/set", () => ({})); // no modulePath: the sentinel
+	d.instantiate();
+	const sel = d.select("command/x/set", stubRegistry);
+	expect(sel?.registration.modulePath).toBe("");
+});
+
+test("after loadHandlers, importingPath resets: a direct register() gets the '' sentinel again", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "offbook-handlers-reset-"));
+	const dispatchPath = join(import.meta.dir, "dispatch.ts");
+	writeFileSync(
+		join(dir, "mod.ts"),
+		`import { register } from ${JSON.stringify(dispatchPath)};
+register("task7/{x}", () => ({}));`,
+	);
+	await defaultDispatch.loadHandlers(dir);
+	defaultDispatch.register("task7/{x}", () => ({}));
+	defaultDispatch.instantiate();
+	const paths = defaultDispatch
+		.all()
+		.filter((x) => x.registration.pattern === "task7/{x}")
+		.map((x) => x.registration.modulePath);
+	expect(paths.length).toBe(2);
+	expect(paths[0]).toBe(""); // sentinel sorts first and is exactly ""
+	expect(paths[1]?.endsWith("mod.ts")).toBe(true);
+});
+
+function reg(modulePath: string, order: number): Registration {
+	return { pattern: "p", factory: () => ({}), modulePath, order };
+}
+
+test("precedence: module path dominates by code unit; registration order breaks ties, both directions", () => {
+	expect(precedence(reg("a.ts", 9), reg("z.ts", 0))).toBeLessThan(0);
+	expect(precedence(reg("z.ts", 0), reg("a.ts", 9))).toBeGreaterThan(0);
+	expect(precedence(reg("m.ts", 1), reg("m.ts", 2))).toBeLessThan(0);
+	expect(precedence(reg("m.ts", 2), reg("m.ts", 1))).toBeGreaterThan(0);
+	expect(precedence(reg("B.ts", 0), reg("a.ts", 0))).toBeLessThan(0); // code units, not locale
+});
+
+test("all() excludes a registration made after instantiate(): no instance yet, never surfaced", () => {
+	const d = createDispatchRegistry();
+	d.register("p", () => ({}), "a.ts");
+	d.instantiate();
+	d.register("p", () => ({}), "b.ts"); // registered after instantiate(): no instance yet
+	expect(d.all().map((x) => x.registration.modulePath)).toEqual(["a.ts"]);
 });

@@ -29,19 +29,21 @@ export interface DispatchRegistry {
 	all(): { handler: Handler; registration: Registration }[];
 }
 
+// code-unit comparison, NOT localeCompare: precedence must be identical
+// across machines/ICU builds and consistent with loadHandlers' path sort.
+// Exported for direct unit testing (mutation-kill: engine sort internals
+// hide tie-break defects behind stable-sort no-swaps).
+export function precedence(a: Registration, b: Registration): number {
+	if (a.modulePath < b.modulePath) return -1;
+	if (a.modulePath > b.modulePath) return 1;
+	return a.order - b.order;
+}
+
 export function createDispatchRegistry(): DispatchRegistry {
 	const registrations: Registration[] = [];
 	const instances = new Map<Registration, Handler>();
 	let order = 0;
 	let importingPath = ""; // set around each loadHandlers import; "" = direct registration
-
-	function precedence(a: Registration, b: Registration): number {
-		// code-unit comparison, NOT localeCompare: precedence must be identical
-		// across machines/ICU builds and consistent with loadHandlers' path sort
-		if (a.modulePath < b.modulePath) return -1;
-		if (a.modulePath > b.modulePath) return 1;
-		return a.order - b.order;
-	}
 
 	return {
 		register(pattern, factory, modulePath) {

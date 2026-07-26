@@ -24,6 +24,15 @@ interface TimelineEntry {
 	epoch: number;
 }
 
+// The seeded timeline order: dueAt, then insertion seq. Exported for direct
+// unit testing (mutation-kill: engine sort internals hide tie-break defects).
+export function timelineOrder(
+	a: { dueAt: number; seq: number },
+	b: { dueAt: number; seq: number },
+): number {
+	return a.dueAt - b.dueAt || a.seq - b.seq;
+}
+
 export function createScheduler(
 	config: Config,
 	onTaskError?: (err: unknown) => void,
@@ -68,7 +77,7 @@ export function createScheduler(
 				let entry = immediate.shift();
 				if (!entry && timeline.length > 0) {
 					// pop the earliest (dueAt, insertionSeq) — the seeded timeline order
-					timeline.sort((a, b) => a.dueAt - b.dueAt || a.seq - b.seq);
+					timeline.sort(timelineOrder);
 					const next = timeline.shift();
 					if (next) {
 						logicalNow = Math.max(logicalNow, next.dueAt);

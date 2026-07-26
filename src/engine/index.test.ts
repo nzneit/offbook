@@ -511,3 +511,68 @@ test("engine.faker exposes the seeded faker: same channel+params reproduce, outp
 	expect(b).toEqual(a);
 	expect(m.channel.validate(a)).toEqual([]);
 });
+
+test("tick() in autonomous mode advances the clock and ticks handlers; in passive mode neither happens", async () => {
+	const active = buildEngine({ seed: 1 });
+	const activeTicks = tickCounter(active.dispatch);
+	active.engine.tick();
+	await active.engine.idle();
+	expect(activeTicks()).toBe(1);
+	expect(active.engine.now()).toBe(
+		active.config.fixedEpoch + active.config.tickIntervalMs,
+	);
+
+	const passive = buildEngine({ seed: 1, mode: "passive" });
+	const passiveTicks = tickCounter(passive.dispatch);
+	passive.engine.tick();
+	await passive.engine.idle();
+	expect(passiveTicks()).toBe(0);
+	expect(passive.engine.now()).toBe(passive.config.fixedEpoch);
+});
+
+test("inbound with no registration, or a handler without onInbound, is a silent no-op, never a crash", async () => {
+	const errors: unknown[][] = [];
+	const orig = console.error;
+	console.error = (...a: unknown[]) => {
+		errors.push(a);
+	};
+	try {
+		const bare = buildEngine(); // no registrations at all
+		bare.engine.onInbound({
+			message: { topic: "state/d1", payload: { status: "ok" } },
+			meta: { clientId: "c", seq: 1, receivedAt: 0 },
+		});
+		await bare.engine.idle();
+
+		const tickOnly = buildEngine(); // matched registration, but no onInbound method
+		tickOnly.dispatch.register(
+			"state/{deviceId}",
+			() => ({ tick() {} }),
+			"h.ts",
+		);
+		tickOnly.dispatch.instantiate();
+		tickOnly.engine.onInbound({
+			message: { topic: "state/d1", payload: { status: "ok" } },
+			meta: { clientId: "c", seq: 1, receivedAt: 0 },
+		});
+		await tickOnly.engine.idle();
+
+		expect(bare.emitted).toEqual([]);
+		expect(tickOnly.emitted).toEqual([]);
+	} finally {
+		console.error = orig;
+	}
+	expect(errors).toEqual([]); // neither path threw inside the scheduler task
+});
+
+test("a '+' inside a topic level is not a wildcard: the subscribe materializes (level-exact detection)", async () => {
+	const { engine, emitted } = buildEngine();
+	engine.onSubscribe("state/x+y");
+	await engine.idle();
+	expect(emitted.length).toBe(1);
+	expect(engine.instances.snapshot()).toEqual({
+		instances: [
+			{ channelAddress: "state/{deviceId}", params: { deviceId: "x+y" } },
+		],
+	});
+});

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { loadConfig } from "../config/index.ts";
 import { hashToInt, mulberry32 } from "./prng.ts";
-import { createScheduler } from "./scheduler.ts";
+import { createScheduler, timelineOrder } from "./scheduler.ts";
 
 // [utest->R-010]
 
@@ -273,4 +273,47 @@ test("reset() stops a running wall ticker: nothing fires after reset", async () 
 	await Bun.sleep(50);
 	expect(ticks).toBeLessThanOrEqual(seen + 1); // tolerance for one already-queued fire; the interval itself is gone
 	expect(s.now()).toBe(config.fixedEpoch);
+});
+
+test("timeline pops by dueAt: a later-scheduled earlier-due emission runs first and now() lands on the max", async () => {
+	const config = loadConfig({ seed: 1 });
+	const s = createScheduler(config);
+	const order: string[] = [];
+	s.scheduleEmit(200, () => {
+		order.push("late");
+	});
+	s.scheduleEmit(100, () => {
+		order.push("early");
+	});
+	await s.idle();
+	expect(order).toEqual(["early", "late"]);
+	expect(s.now()).toBe(config.fixedEpoch + 200);
+});
+
+test("same-dueAt emissions keep schedule order (insertion tiebreak, three-way)", async () => {
+	const s = createScheduler(loadConfig({ seed: 1 }));
+	const order: string[] = [];
+	for (const label of ["a", "b", "c"]) {
+		s.scheduleEmit(100, () => {
+			order.push(label);
+		});
+	}
+	await s.idle();
+	expect(order).toEqual(["a", "b", "c"]);
+});
+
+test("timelineOrder: dueAt dominates; insertion seq breaks ties, in both directions", () => {
+	expect(
+		timelineOrder({ dueAt: 1, seq: 9 }, { dueAt: 2, seq: 0 }),
+	).toBeLessThan(0);
+	expect(
+		timelineOrder({ dueAt: 2, seq: 0 }, { dueAt: 1, seq: 9 }),
+	).toBeGreaterThan(0);
+	expect(
+		timelineOrder({ dueAt: 5, seq: 1 }, { dueAt: 5, seq: 2 }),
+	).toBeLessThan(0);
+	expect(
+		timelineOrder({ dueAt: 5, seq: 2 }, { dueAt: 5, seq: 1 }),
+	).toBeGreaterThan(0);
+	expect(timelineOrder({ dueAt: 5, seq: 3 }, { dueAt: 5, seq: 3 })).toBe(0);
 });
