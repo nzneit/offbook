@@ -98,3 +98,10 @@ Append-only. Each decision has a stable never-reused `D-###` id, what was decide
 **Why**: distinct param maps could previously collide into one identity (the archived intake item's example), silently conflating instances in both the ledger and the faker seeding; injectivity is the property the F7 identity exists to provide. Escape chosen over document-the-limitation by owner ruling.
 **From**: docs/archive/intake/2026-07-26-canonicalize-param-escaping.md (final-review finding, owner ruling 2026-07-26)
 **Folds into**: src/engine/faker.ts (canonicalize), src/engine/faker.test.ts
+
+### D-013: Absolute internal imports via package.json subpath imports
+**Date**: 2026-07-26
+**What**: Internal imports that reach upward (anything that would need `../`) use Node subpath imports declared in the `package.json` `imports` field: `#src/*` → `./src/*`, `#scripts/*` → `./scripts/*`. Same-directory and downward imports stay relative, with explicit `.ts` extensions as before. Applies across `src/`, `test/`, `scripts/`, and `bin/offbook`; enforced by the grep gate `test/import-style.test.ts`. tsconfig `paths` is permanently excluded alongside this: one alias system only.
+**Why**: Refactor safety (moving an importing file no longer breaks that file's own imports) and one uniform, exactly-greppable specifier per file. Subpath imports are resolved by spec in every Node-compatible resolver the repo uses (Bun runtime and `bun test`, tsc under `moduleResolution: "bundler"`, and the Stryker sandbox, where `#` resolves against the sandbox's copied `package.json`); tsconfig `paths` would couple runtime module resolution to tsconfig-aware tools and was rejected.
+**From**: docs/superpowers/specs/2026-07-26-absolute-imports-design.md (design dialog, 2026-07-26)
+**Folds into**: AGENTS.md (working notes)
