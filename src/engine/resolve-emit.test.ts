@@ -125,3 +125,43 @@ test("channel-side qos 0 / retain false are honored (nullish, not falsy, coalesc
 test("mixed-unit range strings reject (unit suffix is single and shared)", () => {
 	expect(() => parseDelay("1s-2s", loadConfig(), key)).toThrow();
 });
+
+test("parseDelay errors name the offending spec and which rule broke", () => {
+	const config = loadConfig({ seed: 7 });
+	expect(() => parseDelay("soon", config, key)).toThrow(
+		/malformed delay "soon"/,
+	);
+	expect(() => parseDelay("soon", config, key)).toThrow(/<min>-<max>ms\|s/);
+	expect(() => parseDelay("5-3ms", config, key)).toThrow(
+		/malformed delay "5-3ms"/,
+	);
+	expect(() => parseDelay("5-3ms", config, key)).toThrow(/min > max/);
+});
+
+test("degenerate range 'n-nms' is valid and returns exactly n (inclusive-range arithmetic)", () => {
+	expect(parseDelay("5-5ms", loadConfig({ seed: 7 }), key)).toBe(5);
+});
+
+test("ranged seconds convert before the bounds check: '1-2s' draws in [1000, 2000]", () => {
+	const d = parseDelay("1-2s", loadConfig({ seed: 7 }), key);
+	expect(d).toBeGreaterThanOrEqual(1000);
+	expect(d).toBeLessThanOrEqual(2000);
+});
+
+test("resolveEmit guard errors say which contract broke", () => {
+	expect(() =>
+		resolveEmit(
+			{ topic: "t", payload: {}, delay: "10ms", delayMs: 5 },
+			channel(),
+			loadConfig(),
+			key,
+		),
+	).toThrow(/both delay and delayMs/);
+	expect(() =>
+		resolveEmit(
+			{ topic: "t", payload: {}, delay: "10ms" },
+			channel(),
+			loadConfig(),
+		),
+	).toThrow(/requires a scenario delayKey/);
+});

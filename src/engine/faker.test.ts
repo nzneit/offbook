@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import Ajv2020 from "ajv/dist/2020";
 import { loadConfig } from "../config/index.ts";
-import type { Channel } from "../model/index.ts";
-import { createFaker, l1Floor } from "./faker.ts";
+import type { Channel, SchemaError } from "../model/index.ts";
+import { canonicalize, createFaker, l1Floor } from "./faker.ts";
 
 // [utest->R-011]
 
@@ -91,4 +91,124 @@ test("l1Floor catches a rejecting faker and surfaces an L1 mock violation", asyn
 		expect(out.violation.kind).toBe("schema");
 		expect(out.violation.emitSource?.layer).toBe("L1");
 	}
+});
+
+function rawChannel(
+	topic: string,
+	schema: object,
+	validate: Channel["validate"] = () => [],
+): Channel {
+	return {
+		topic,
+		direction: "toClient",
+		service: "t",
+		schema,
+		validate,
+		qos: 1,
+		retain: false,
+	};
+}
+
+const schemaError = (instancePath: string, keyword: string): SchemaError => ({
+	instancePath,
+	keyword,
+	schemaPath: "#",
+	params: {},
+});
+
+test("canonicalize is the exact F7 identity string: '' for absent/empty, sorted k=v&k=v otherwise", () => {
+	expect(canonicalize(undefined)).toBe("");
+	expect(canonicalize({})).toBe("");
+	expect(canonicalize({ b: "2", a: "1" })).toBe("a=1&b=2");
+});
+
+test("the faker seed key is (config.seed, channel address, canonical params): each axis shifts the draw", async () => {
+	const intSchema = { type: "integer", minimum: 0, maximum: 1_000_000 };
+	const faker = createFaker(loadConfig({ seed: 7 }));
+	const base = await faker(rawChannel("a/{id}", intSchema), { id: "1" });
+	expect(await faker(rawChannel("a/{id}", intSchema), { id: "1" })).toEqual(
+		base,
+	);
+	expect(await faker(rawChannel("b/{id}", intSchema), { id: "1" })).not.toEqual(
+		base,
+	);
+	expect(await faker(rawChannel("a/{id}", intSchema), { id: "2" })).not.toEqual(
+		base,
+	);
+	expect(
+		await createFaker(loadConfig({ seed: 8 }))(
+			rawChannel("a/{id}", intSchema),
+			{ id: "1" },
+		),
+	).not.toEqual(base);
+});
+
+test("l1Floor formats the recheck detail from the first error: root '' falls back to '/', nested path verbatim", async () => {
+	const root = await l1Floor(
+		rawChannel("t/{x}", { type: "object" }, () => [schemaError("", "not")]),
+		async () => ({}),
+	);
+	expect("violation" in root).toBe(true);
+	if ("violation" in root) {
+		expect(root.violation.detail).toBe("/: not");
+		expect(root.violation.topic).toBe("t/{x}");
+		expect(root.violation.channel).toBe("t/{x}");
+		expect(root.violation.errors).toEqual([schemaError("", "not")]);
+		expect(root.violation.payload).toEqual({});
+		expect(root.violation.severity).toBe("error");
+	}
+	const nested = await l1Floor(
+		rawChannel("t/{x}", { type: "object" }, () => [
+			schemaError("/x", "maximum"),
+		]),
+		async () => ({}),
+	);
+	if ("violation" in nested)
+		expect(nested.violation.detail).toBe("/x: maximum");
+});
+
+test("a rejecting faker surfaces 'faker rejected: <original message>'", async () => {
+	const out = await l1Floor(
+		rawChannel("t/{x}", { type: "object" }),
+		async () => {
+			throw new Error("nope");
+		},
+	);
+	expect("violation" in out).toBe(true);
+	if ("violation" in out)
+		expect(out.violation.detail).toBe("faker rejected: nope");
+});
+
+test("alwaysFakeOptionals: every optional property is present in the draw", async () => {
+	const props: Record<string, object> = {};
+	for (const k of ["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8"])
+		props[k] = { type: "integer" };
+	const faker = createFaker(loadConfig({ seed: 7 }));
+	const out = await faker(
+		rawChannel("o/{id}", {
+			type: "object",
+			properties: props,
+			required: [],
+			additionalProperties: false,
+		}),
+	);
+	expect(Object.keys(out as object).sort()).toEqual([
+		"p1",
+		"p2",
+		"p3",
+		"p4",
+		"p5",
+		"p6",
+		"p7",
+		"p8",
+	]);
+});
+
+test("failOnInvalidTypes stays off: an unknown schema type must not reject the draw", async () => {
+	const faker = createFaker(loadConfig({ seed: 7 }));
+	const outcome = await faker(rawChannel("f/{id}", { type: "file" })).then(
+		() => "resolved",
+		(e) => `threw: ${e}`,
+	);
+	expect(outcome).toBe("resolved");
 });

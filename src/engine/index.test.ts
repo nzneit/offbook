@@ -143,6 +143,9 @@ test("R-013/G10: an off-spec L2-sourced emit drops (F5) and surfaces a mock viol
 		stepIndex: 2,
 	});
 	expect(v?.errors?.[0]?.keyword).toBe("enum");
+	expect(v?.detail).toBe("/status: enum"); // nested instancePath verbatim, Ajv keyword
+	expect(v?.topic).toBe("state/d1");
+	expect(v?.channel).toBe("state/{deviceId}");
 });
 
 // [utest->R-013]
@@ -181,7 +184,13 @@ test("unmatched mock topic: surfaced as unknown-topic (stamped) AND still emitte
 	]);
 	expect(violations[0]?.kind).toBe("unknown-topic");
 	expect(violations[0]?.origin).toBe("mock");
+	expect(violations[0]?.severity).toBe("error");
 	expect(violations[0]?.emitSource).toEqual({ layer: "L3" });
+	expect(violations[0]?.detail).toBe(
+		"unknown-topic: mock emit matches no channel",
+	);
+	expect(violations[0]?.topic).toBe("no/such/topic");
+	expect(violations[0]?.payload).toEqual({ a: 1 });
 });
 
 test("reactive path: inbound dispatches the matched L3 handler; ctx.publish is stamped L3; ctx.random is per-invocation deterministic", async () => {
@@ -473,6 +482,9 @@ test("the L1 floor on an unsatisfiable schema stays empty and surfaces the reche
 	expect(violations[0]?.topic).toBe("broken/{id}"); // the floor stamps the channel address; publish()'s recheck would stamp the concrete topic
 	expect(violations[0]?.kind).toBe("schema");
 	expect(violations[0]?.emitSource).toEqual({ layer: "L1" });
+	expect(engine.instances.snapshot()).toEqual({
+		instances: [{ channelAddress: "broken/{id}", params: { id: "b1" } }],
+	});
 });
 
 test("loadHandlers delegates to the dispatch registry and then instantiates", async () => {
@@ -575,4 +587,211 @@ test("a '+' inside a topic level is not a wildcard: the subscribe materializes (
 			{ channelAddress: "state/{deviceId}", params: { deviceId: "x+y" } },
 		],
 	});
+});
+
+function literalRegistry(): SpecRegistry {
+	const ch = makeChannel("plain/topic", { type: "object" }, 1, false);
+	return {
+		match: (topic: string) =>
+			topic === "plain/topic" ? { channel: ch, params: {} } : undefined,
+		matchesFilter: () => false,
+		channels: () => [ch],
+	};
+}
+
+test("a wrong-typed mock payload surfaces the root-path fallback in the detail", async () => {
+	const { engine, violations } = buildEngine();
+	engine.publish({ topic: "state/d1", payload: 42 }, { layer: "L3" });
+	await engine.idle();
+	expect(violations[0]?.detail).toBe("/: type");
+	expect(violations[0]?.channel).toBe("state/{deviceId}");
+	expect(violations[0]?.topic).toBe("state/d1");
+	expect(violations[0]?.severity).toBe("error");
+});
+
+test("a delayed unknown-topic emit still schedules at its delay (the ?? 0 fallback is nullish, not falsy)", async () => {
+	const { config, engine, emitted } = buildEngine();
+	engine.publish(
+		{ topic: "no/such/topic", payload: { a: 1 }, delayMs: 120 },
+		{ layer: "L3" },
+	);
+	await engine.idle();
+	expect(emitted.length).toBe(1);
+	expect(engine.now()).toBe(config.fixedEpoch + 120);
+});
+
+test("an L2 ranged delay advances now() by the exact keyed draw (config.seed reaches the choke-point intact)", async () => {
+	const { config, engine, emitted } = buildEngine({ seed: 7 });
+	const key = { scenarioName: "warm-up", stepIndex: 3 };
+	engine.publish(
+		{ topic: "state/d1", payload: { status: "ok" }, delay: "150-300ms" },
+		{ layer: "L2", ...key },
+		key,
+	);
+	await engine.idle();
+	const draw = mulberry32(hashToInt(`${config.seed}|delay|warm-up|3`))();
+	expect(emitted.length).toBe(1);
+	expect(engine.now()).toBe(config.fixedEpoch + 150 + Math.floor(draw * 151));
+});
+
+test("ctx.publish stamps L3 and ctx.now() reads the logical clock", async () => {
+	const { config, engine, violations, dispatch } = buildEngine();
+	let sawNow = -1;
+	dispatch.register(
+		"state/{deviceId}",
+		() => ({
+			onInbound(_e, ctx) {
+				sawNow = ctx.now();
+				ctx.publish({ topic: "state/d1", payload: { status: "BOGUS" } }); // off-spec on purpose
+			},
+		}),
+		"h.ts",
+	);
+	dispatch.instantiate();
+	engine.onInbound({
+		message: { topic: "state/d1", payload: { status: "ok" } },
+		meta: { clientId: "c", seq: 1, receivedAt: 0 },
+	});
+	await engine.idle();
+	expect(sawNow).toBe(config.fixedEpoch);
+	expect(violations[0]?.emitSource).toEqual({ layer: "L3" });
+	expect(violations[0]?.detail).toBe("/status: enum");
+});
+
+test("materialization rule (ii) is exact: a parametrized mock emit records its instance, nothing else", async () => {
+	const { engine } = buildEngine();
+	engine.publish(
+		{ topic: "state/d4", payload: { status: "ok" } },
+		{ layer: "L3" },
+	);
+	await engine.idle();
+	expect(engine.instances.snapshot()).toEqual({
+		instances: [
+			{ channelAddress: "state/{deviceId}", params: { deviceId: "d4" } },
+		],
+	});
+});
+
+test("a non-parametrized mock emit never invents a ledger instance", async () => {
+	const { engine, emitted } = buildEngine({}, literalRegistry());
+	engine.publish({ topic: "plain/topic", payload: {} }, { layer: "L3" });
+	await engine.idle();
+	expect(emitted.length).toBe(1);
+	expect(engine.instances.snapshot()).toEqual({ instances: [] });
+});
+
+test("a concrete parametrized subscribe records exactly its instance in the ledger", async () => {
+	const { engine } = buildEngine();
+	engine.onSubscribe("state/d5");
+	await engine.idle();
+	expect(engine.instances.snapshot()).toEqual({
+		instances: [
+			{ channelAddress: "state/{deviceId}", params: { deviceId: "d5" } },
+		],
+	});
+});
+
+test("start() with no seeds: a {param} address is never eagerly republished as a literal topic", async () => {
+	const { engine, emitted } = buildEngine();
+	engine.start();
+	await engine.idle();
+	expect(emitted).toEqual([]);
+	expect(engine.instances.snapshot()).toEqual({ instances: [] });
+});
+
+test("start(): a resolvable parametrized seed entry lands in the ledger and republishes its initial state", async () => {
+	const { engine, emitted } = buildEngine({}, makeRegistry(), {
+		"state/{deviceId}": [{ deviceId: "d9" }],
+	});
+	engine.start();
+	await engine.idle();
+	expect(engine.instances.snapshot()).toEqual({
+		instances: [
+			{ channelAddress: "state/{deviceId}", params: { deviceId: "d9" } },
+		],
+	});
+	expect(emitted.length).toBe(1);
+	expect(emitted[0]?.topic).toBe("state/d9");
+});
+
+test("start(): a resolvable non-parametrized seed entry does not invent a ledger instance", async () => {
+	const { engine, emitted } = buildEngine({}, literalRegistry(), {
+		"plain/topic": [{}],
+	});
+	engine.start();
+	await engine.idle();
+	expect(engine.instances.snapshot()).toEqual({ instances: [] });
+	expect(emitted.length).toBe(1); // the eager loop's own initial state, exactly once
+});
+
+test("start(): a junk seed entry surfaces loudly with address and params in the detail, and is skipped", async () => {
+	const { engine, emitted, violations } = buildEngine({}, makeRegistry(), {
+		"junk/{x}": [{ x: "1" }],
+	});
+	engine.start();
+	await engine.idle();
+	expect(emitted).toEqual([]);
+	expect(engine.instances.snapshot()).toEqual({ instances: [] });
+	expect(violations.length).toBe(1);
+	const v = violations[0];
+	expect(v?.kind).toBe("unknown-topic");
+	expect(v?.topic).toBe("junk/1");
+	expect(v?.severity).toBe("error");
+	expect(v?.emitSource).toEqual({ layer: "L1" });
+	expect(v?.detail).toContain("seedInstances: 'junk/{x}'");
+	expect(v?.detail).toContain('{"x":"1"}');
+	expect(v?.detail).toContain(
+		"does not resolve to a toClient channel instance",
+	);
+});
+
+function fromClientRegistry(): SpecRegistry {
+	const v = new Ajv2020({ allErrors: true, strict: false }).compile({
+		type: "object",
+	});
+	const ch: Channel = {
+		topic: "cmd/{id}",
+		direction: "fromClient",
+		service: "t",
+		schema: { type: "object" },
+		validate: (p) => (v(p) ? [] : (v.errors ?? [])),
+		qos: 1,
+		retain: false,
+	};
+	return {
+		match(topic: string) {
+			const m = topic.match(/^cmd\/([^/]+)$/);
+			if (m?.[1]) return { channel: ch, params: { id: m[1] } };
+			return undefined;
+		},
+		matchesFilter: () => false,
+		channels: () => [ch],
+	};
+}
+
+test("a mock emit on a fromClient channel never materializes an instance (rule (ii) is toClient-only)", async () => {
+	const { engine, emitted } = buildEngine({}, fromClientRegistry());
+	engine.publish({ topic: "cmd/c1", payload: {} }, { layer: "L3" });
+	await engine.idle();
+	expect(emitted.length).toBe(1); // still delivered; direction gates the ledger, not delivery
+	expect(engine.instances.snapshot()).toEqual({ instances: [] });
+});
+
+test("start(): a seed entry resolving to a fromClient channel surfaces loudly and stays out of the ledger", async () => {
+	const { engine, emitted, violations } = buildEngine(
+		{},
+		fromClientRegistry(),
+		{
+			"cmd/{id}": [{ id: "c9" }],
+		},
+	);
+	engine.start();
+	await engine.idle();
+	expect(emitted).toEqual([]);
+	expect(engine.instances.snapshot()).toEqual({ instances: [] });
+	expect(violations.length).toBe(1);
+	expect(violations[0]?.kind).toBe("unknown-topic");
+	expect(violations[0]?.detail).toContain(
+		"does not resolve to a toClient channel instance",
+	);
 });
