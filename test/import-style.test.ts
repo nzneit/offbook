@@ -11,7 +11,11 @@ function walk(dir: string): string[] {
 
 // Upward-reaching imports must use the #src/ or #scripts/ aliases from
 // package.json "imports"; same-directory and downward ./ stay relative.
-const PARENT_RELATIVE = /from ["']\.\.\//;
+// Covers static/re-export, bare side-effect, and literal dynamic forms;
+// a dynamic import of a variable is invisible to a grep gate by nature.
+// No self-match: this file's own source never puts a quote directly
+// after "from ", "import ", or "import(".
+const PARENT_RELATIVE = /(from |import |import\()["']\.\.\//;
 
 test("no parent-relative imports outside the subpath aliases", () => {
 	const offenders = ["src", "test", "scripts", "bin"]
