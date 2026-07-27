@@ -1,9 +1,9 @@
 // R-033 — connect fingerprint + ws-fidelity listener behavior (docs/specs/demo-app.md §3).
 // [itest->R-033]
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import type { BrokerModule } from "#src/broker/index.ts";
-import { createBroker } from "#src/broker/index.ts";
 import { loadConfig } from "#src/config/index.ts";
+import type { BrokerModule } from "./index.ts";
+import { createBroker } from "./index.ts";
 
 // ports unique to this file: ws 19100 / tcp 12990
 const WS = 19100;
