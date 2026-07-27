@@ -66,16 +66,51 @@ interface WsListener {
 	close(cb: () => void): void;
 }
 
-function createWsListener(aedes: Aedes): WsListener {
-	const duplexes = new WeakMap<ServerWebSocket<undefined>, Duplex>();
-	let server: ReturnType<typeof Bun.serve<undefined>> | undefined;
+// The upgrade facts captured off the raw HTTP request at handshake time — the
+// R-033 connect-fingerprint's ws-layer half (CONNECT-packet facts are the
+// other half, captured downstream of aedes' own "client" event). Keyed into
+// `factsOut` by the bridge Duplex so the CONNECT-handling code (Task 2) can
+// correlate a packet back to the connection it arrived on.
+export interface WsFacts {
+	path: string;
+	subprotocolsOffered: string[];
+	subprotocolSelected: string | undefined;
+	origin: string | undefined;
+	userAgent: string | undefined;
+}
+
+function createWsListener(
+	aedes: Aedes,
+	factsOut: WeakMap<object, WsFacts>,
+): WsListener {
+	const duplexes = new WeakMap<ServerWebSocket<WsFacts>, Duplex>();
+	let server: ReturnType<typeof Bun.serve<WsFacts>> | undefined;
 
 	return {
 		listen(port, cb) {
-			server = Bun.serve<undefined>({
+			server = Bun.serve<WsFacts>({
 				port,
 				fetch(req, srv) {
-					if (srv.upgrade(req)) return undefined;
+					const offeredHeader = req.headers.get("sec-websocket-protocol");
+					const offered = offeredHeader
+						? offeredHeader
+								.split(",")
+								.map((s) => s.trim())
+								.filter(Boolean)
+						: [];
+					// A real browser DROPS the connection if its requested subprotocol
+					// isn't echoed on the 101 (mqtt.js always requests "mqtt") — verified
+					// by hand that Bun's own `srv.upgrade()` already echoes the first
+					// offered subprotocol unassisted, so there's no header to set here;
+					// this just records which one that was.
+					const data: WsFacts = {
+						path: new URL(req.url).pathname,
+						subprotocolsOffered: offered,
+						subprotocolSelected: offered[0],
+						origin: req.headers.get("origin") ?? undefined,
+						userAgent: req.headers.get("user-agent") ?? undefined,
+					};
+					if (srv.upgrade(req, { data })) return undefined;
 					return new Response("Upgrade required", { status: 426 });
 				},
 				websocket: {
@@ -122,6 +157,10 @@ function createWsListener(aedes: Aedes): WsListener {
 						// path above.
 						duplex.on("close", () => closeWs());
 						duplexes.set(ws, duplex);
+						// keyed by the bridge Duplex, not the ServerWebSocket, so Task 2's
+						// CONNECT-handling code (which only sees the aedes `client`/stream
+						// side) can look these facts back up.
+						factsOut.set(duplex, ws.data);
 						aedes.handle(duplex);
 					},
 					message(ws, message) {
@@ -174,7 +213,10 @@ function decode(buf: Buffer): { payload: unknown; decodeError?: string } {
 
 export function createBroker(config: Config): BrokerModule {
 	const aedes = new Aedes() as AedesWithPersistence;
-	const wsServer = createWsListener(aedes);
+	// consumed by Task 2's CONNECT-handling code to correlate a packet's
+	// client-facing facts back to the ws upgrade it arrived on
+	const wsFacts = new WeakMap<object, WsFacts>();
+	const wsServer = createWsListener(aedes, wsFacts);
 	const tcpServer = createServer(aedes);
 	let seq = 0;
 	const inbound: Array<(e: InboundEvent) => void> = [];
