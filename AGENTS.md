@@ -10,6 +10,7 @@ Guidance for any agent (or human) working in this repo. `CLAUDE.md` is a symlink
 - **`docs/specs/design.md`** — decisions & rationale (§1–§12). *Canonical for "why".*
 - **`docs/specs/l2-scenarios.md`** — the L2 scenario authoring format.
 - **`docs/specs/build-plan.md`** — tech stack, repo scaffold, tiered dependency graph, per-module acceptance, spike specs.
+- **`docs/specs/demo-app.md`** — the demo webapp / R-006–R-007 spike-harness design (`demo-app/`, connect fingerprint, `demo --serve`; R-033).
 - **`docs/specs/doc-system.md`** — how this documentation system is organized.
 - **`REQUIREMENTS.md`** — the enumerable v1 requirements registry (`R-###`); the answer to "what needs building, and is it done".
 - **`DECISIONS.md`** — the decision ledger (`D-###`); forward-authoritative provenance.
@@ -38,7 +39,7 @@ Guidance for any agent (or human) working in this repo. `CLAUDE.md` is a symlink
 2. **Fixture-semantics** — *"does this fixture actually test what it claims?"* See the **Fixture quality bar** in `fixtures/asyncapi/README.md` (no vacuous values; claim↔content; full-path/both-direction coverage; internal consistency; negative cases). The validity-only angle misses all of these.
 
 ## Status & next
-All build tiers and v1 gates are `tested` (30 of 32 requirements): `model` → `broker`/`registry`/`ingestion` → `engine`/`validation` → `scenarios`/`control-plane` → `cli` (the full verb set incl. `up`/`down` process management over the G14 runfile, watch modes, `init`), plus the four cross-cutting v1 gates (R-028–R-031). The only open items are the two empirical spikes, `R-006` (WS-fidelity) and `R-007` (capture the browser application's `connect()`): both need the real browser application against `broker/`'s Aedes defaults and are hard gates on calling v1 done.
+All build tiers and v1 gates are `tested` (30 of 33 requirements): `model` → `broker`/`registry`/`ingestion` → `engine`/`validation` → `scenarios`/`control-plane` → `cli` (the full verb set incl. `up`/`down` process management over the G14 runfile, watch modes, `init`), plus the four cross-cutting v1 gates (R-028–R-031). The open items: the two empirical spikes, `R-006` (WS-fidelity) and `R-007` (capture the browser application's `connect()`), which need the real browser application against `broker/`'s Aedes defaults and are hard gates on calling v1 done; and `R-033` (`specified`), the `demo-app/` spike-harness webapp + connect fingerprint (`docs/specs/demo-app.md`) that rehearses both spikes and makes the at-work capture a no-app-change procedure.
 
 ## Working notes
 - **Git identity is the user's to set** — don't run `git config user.*` on their behalf. Commit/push **only when asked**.

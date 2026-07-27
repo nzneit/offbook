@@ -262,6 +262,12 @@ No validation path ever blocks delivery — validation observes and surfaces lou
 **TEST**: src/engine/instances.test.ts, src/engine/reset.test.ts
 The engine owns the instance-materialization ledger (contracts §2, F1): `InstanceRegistry.materialize` is idempotent, `snapshot()` is captured at reset and `restore()` re-materializes exactly the snapshot set re-seeded (a ledger, never a mirror of Aedes' retained store — that is `getState()`'s job, R3), `seedInstances` in `services.yaml` pre-materializes the deterministic demo set, and `reset` republishes initial state through it (contracts §5) — the materialization half of reset, extending R-014's engine-internal restore.
 
+#### demo-app spike harness + connect fingerprint
+**UID**: R-033
+**STATUS**: specified
+**COVERS**: docs/specs/demo-app.md#demo-app
+A React demo webapp (`demo-app/`, real `mqtt.js` over ws from a real browser) doubles as the showcase and the R-006/R-007 rehearsal harness: thermostat dashboard + `/v1/validation` feed (via a same-origin proxy, no CORS change) + a first-class spike panel (live R-006 checklist, sent-vs-seen comparison, R-007 capture download). `src/broker/` captures a normalized connect fingerprint (ws upgrade + CONNECT facts, password as presence only; deduped subscribe/publish QoS observations) surfaced as structured `offbook.log` lines — the R-007 capture surface (D-015) that also works against the real, unmodifiable browser application at work. `offbook demo --serve` boots the bundled spec + bundled chain scenarios long-running over the G14 machinery. R-006/R-007 remain open: the real browser application run stays the authoritative gate.
+
 <!--
 Seeding is staged (doc-system.md §7). Batch 1 (R-001..R-007) + R-008 (M0) + R-009 (broker tier-1 residual): seeded; reconciled where traces exist (the R-006/R-007 spikes remain open). Batch 2+ (R-010..R-031): the full module/spike/gate carve per D-007 and docs/archive/intake/2026-07-21-batch-2-seeding-carve.md.
 What remains unseeded resolves case by case (not bulk):
