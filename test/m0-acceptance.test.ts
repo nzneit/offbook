@@ -1,8 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { connectAsync } from "mqtt";
+import { compose } from "#src/compose/index.ts";
 import { loadConfig } from "#src/config/index.ts";
-import { createServer } from "#src/control-plane/index.ts";
-import { createFaker } from "#src/engine/faker.ts";
 import type { Violation } from "#src/model/index.ts";
 import { buildRegistry } from "#src/registry/index.ts";
 
@@ -28,7 +27,9 @@ async function bootFullStack(n: number) {
 	const config = ports(n);
 	const specText = await Bun.file("src/demo/thermostat.yaml").text();
 	const registry = await buildRegistry({ specText, service: "demo", config });
-	const server = createServer(config, { registry, faker: createFaker(config) });
+	// composed through the real root (F11): broker+engine+validation wired
+	// there, the control-plane reached only through injected capabilities
+	const server = await compose({ config, registry });
 	await server.start();
 	cleanups.push(() => server.stop());
 	return { server, config, registry };

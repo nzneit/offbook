@@ -122,26 +122,32 @@ Every emission passes the single `resolveEmit(partial, channel)` choke-point (co
 **UID**: R-015
 **STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-2
-**IMPL**: src/validation/, src/control-plane/
+**IMPL**: src/validation/
 **TEST**: src/validation/index.test.ts, test/m0-acceptance.test.ts
-Validation produces `Violation` records for all four kinds (`schema` with structured `SchemaError[]`, `decode`, `direction`, `unknown-topic`) with `client`/`mock` origin, stores them in a bounded ring buffer (`config.maxViolations`, FIFO eviction, process-monotonic `seq` never reused, `summary.oldestSeq` advancing past the cap), and never blocks delivery (observe-and-surface). (IMPL spans both directories because the four-kind classification currently lives in `src/control-plane/index.ts` per M0 wiring; the ring buffer lives in `src/validation/`. The F11 injection cleanup is R-017's business, not R-015's.)
+Validation produces `Violation` records for all four kinds (`schema` with structured `SchemaError[]`, `decode`, `direction`, `unknown-topic`) with `client`/`mock` origin, stores them in a bounded ring buffer (`config.maxViolations`, FIFO eviction, process-monotonic `seq` never reused, `summary.oldestSeq` advancing past the cap), and never blocks delivery (observe-and-surface). (The four-kind classification lives in `src/validation/classify.ts` since R-017's F11 cleanup; the ring buffer in `src/validation/index.ts`.)
 
 #### scenarios/ (L2) authoring runtime
 **UID**: R-016
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-3
-Per `l2-scenarios.md`: a glob+sorted-path dispatch table with the `{param}` matcher + `payloadMatch`, `{{…}}` templating with seeded helpers + L1 autofill, author-time validation surfacing to `/diagnostics` (overlap warnings included), hot-reload, and a malformed scenario skipped-loud to `/diagnostics` when `config.strict` is false (dev default) but fatal-at-startup when strict (`up --ci` or `--strict`).
+**IMPL**: src/scenarios/, src/engine/index.ts
+**TEST**: src/scenarios/matcher.test.ts, src/scenarios/template.test.ts, src/scenarios/fill.test.ts, src/scenarios/loader.test.ts, src/scenarios/index.test.ts
+Per `l2-scenarios.md`: a glob+sorted-path dispatch table with the `{param}` matcher + `payloadMatch`, `{{…}}` templating with seeded helpers + L1 autofill, author-time validation surfacing to `/diagnostics` (overlap warnings included), hot-reload, and a malformed scenario skipped-loud to `/diagnostics` when `config.strict` is false (dev default) but fatal-at-startup when strict (`up --ci` or `--strict`). (The scenario-load/overlap diagnostics are served by the runtime's `diagnostics()`; the HTTP `/diagnostics` view is R-017's wiring. The engine trace is the reactive L3→L2 seam + `post`.)
 
 #### control-plane/ endpoints + envelope
 **UID**: R-017
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-3
-Every `/v1/*` endpoint behaves per contracts §5 with a contract test each, errors use the §5 envelope, lower-layer capabilities (the engine's `Faker`, state read, validation query, scenario trigger) arrive by injection at the composition root (F11 — no direct engine/broker import), `GET /topics` `example` is byte-equal to `POST /publish {example:true}` for the same channel (one injected faker), and an explicit `/publish` `qos`/`retain` overriding the channel binding emits at the override while firing the tier-3 divergence warn-log (off-spec never silent).
+**IMPL**: src/control-plane/, src/compose/, src/validation/classify.ts, src/validation/diagnostics.ts
+**TEST**: src/control-plane/index.test.ts
+Every `/v1/*` endpoint behaves per contracts §5 with a contract test each, errors use the §5 envelope, lower-layer capabilities (the engine's `Faker`, state read, validation query, scenario trigger) arrive by injection at the composition root (F11 — no direct engine/broker import), `GET /topics` `example` is byte-equal to `POST /publish {example:true}` for the same channel (one injected faker), and an explicit `/publish` `qos`/`retain` overriding the channel binding emits at the override while firing the tier-3 divergence warn-log (off-spec never silent). (`POST /specs/refresh` is served over the injected `resolveSpecs` capability with the F19 thunk hot-swap contract-tested; the real re-resolve pipeline — content-hash short-circuit, lockfile rewrite — lands with the tier-4 `up` wiring that owns spec resolution.)
 
 #### control-plane/ CI settlement flow
 **UID**: R-018
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-3
+**IMPL**: src/control-plane/, src/compose/, src/engine/scheduler.ts
+**TEST**: test/ci-settlement.test.ts
 The `reset → publish → GET /pending?wait → GET /validation?sinceSeq=` CI flow returns the expected violation slice with no poll loop (EC1): `GET /pending?wait` for a multi-step reactive scenario returns only once `/state` reflects every emit (`scheduled: 0, settled: true` — counting in-flight faker promises, D-003) and reports nonzero `scheduled` mid-chain in wall-paced mode.
 
 #### cli/ dispatch backbone

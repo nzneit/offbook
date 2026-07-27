@@ -1,6 +1,8 @@
+import { compose } from "#src/compose/index.ts";
 import { loadConfig } from "#src/config/index.ts";
-import { buildTopicInfo, createServer } from "#src/control-plane/index.ts";
-import { createFaker } from "#src/engine/faker.ts";
+import type { ExampleFn } from "#src/control-plane/index.ts";
+import { buildTopicInfo } from "#src/control-plane/index.ts";
+import { createFaker, l1Floor } from "#src/engine/faker.ts";
 import type { TopicInfo, Violation } from "#src/model/index.ts";
 import { buildRegistry } from "#src/registry/index.ts";
 
@@ -10,7 +12,14 @@ async function demoTopicInfo(): Promise<TopicInfo[]> {
 	const config = loadConfig();
 	const specText = await Bun.file(DEMO_SPEC).text();
 	const registry = await buildRegistry({ specText, service: "demo", config });
-	return buildTopicInfo(registry, createFaker(config));
+	// the CLI composes its own example capability (F11 constrains the
+	// control-plane module, not the CLI)
+	const faker = createFaker(config);
+	const example: ExampleFn = async (channel) => {
+		const floor = await l1Floor(channel, faker);
+		return "payload" in floor ? { payload: floor.payload } : { dropped: true };
+	};
+	return buildTopicInfo(registry, example);
 }
 
 function phraseDirection(d: TopicInfo["direction"]): string {
@@ -52,7 +61,7 @@ export async function runDemo(
 	});
 	const specText = await Bun.file(DEMO_SPEC).text();
 	const registry = await buildRegistry({ specText, service: "demo", config });
-	const server = createServer(config, { registry, faker: createFaker(config) });
+	const server = await compose({ config, registry });
 	await server.start();
 	try {
 		// seed populated (retained, per the state channel binding) state

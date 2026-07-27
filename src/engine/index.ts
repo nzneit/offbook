@@ -33,8 +33,17 @@ export interface EngineDeps {
 	registry: () => SpecRegistry;
 	record: (v: Omit<Violation, "seq" | "observedAt">) => Violation;
 	dispatch?: DispatchRegistry;
+	// the L2 seam (R-016): a thunk like `registry` so the composition root can
+	// wire the scenario runtime after the engine exists (it needs the engine's
+	// publish/now/post/faker back); structural — engine/ never imports
+	// scenarios/ (tier direction)
+	scenarios?: () => L2Dispatch | undefined;
 	// merged across services by the composition root: channel address → param-maps (F1, §2)
 	seedInstances?: Record<string, Record<string, string>[]>;
+}
+
+export interface L2Dispatch {
+	onInbound(event: InboundEvent): void | Promise<void>;
 }
 
 export interface Engine {
@@ -46,6 +55,10 @@ export interface Engine {
 	startTicks(): void;
 	stopTicks(): void;
 	publish(partial: EmitPartial, source: EmitSource, delayKey?: DelayKey): void;
+	// enqueue a run-to-completion task on the engine's single event loop (G23)
+	// — the L2 trigger path posts its firing here so {{seq}}/{{uuid}} counter
+	// advancement never interleaves with other dispatch units
+	post(task: () => void | Promise<void>): void;
 	faker: Faker;
 	instances: InstanceRegistry;
 	now(): number;
@@ -257,16 +270,23 @@ export function createEngine(deps: EngineDeps): Engine {
 				...event,
 				meta: { ...event.meta, seq: ++inboundSeq },
 			};
-			scheduler.post(() => {
+			scheduler.post(async () => {
 				const sel = dispatch.select(stamped.message.topic, registry());
-				// L3 → [L2 seam: the scenario runner slots in here, R-016] ; no L1 on
-				// the reactive path (contracts §3 trigger table)
-				sel?.handler.onInbound?.(
-					stamped,
-					makeCtx(
-						`inbound|${stamped.meta.seq}|${sel.registration.modulePath}|${sel.registration.order}`,
-					),
-				);
+				// L3 → L2 first-match-wins, no L1 on the reactive path (contracts §3
+				// trigger table). A registered L3 handler owns the WHOLE topic and
+				// shadows L2 even without an onInbound hook (l2 §0: real logic means
+				// handing the topic to L3). The await keeps the L2 firing inside
+				// this run-to-completion unit (G23/D-003).
+				if (sel) {
+					sel.handler.onInbound?.(
+						stamped,
+						makeCtx(
+							`inbound|${stamped.meta.seq}|${sel.registration.modulePath}|${sel.registration.order}`,
+						),
+					);
+					return;
+				}
+				await deps.scenarios?.()?.onInbound(stamped);
 			});
 		},
 
@@ -290,6 +310,8 @@ export function createEngine(deps: EngineDeps): Engine {
 		stopTicks: () => scheduler.stopTicks(),
 
 		publish,
+
+		post: (task) => scheduler.post(task),
 
 		get faker() {
 			return faker;
