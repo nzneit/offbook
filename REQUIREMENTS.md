@@ -152,44 +152,58 @@ The `reset → publish → GET /pending?wait → GET /validation?sinceSeq=` CI f
 
 #### cli/ dispatch backbone
 **UID**: R-019
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-4
-The Bun CLI is a thin client over the HTTP API: every verb (`init/demo/up/down/topics/publish/state/scenarios/scenario/reset/mode/validation/check/diagnostics/logs/status/specs update`) hits its endpoint (or does its local file/process work) and renders the response, resolving the runfile where needed.
+**IMPL**: src/cli/, src/registry/
+**TEST**: test/cli-dispatch.test.ts
+The Bun CLI is a thin client over the HTTP API: every verb (`init/demo/up/down/topics/publish/state/scenarios/scenario/reset/mode/validation/check/diagnostics/logs/status/specs update`) hits its endpoint (or does its local file/process work) and renders the response, resolving the runfile where needed. (`up` spawns `src/cli/serve.ts` detached over the `src/cli/boot.ts` project boot — services.yaml → ingestion → per-service registries merged by `mergeRegistries` → compose — which also wires the real `POST /specs/refresh` re-resolve pipeline deferred from R-017: content-hash short-circuit + lockfile rewrite. `check` reads `--since <seq>` or the full retained log; the server-retained reset baseline is R-023. Rendering depth, boot-profile edge cases, watch modes, and the init contract are R-020–R-025.)
 
 #### cli/ publish + scenario input ergonomics
 **UID**: R-020
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-4
+**IMPL**: src/cli/
+**TEST**: test/cli-dispatch.test.ts
 `publish` accepts `--example | --payload <json> | --payload-file <path> | --payload -` (mutually exclusive; bare = `--example`) and exits nonzero on an unmatched topic unless `--force` (EQ1), and `scenario` accepts repeatable `--param k=v` plus the same `--payload*` family (EQ4).
 
 #### cli/ topics + validation rendering
 **UID**: R-021
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-4
+**IMPL**: src/cli/
+**TEST**: test/cli-dispatch.test.ts
 `topics` default output prints no raw JSON-Schema fragment (a `grep '"type":'` finds nothing), lists each topic's fields with required-ness + the seeded example, flattens `allOf`/marks `oneOf`·`anyOf` (`--compact`/`--no-examples`/`--schema` toggles; `--receives`/`--sends` filters; `--json` round-trips `TopicInfo[]`), rendering direction as "client receives/sends" in human output (EQ3/ER1); `validation` default prints one line per distinct violation (repeats collapsed to `×N`; distinct key = origin·kind·channel·error-location; composed headline from `errors[0]`+`payload`@instancePath for `kind:'schema'`; first…last `#seq`) plus a summary footer showing `summary.distinct` and no raw Ajv object, with `-v` expanding `errors[]`/`channel`/`clientId`/payload and `--json` matching `GET /v1/validation` (EQ6/ER2).
 
 #### cli/ up boot profiles + ports
 **UID**: R-022
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-4
-`up` resolves two boot profiles — interactive default (`wallClock=true`, `mode=autonomous`, `strict=false`) vs `--ci` (co-sets `mode=passive`, `wallClock=false`, `strict=true`, `--watch` off) with `--strict` an independent flag (`--frozen` is v2) — preflights the three ports (foreground error on conflict), refuses a live double-start, auto-reclaims a stale runfile, honors `--ws-port`/`--tcp-port`/`--ctrl-port` overrides, prints the `ws://localhost:<wsPort>` connect target (P7), and `down` is idempotent.
+**IMPL**: src/cli/
+**TEST**: test/cli-dispatch.test.ts
+`up` resolves two boot profiles — interactive default (`wallClock=true`, `mode=autonomous`, `strict=false`) vs `--ci` (co-sets `mode=passive`, `wallClock=false`, `strict=true`, `--watch` off) with `--strict` an independent flag (`--frozen` is v2) — preflights the three ports (foreground error on conflict), refuses a live double-start, auto-reclaims a stale runfile, honors `--ws-port`/`--tcp-port`/`--ctrl-port` overrides, prints the `ws://localhost:<wsPort>` connect target (P7), and `down` is idempotent. (The `--watch`-off co-set is enforced and tested with R-024, where the `--watch` flag lands.)
 
 #### cli/ status + check
 **UID**: R-023
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-4
-`status` resolves the runfile and prints running/ports/mode/specs+SHAs/violation-summary including the caught-N-distinct-breaks scoreboard (`summary.distinct.client`, design §5), the `/diagnostics` error/warn counts, the connect target + spec age (P7/P8/P2), exiting nonzero when down; `check` exits nonzero iff `summary.byOrigin.client > 0` since the last `reset` (P8); and `up --seed`/`reset --seed` set and echo the seed.
+**IMPL**: src/cli/, src/control-plane/, src/compose/
+**TEST**: test/cli-dispatch.test.ts, src/control-plane/index.test.ts
+`status` resolves the runfile and prints running/ports/mode/specs+SHAs/violation-summary including the caught-N-distinct-breaks scoreboard (`summary.distinct.client`, design §5), the `/diagnostics` error/warn counts, the connect target + spec age (P7/P8/P2), exiting nonzero when down; `check` exits nonzero iff `summary.byOrigin.client > 0` since the last `reset` (P8) — the server-retained baseline surfaced as `lastResetSeq` on `GET /v1/mode` (D-014); and `up --seed`/`reset --seed` set and echo the seed.
 
 #### cli/ watch modes
 **UID**: R-024
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-4
-`up --watch` (autonomous-only) restarts the server on `handlers/**/*.ts` changes and is off in `passive` so CI never restarts mid-window (EH1), while `validation --watch` and `diagnostics --watch` poll `?sinceSeq=` and render new entries within one interval (EO1–EO4).
+**IMPL**: src/cli/, src/compose/
+**TEST**: test/cli-dispatch.test.ts
+`up --watch` (autonomous-only) restarts the server on `handlers/**/*.ts` changes and is off in `passive` so CI never restarts mid-window (EH1), while `validation --watch` and `diagnostics --watch` poll `?sinceSeq=` and render new entries within one interval (EO1–EO4). (The restart is a full process replacement — L3 handlers load via cached `import()`, so only a fresh module graph picks up edits; the runfile follows the new pid and the log is appended, G14. This slice also wires `runtime.watch()` into compose start/setMode, making l2 §8 scenario hot-reload live on a running server and frozen in `passive`, G24.)
 
 #### cli/ init scaffold
 **UID**: R-025
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-4
+**IMPL**: src/cli/
+**TEST**: test/cli-dispatch.test.ts
 `init` writes `services.yaml`/`environments.yaml`/`scenarios/00-example.yaml`/empty `handlers/`/`.gitignore` only when absent (re-run refuses, nonzero), never scaffolds `specs.lock`, and `init && <set gitHost> && up` reaches a running server with no other hand-authored YAML — on a fresh project `up` prints the L1-floor orientation banner, suppressed once a scenario or handler loads (EI1–EI2).
 
 #### spike: mqtt-pattern parity (F6/R2)
@@ -210,27 +224,35 @@ JSF 0.6.2 runs against every `fixtures/asyncapi/*` bundled `channel.schema` and 
 
 #### gate: §5 validation correctness
 **UID**: R-028
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#v1-gate
-Registry + validation are green against the `external-ref`, `qos-retain`, and `qos-overrides` fixtures (false-positive/false-negative are tool-killers; `qos-overrides` guards the tier-2 `topicOverrides` string-equality resolution, F14) — the module bars live in R-004 and R-015; this entry is the cross-cutting v1 gate over them.
+**IMPL**: src/registry/, src/validation/, src/compose/
+**TEST**: test/gate-validation.test.ts
+Registry + validation are green against the `external-ref`, `qos-retain`, and `qos-overrides` fixtures (false-positive/false-negative are tool-killers; `qos-overrides` guards the tier-2 `topicOverrides` string-equality resolution, F14) — the module bars live in R-004 and R-015; this entry is the cross-cutting v1 gate over them, driving all three fixtures through the composed stack (delivery + violation log + wire-level qos/retain).
 
 #### gate: determinism
 **UID**: R-029
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#v1-gate
-Same seed ⇒ identical emission stream + timings + violation ordering, compared over the F9 canonical projection (`Violation` minus wall-clock `observedAt`/`clientId`), with the gate booting `passive` via `offbook up --ci` and asserting `GET /mode == passive` (F10) so no autonomous tick perturbs the window (`bun test` re-run stable) — the scheduler substrate is R-010; this entry is the cross-cutting v1 gate over it.
+**IMPL**: src/engine/, src/cli/
+**TEST**: test/gate-determinism.test.ts
+Same seed ⇒ identical emission stream + timings + violation ordering, compared over the F9 canonical projection (`Violation` minus wall-clock `observedAt`/`clientId`), with the gate booting `passive` via `offbook up --ci` and asserting `GET /mode == passive` (F10) so no autonomous tick perturbs the window (`bun test` re-run stable) — the scheduler substrate is R-010; this entry is the cross-cutting v1 gate over it, comparing two separate `up --ci` boots of the same seeded project.
 
 #### gate: transport isolation
 **UID**: R-030
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#v1-gate
-The `aedes`-import lint rule passes repo-wide: no module but `broker/` imports `aedes` or any MQTT/transport package, everything else operating on the normalized message model.
+**IMPL**: test/transport-isolation.test.ts
+**TEST**: test/transport-isolation.test.ts
+The `aedes`-import lint rule passes repo-wide: no module but `broker/` imports `aedes` or any MQTT/transport package (`aedes`/`aedes-server-factory`/`mqtt`/`mqtt-packet`/`mqtt-connection`/`ws`/`websocket-stream`; `mqtt-pattern` stays sanctioned for `registry/`, F6/R2), everything else operating on the normalized message model.
 
 #### gate: observe-and-surface
 **UID**: R-031
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#v1-gate
-No validation path ever blocks delivery — validation observes and surfaces loudly at every tier while the broker stays payload-agnostic — the module bar lives in R-015; this entry is the cross-cutting v1 gate over it.
+**IMPL**: src/broker/, src/validation/, src/compose/
+**TEST**: test/gate-observe-surface.test.ts
+No validation path ever blocks delivery — validation observes and surfaces loudly at every tier while the broker stays payload-agnostic — the module bar lives in R-015; this entry is the cross-cutting v1 gate over it: a real ws subscriber receives all four off-contract kinds (schema/direction/unknown-topic/decode) byte-intact while each lands in the violation log.
 
 #### engine/ instance materialization (InstanceRegistry)
 **UID**: R-032

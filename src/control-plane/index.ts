@@ -76,6 +76,9 @@ export interface ControlPlaneCaps {
 	mode(): Config["mode"];
 	setMode(mode: Config["mode"]): void;
 	seed(): number;
+	// the most-recent reset's violation-log baseline (0 before the first) —
+	// offbook check's default window (P8, D-014)
+	lastResetSeq(): number;
 	// the §4 tier-3 divergence warn-log sink (off-spec never silent)
 	warn(line: string): void;
 }
@@ -187,7 +190,13 @@ export function createServer(config: Config, caps: ControlPlaneCaps) {
 
 	app.get("/v1/scenarios", (c) => c.json({ scenarios: caps.scenarios() }));
 
-	app.get("/v1/mode", (c) => c.json({ mode: caps.mode(), seed: caps.seed() }));
+	app.get("/v1/mode", (c) =>
+		c.json({
+			mode: caps.mode(),
+			seed: caps.seed(),
+			lastResetSeq: caps.lastResetSeq(),
+		}),
+	);
 
 	app.get("/v1/pending", async (c) => {
 		const wait = c.req.query("wait");

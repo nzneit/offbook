@@ -216,13 +216,22 @@ export async function compose(parts: ComposeParts) {
 		mode: () => config.mode,
 
 		setMode(mode) {
-			// the one config field mutable outside reset (contracts §1a)
+			// the one config field mutable outside reset (contracts §1a);
+			// passive also freezes the scenario set (G24 — no hot-reload swaps
+			// inside a CI window)
 			config.mode = mode;
-			if (mode === "passive") engine.stopTicks();
-			else engine.startTicks();
+			if (mode === "passive") {
+				engine.stopTicks();
+				runtime?.stopWatch();
+			} else {
+				engine.startTicks();
+				runtime?.watch();
+			}
 		},
 
 		seed: () => seed,
+
+		lastResetSeq: () => lastResetBaseline,
 
 		warn: (line) => log(line),
 	};
@@ -250,6 +259,9 @@ export async function compose(parts: ComposeParts) {
 			await runtime?.load();
 			engine.start();
 			engine.startTicks();
+			// l2 §8 hot-reload: swaps definitions on file change, logging each
+			// swap; self-gates to a no-op in passive (G24)
+			runtime?.watch();
 			httpServer = Bun.serve({
 				port: config.controlPlanePort,
 				fetch: app.fetch,

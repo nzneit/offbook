@@ -38,7 +38,7 @@ Guidance for any agent (or human) working in this repo. `CLAUDE.md` is a symlink
 2. **Fixture-semantics** — *"does this fixture actually test what it claims?"* See the **Fixture quality bar** in `fixtures/asyncapi/README.md` (no vacuous values; claim↔content; full-path/both-direction coverage; internal consistency; negative cases). The validity-only angle misses all of these.
 
 ## Status & next
-Pre-work complete (L2 format, frozen contracts, build plan, fixtures, doc-system reorg). `REQUIREMENTS.md` is now the work list: build Tier 0 `model/` → `broker`/`registry`/`ingestion` → `engine`/`validation` → `scenarios`/`control-plane` → `cli`, moving each requirement `specified` → `built` → `tested` as its `COVERS` anchor is implemented and tested. The two empirical spikes, `R-006` (WS-fidelity) and `R-007` (capture the browser application's `connect()`), are runnable in parallel against `broker/`'s Aedes defaults and are hard gates on calling v1 done.
+All build tiers and v1 gates are `tested` (30 of 32 requirements): `model` → `broker`/`registry`/`ingestion` → `engine`/`validation` → `scenarios`/`control-plane` → `cli` (the full verb set incl. `up`/`down` process management over the G14 runfile, watch modes, `init`), plus the four cross-cutting v1 gates (R-028–R-031). The only open items are the two empirical spikes, `R-006` (WS-fidelity) and `R-007` (capture the browser application's `connect()`): both need the real browser application against `broker/`'s Aedes defaults and are hard gates on calling v1 done.
 
 ## Working notes
 - **Git identity is the user's to set** — don't run `git config user.*` on their behalf. Commit/push **only when asked**.

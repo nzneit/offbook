@@ -105,3 +105,10 @@ Append-only. Each decision has a stable never-reused `D-###` id, what was decide
 **Why**: Refactor safety (moving an importing file no longer breaks that file's own imports) and one uniform, exactly-greppable specifier per file. Subpath imports are resolved by spec in every Node-compatible resolver the repo uses (Bun runtime and `bun test`, tsc under `moduleResolution: "bundler"`, and the Stryker sandbox, where `#` resolves against the sandbox's copied `package.json`); tsconfig `paths` would couple runtime module resolution to tsconfig-aware tools and was rejected.
 **From**: docs/superpowers/specs/2026-07-26-absolute-imports-design.md (design dialog, 2026-07-26)
 **Folds into**: AGENTS.md (working notes)
+
+### D-014: `GET /v1/mode` carries `lastResetSeq` — the server-retained `offbook check` baseline
+**Date**: 2026-07-26
+**What**: The `GET /v1/mode` response gains a third field, `lastResetSeq`: the violation-log baseline captured by the most-recent `POST /v1/reset` (`0` before the first reset). `offbook check` resolves its default window by reading it (`--since <seq>` still overrides). No new endpoint; `ValidationSummary` is unchanged.
+**Why**: Contracts §5 already promised that "the server retains the most-recent `reset` `sinceSeq`" for `offbook check` (P8) but specified no read surface — a retained value the CLI cannot read from a separate process cannot power the gate. `GET /mode` is the runtime-posture read (mode and seed are both reset-scoped state), so the baseline belongs there; extending `ValidationSummary` was rejected (frozen §4 interface, and the baseline is not a property of the log), as was a new endpoint (§5's endpoint set is closed).
+**From**: R-023 implementation (tier-4 CLI), 2026-07-26
+**Folds into**: docs/specs/contracts.md §5 (`GET /v1/mode` row + the `offbook check` note), src/control-plane/index.ts, src/compose/index.ts

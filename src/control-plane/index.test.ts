@@ -2,8 +2,10 @@
 // composition root (F11): reads (topics/state/validation/specs/diagnostics/
 // scenarios/mode/pending), actions (publish/trigger/reset/mode/specs-refresh),
 // the closed-union error envelope, the byte-equal example guarantee, and the
-// qos/retain divergence warn-log.
+// qos/retain divergence warn-log. GET /v1/mode's lastResetSeq (D-014) is the
+// offbook-check baseline.
 // [itest->R-017]
+// [itest->R-023]
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -302,9 +304,11 @@ test("GET /v1/scenarios: name · when topic · stepCount · source from the disp
 
 test("GET/POST /v1/mode: reflects flips; invalid mode → 400 bad-request envelope", async () => {
 	const { req, post } = await boot(8);
+	// lastResetSeq = 0 before the first reset (D-014)
 	expect(await (await req("/v1/mode")).json()).toEqual({
 		mode: "autonomous",
 		seed: 1,
+		lastResetSeq: 0,
 	});
 	const flipped = await post("/v1/mode", { mode: "passive" });
 	expect(flipped.status).toBe(200);
@@ -312,6 +316,7 @@ test("GET/POST /v1/mode: reflects flips; invalid mode → 400 bad-request envelo
 	expect(await (await req("/v1/mode")).json()).toEqual({
 		mode: "passive",
 		seed: 1,
+		lastResetSeq: 0,
 	});
 	const bad = await post("/v1/mode", { mode: "chaotic" });
 	expect(bad.status).toBe(400);
@@ -529,11 +534,14 @@ test("POST /v1/reset: {reset, seed, sinceSeq}; seed change reflects in GET /v1/m
 
 	const reseeded = (await (await post("/v1/reset", { seed: 42 })).json()) as {
 		seed: number;
+		sinceSeq: number;
 	};
 	expect(reseeded.seed).toBe(42);
+	// the retained baseline now mirrors the latest reset's sinceSeq (D-014)
 	expect(await (await req("/v1/mode")).json()).toEqual({
 		mode: "autonomous",
 		seed: 42,
+		lastResetSeq: reseeded.sinceSeq,
 	});
 	const bad = await post("/v1/reset", { seed: "nope" });
 	expect(bad.status).toBe(400);

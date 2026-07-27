@@ -1,0 +1,1152 @@
+// R-019 — the CLI dispatch backbone: every verb hits its endpoint (or does
+// its local file/process work) and renders the response, resolving the G14
+// runfile where needed. Suite A drives the HTTP verbs against an in-process
+// composed server; suite B runs the real `up → status → … → down` process
+// cycle against a local-git project fixture.
+// [itest->R-019]
+import { afterAll, beforeAll, expect, test } from "bun:test";
+import {
+	appendFileSync,
+	existsSync,
+	mkdirSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { Io } from "#src/cli/index.ts";
+import { renderTopicList, run } from "#src/cli/index.ts";
+import { readRunfile, writeRunfile } from "#src/cli/runfile.ts";
+import type { Composed } from "#src/compose/index.ts";
+import { compose } from "#src/compose/index.ts";
+import { loadConfig } from "#src/config/index.ts";
+import type { Channel, SpecRegistry, TopicInfo } from "#src/model/index.ts";
+import { buildRegistry, mergeRegistries } from "#src/registry/index.ts";
+import {
+	gitSpecProject,
+	makeSpecRepo,
+	servicesYamlFor,
+} from "./project-fixture.ts";
+
+// 19xxx/129xx: distinct from control-plane (18xxx), ci-settlement (16xxx), m0
+const WS = 19001;
+const TCP = 12901;
+const CTRL = 19801;
+const CTRL_FLAG = ["--ctrl-port", String(CTRL)];
+
+const SCENARIO = `
+- name: accept-set
+  when:
+    topic: command/{deviceId}/set
+  then:
+    - emit:
+        topic: state/{{deviceId}}
+        payload:
+          deviceId: "{{deviceId}}"
+          status: accepted
+          target: "{{payload.target}}"
+`;
+
+let base: string;
+let server: Composed;
+
+function io(): { out: string[]; err: string[]; io: Io } {
+	const out: string[] = [];
+	const err: string[] = [];
+	return { out, err, io: { out: (l) => out.push(l), err: (l) => err.push(l) } };
+}
+
+beforeAll(async () => {
+	base = await mkdtemp(join(tmpdir(), "offbook-cli-"));
+	const scenariosDir = join(base, "scenarios");
+	mkdirSync(scenariosDir);
+	writeFileSync(join(scenariosDir, "50-accept.yaml"), SCENARIO);
+	const config = loadConfig({
+		brokerWsPort: WS,
+		brokerTcpPort: TCP,
+		controlPlanePort: CTRL,
+	});
+	const registry = await buildRegistry({
+		specText: await Bun.file("src/demo/thermostat.yaml").text(),
+		service: "demo",
+		config,
+	});
+	server = await compose({ config, registry, scenariosDir });
+	await server.start();
+});
+
+afterAll(async () => {
+	await server.stop();
+	await rm(base, { recursive: true, force: true });
+});
+
+// --- suite A: HTTP verbs over --ctrl-port ---
+
+test("topics hits GET /v1/topics on the running server (no demo-fallback note) and --json round-trips", async () => {
+	const human = io();
+	expect(await run(["topics", ...CTRL_FLAG], human.io)).toBe(0);
+	const text = human.out.join("\n");
+	expect(text).toContain("state/{deviceId}");
+	expect(text).toContain("command/{deviceId}/set");
+	expect(text).toMatch(/client receives|client sends/);
+	expect(text).not.toContain("bundled demo spec"); // server-backed, not fallback
+
+	const json = io();
+	expect(await run(["topics", ...CTRL_FLAG, "--json"], json.io)).toBe(0);
+	const topics = JSON.parse(json.out.join("\n")) as Array<{ topic: string }>;
+	expect(topics.map((t) => t.topic).sort()).toEqual([
+		"command/{deviceId}/set",
+		"state/{deviceId}",
+	]);
+});
+
+test("publish --payload injects and state renders the retained entry", async () => {
+	const pub = io();
+	expect(
+		await run(
+			[
+				"publish",
+				"state/thermostat-9",
+				"--payload",
+				'{"deviceId":"thermostat-9","status":"idle"}',
+				...CTRL_FLAG,
+				"--wait",
+			],
+			pub.io,
+		),
+	).toBe(0);
+	expect(pub.out.join("\n")).toContain("injected → state/thermostat-9");
+	expect(pub.out.join("\n")).toContain("settled: true");
+
+	const st = io();
+	expect(
+		await run(["state", "--topic", "state/thermostat-9", ...CTRL_FLAG], st.io),
+	).toBe(0);
+	expect(st.out.join("\n")).toContain('"deviceId":"thermostat-9"');
+});
+
+test("publish on an unmatched topic exits nonzero unless --force (EQ1)", async () => {
+	const bare = io();
+	expect(
+		await run(
+			["publish", "nope/unknown", "--payload", "{}", ...CTRL_FLAG],
+			bare.io,
+		),
+	).toBe(1);
+	expect(bare.out.join("\n")).toContain("unknown topic");
+	expect(bare.err.join("\n")).toContain("--force");
+
+	const forced = io();
+	expect(
+		await run(
+			["publish", "nope/unknown", "--payload", "{}", "--force", ...CTRL_FLAG],
+			forced.io,
+		),
+	).toBe(0);
+});
+
+test("publish rejects --payload with --example, and bad --payload JSON, client-side", async () => {
+	const both = io();
+	expect(
+		await run(
+			["publish", "state/x", "--payload", "{}", "--example", ...CTRL_FLAG],
+			both.io,
+		),
+	).toBe(1);
+	expect(both.err.join("\n")).toContain("mutually exclusive");
+
+	const bad = io();
+	expect(
+		await run(
+			["publish", "state/x", "--payload", "{nope", ...CTRL_FLAG],
+			bad.io,
+		),
+	).toBe(1);
+	expect(bad.err.join("\n")).toContain("invalid JSON");
+});
+
+// --- R-020: the --payload* input family on publish + scenario (EQ1/EQ4) ---
+// [itest->R-020]
+
+test("publish --payload-file injects the file's JSON; a missing file errors client-side", async () => {
+	const file = join(base, "payload.json");
+	writeFileSync(file, '{"deviceId":"from-file","status":"idle"}');
+	const ok = io();
+	expect(
+		await run(
+			["publish", "state/from-file", "--payload-file", file, ...CTRL_FLAG],
+			ok.io,
+		),
+	).toBe(0);
+	const st = io();
+	await run(["state", "--topic", "state/from-file", ...CTRL_FLAG], st.io);
+	expect(st.out.join("\n")).toContain('"deviceId":"from-file"');
+
+	const missing = io();
+	expect(
+		await run(
+			[
+				"publish",
+				"state/x",
+				"--payload-file",
+				join(base, "nope.json"),
+				...CTRL_FLAG,
+			],
+			missing.io,
+		),
+	).toBe(1);
+	expect(missing.err.join("\n")).toContain("cannot read");
+});
+
+test("the payload sources are mutually exclusive in every pairing", async () => {
+	const pairs = [
+		["--payload", "{}", "--example"],
+		["--payload", "{}", "--payload-file", "x.json"],
+		["--example", "--payload-file", "x.json"],
+	];
+	for (const extra of pairs) {
+		const r = io();
+		expect(
+			await run(["publish", "state/x", ...extra, ...CTRL_FLAG], r.io),
+		).toBe(1);
+		expect(r.err.join("\n")).toContain("mutually exclusive");
+	}
+});
+
+test("publish --payload - reads the payload from stdin", async () => {
+	const bin = `${import.meta.dir}/../bin/offbook`;
+	const proc = Bun.spawn(
+		[bin, "publish", "state/stdin-1", "--payload", "-", ...CTRL_FLAG],
+		{
+			stdin: new TextEncoder().encode('{"deviceId":"stdin-1","status":"idle"}'),
+			stdout: "pipe",
+			stderr: "pipe",
+		},
+	);
+	const out = await new Response(proc.stdout).text();
+	const err = await new Response(proc.stderr).text();
+	await proc.exited;
+	expect({ code: proc.exitCode, err }).toEqual({ code: 0, err: "" });
+	expect(out).toContain("injected → state/stdin-1");
+
+	const st = io();
+	await run(["state", "--topic", "state/stdin-1", ...CTRL_FLAG], st.io);
+	expect(st.out.join("\n")).toContain('"deviceId":"stdin-1"');
+});
+
+test("scenario accepts the same --payload* family: --payload-file feeds {{payload.*}} refs (EQ4)", async () => {
+	const file = join(base, "trigger-payload.json");
+	writeFileSync(file, '{"mode":"heat","target":33}');
+	const fired = io();
+	expect(
+		await run(
+			[
+				"scenario",
+				"accept-set",
+				"--param",
+				"deviceId=t8",
+				"--payload-file",
+				file,
+				"--wait",
+				...CTRL_FLAG,
+			],
+			fired.io,
+		),
+	).toBe(0);
+	const st = io();
+	await run(["state", "--topic", "state/t8", ...CTRL_FLAG], st.io);
+	expect(st.out.join("\n")).toContain('"target":33');
+
+	const both = io();
+	expect(
+		await run(
+			[
+				"scenario",
+				"accept-set",
+				"--payload",
+				"{}",
+				"--payload-file",
+				file,
+				...CTRL_FLAG,
+			],
+			both.io,
+		),
+	).toBe(1);
+	expect(both.err.join("\n")).toContain("mutually exclusive");
+});
+
+test("scenario fires POST /v1/trigger/:name with --param; unknown name renders the envelope and exits nonzero", async () => {
+	const fired = io();
+	expect(
+		await run(
+			[
+				"scenario",
+				"accept-set",
+				"--param",
+				"deviceId=t7",
+				"--wait",
+				...CTRL_FLAG,
+			],
+			fired.io,
+		),
+	).toBe(0);
+	expect(fired.out.join("\n")).toContain("fired → scenario 'accept-set'");
+
+	const st = io();
+	await run(["state", "--topic", "state/t7", ...CTRL_FLAG], st.io);
+	expect(st.out.join("\n")).toContain('"status":"accepted"');
+
+	const missing = io();
+	expect(await run(["scenario", "ghost", ...CTRL_FLAG], missing.io)).toBe(1);
+	expect(missing.err.join("\n")).toContain("unknown-scenario");
+});
+
+test("scenarios lists the loaded L2 table", async () => {
+	const s = io();
+	expect(await run(["scenarios", ...CTRL_FLAG], s.io)).toBe(0);
+	expect(s.out.join("\n")).toContain(
+		"accept-set — on command/{deviceId}/set · 1 step(s)",
+	);
+});
+
+test("reset --seed echoes the seed; mode reads and sets", async () => {
+	const r = io();
+	expect(await run(["reset", "--seed", "42", ...CTRL_FLAG], r.io)).toBe(0);
+	expect(r.out.join("\n")).toMatch(/reset — seed 42 · violation baseline #\d+/);
+
+	const m1 = io();
+	expect(await run(["mode", ...CTRL_FLAG], m1.io)).toBe(0);
+	expect(m1.out.join("\n")).toContain("mode: autonomous · seed 42");
+
+	const m2 = io();
+	expect(await run(["mode", "passive", ...CTRL_FLAG], m2.io)).toBe(0);
+	expect(m2.out.join("\n")).toContain("mode: passive");
+
+	const bad = io();
+	expect(await run(["mode", "sideways", ...CTRL_FLAG], bad.io)).toBe(1);
+	expect(bad.err.join("\n")).toContain("bad-request");
+
+	await run(["mode", "autonomous", ...CTRL_FLAG], io().io);
+});
+
+test("validation renders violation lines + summary footer; check gates on client breaks since a baseline (P8)", async () => {
+	// checkpoint via the CLI reset, then a CLEAN window
+	const r = io();
+	await run(["reset", ...CTRL_FLAG], r.io);
+	const baseline = Number(/#(\d+)/.exec(r.out.join("\n"))?.[1]);
+	expect(Number.isInteger(baseline)).toBe(true);
+	await run(
+		["publish", "state/thermostat-1", "--example", "--wait", ...CTRL_FLAG],
+		io().io,
+	);
+
+	const clean = io();
+	expect(
+		await run(["check", "--since", String(baseline), ...CTRL_FLAG], clean.io),
+	).toBe(0);
+	expect(clean.out.join("\n")).toContain("clean");
+
+	// off-contract client publish → check exits nonzero
+	await run(
+		[
+			"publish",
+			"command/thermostat-1/set",
+			"--payload",
+			'{"mode":"broil","target":22}',
+			"--wait",
+			...CTRL_FLAG,
+		],
+		io().io,
+	);
+	const broken = io();
+	expect(
+		await run(["check", "--since", String(baseline), ...CTRL_FLAG], broken.io),
+	).toBe(1);
+	expect(broken.out.join("\n")).toMatch(/1 client violation\(s\).*1 distinct/);
+
+	const v = io();
+	expect(
+		await run(
+			[
+				"validation",
+				"--since",
+				String(baseline),
+				"--origin",
+				"client",
+				...CTRL_FLAG,
+			],
+			v.io,
+		),
+	).toBe(0);
+	const text = v.out.join("\n");
+	expect(text).toMatch(/×1 ✗ client schema command\/thermostat-1\/set — /);
+	expect(text).toMatch(/— 1 distinct shown \(1 total\)/);
+});
+
+// --- R-021: topics + validation human rendering (ER1/ER2/EQ3/EQ6) ---
+// [itest->R-021]
+
+test("topics default output has fields + example but NO raw JSON-Schema; --schema opts it in; --compact/--no-examples trim (ER1)", async () => {
+	const def = io();
+	await run(["topics", ...CTRL_FLAG], def.io);
+	const text = def.out.join("\n");
+	expect(text).not.toMatch(/"type":/); // the acceptance grep
+	expect(text).toMatch(/- deviceId \(required\): string/);
+	expect(text).toContain("example: ");
+
+	const raw = io();
+	await run(["topics", "--schema", ...CTRL_FLAG], raw.io);
+	expect(raw.out.join("\n")).toMatch(/"type":/); // opt-in only
+
+	const compact = io();
+	await run(["topics", "--compact", ...CTRL_FLAG], compact.io);
+	const compactText = compact.out.join("\n");
+	expect(compactText).not.toContain("example:");
+	expect(compactText).not.toContain("- deviceId");
+	expect(compactText).toContain("state/{deviceId}  [client receives]");
+
+	const noEx = io();
+	await run(["topics", "--no-examples", ...CTRL_FLAG], noEx.io);
+	expect(noEx.out.join("\n")).not.toContain("example:");
+	expect(noEx.out.join("\n")).toMatch(/- deviceId/);
+});
+
+test("topics --receives/--sends filter by direction and are mutually exclusive (EQ3)", async () => {
+	const recv = io();
+	await run(["topics", "--receives", "--compact", ...CTRL_FLAG], recv.io);
+	expect(recv.out.join("\n")).toContain("state/{deviceId}");
+	expect(recv.out.join("\n")).not.toContain("command/{deviceId}/set");
+
+	const sends = io();
+	await run(["topics", "--sends", "--compact", ...CTRL_FLAG], sends.io);
+	expect(sends.out.join("\n")).toContain("command/{deviceId}/set");
+	expect(sends.out.join("\n")).not.toContain("state/{deviceId}");
+
+	const both = io();
+	expect(
+		await run(["topics", "--receives", "--sends", ...CTRL_FLAG], both.io),
+	).toBe(1);
+	expect(both.err.join("\n")).toContain("mutually exclusive");
+});
+
+test("renderTopicList flattens allOf into one field list and marks oneOf variants (ER1)", async () => {
+	const t = (schema: object): TopicInfo =>
+		({
+			topic: "x/y",
+			direction: "toClient",
+			service: "s",
+			schema,
+			example: { a: "v" },
+		}) as TopicInfo;
+	const flattened = renderTopicList([
+		t({
+			allOf: [
+				{ properties: { a: { type: "string" } }, required: ["a"] },
+				{ properties: { b: { type: "number" } } },
+			],
+		}),
+	]);
+	expect(flattened).toContain("- a (required): string");
+	expect(flattened).toContain("- b: number");
+	expect(flattened).not.toMatch(/"type":/);
+
+	const marked = renderTopicList([
+		t({
+			oneOf: [
+				{ properties: { on: { type: "boolean" } }, required: ["on"] },
+				{ properties: { level: { enum: ["low", "high"] } } },
+			],
+		}),
+	]);
+	expect(marked).toContain("one of 2 variant(s):");
+	expect(marked).toContain("variant 1:");
+	expect(marked).toContain("- on (required): boolean");
+	expect(marked).toContain("- level: enum(low|high)");
+});
+
+test("validation collapses repeats to ×N with the EQ6 composed headline; -v expands; --json round-trips (ER2)", async () => {
+	const r = io();
+	await run(["reset", ...CTRL_FLAG], r.io);
+	const baseline = Number(/#(\d+)/.exec(r.out.join("\n"))?.[1]);
+	// the same off-contract publish twice → ONE distinct violation, ×2
+	for (let i = 0; i < 2; i++)
+		await run(
+			[
+				"publish",
+				"command/thermostat-1/set",
+				"--payload",
+				'{"mode":"broil","target":22}',
+				"--wait",
+				...CTRL_FLAG,
+			],
+			io().io,
+		);
+
+	const v = io();
+	expect(
+		await run(
+			[
+				"validation",
+				"--since",
+				String(baseline),
+				"--origin",
+				"client",
+				...CTRL_FLAG,
+			],
+			v.io,
+		),
+	).toBe(0);
+	const text = v.out.join("\n");
+	expect(text).toMatch(
+		/×2 ✗ client schema command\/thermostat-1\/set — \/mode /,
+	);
+	expect(text).toMatch(/\(got "broil"\) · #\d+…#\d+/);
+	expect(text).toMatch(/— 1 distinct shown \(2 total\) · log distinct \d+/);
+	expect(text).not.toMatch(/"keyword":/); // no raw Ajv object in human output
+
+	const verbose = io();
+	await run(
+		[
+			"validation",
+			"--since",
+			String(baseline),
+			"--origin",
+			"client",
+			"-v",
+			...CTRL_FLAG,
+		],
+		verbose.io,
+	);
+	const vText = verbose.out.join("\n");
+	expect(vText).toContain("client: control-plane");
+	expect(vText).toContain('payload: {"mode":"broil","target":22}');
+	expect(vText).toMatch(/error: \/mode enum — /);
+
+	const json = io();
+	await run(
+		["validation", "--since", String(baseline), "--json", ...CTRL_FLAG],
+		json.io,
+	);
+	const parsed = JSON.parse(json.out.join("\n")) as {
+		violations: Array<{ errors?: unknown[] }>;
+		summary: { distinct: { total: number } };
+	};
+	expect(parsed.violations.length).toBeGreaterThanOrEqual(2);
+	expect(parsed.violations.some((x) => (x.errors?.length ?? 0) > 0)).toBe(true);
+	expect(parsed.summary.distinct.total).toBeGreaterThanOrEqual(1);
+});
+
+test("diagnostics and specs render; demo-composed server has no specs but shows branch mode", async () => {
+	const d = io();
+	expect(await run(["diagnostics", ...CTRL_FLAG], d.io)).toBe(0);
+	expect(d.out.join("\n")).toMatch(/— \d+ error\(s\) · \d+ warning\(s\)/);
+
+	const s = io();
+	expect(await run(["specs", ...CTRL_FLAG], s.io)).toBe(0);
+	expect(s.out.join("\n")).toContain("(no specs");
+	expect(s.out.join("\n")).toContain("resolution-mode: branch");
+});
+
+// --- R-023: status scoreboard + check's server-retained baseline (P8/D-014) ---
+// [itest->R-023]
+
+test("check with no --since gates on the window since the LAST RESET (server-retained baseline)", async () => {
+	// break the contract → check (no --since) is dirty
+	await run(["reset", ...CTRL_FLAG], io().io);
+	await run(
+		[
+			"publish",
+			"command/thermostat-1/set",
+			"--payload",
+			'{"mode":"broil","target":22}',
+			"--wait",
+			...CTRL_FLAG,
+		],
+		io().io,
+	);
+	const dirty = io();
+	expect(await run(["check", ...CTRL_FLAG], dirty.io)).toBe(1);
+	expect(dirty.out.join("\n")).toMatch(/since #\d+/);
+
+	// a fresh reset advances the retained baseline past the break → clean
+	await run(["reset", ...CTRL_FLAG], io().io);
+	const clean = io();
+	expect(await run(["check", ...CTRL_FLAG], clean.io)).toBe(0);
+	expect(clean.out.join("\n")).toContain("clean");
+
+	// mode --json surfaces the baseline itself (D-014)
+	const mj = io();
+	await run(["mode", "--json", ...CTRL_FLAG], mj.io);
+	const parsed = JSON.parse(mj.out.join("\n")) as { lastResetSeq: number };
+	expect(parsed.lastResetSeq).toBeGreaterThan(0);
+});
+
+test("status prints the caught-N-distinct-breaks scoreboard, diagnostics counts, and the connect target", async () => {
+	const dir = join(base, "run-live-status");
+	await writeRunfile(dir, {
+		pid: process.pid,
+		brokerWsPort: WS,
+		brokerTcpPort: TCP,
+		controlPlanePort: CTRL,
+		startedAt: "t",
+	});
+	const st = io();
+	expect(await run(["status", "--run-dir", dir], st.io)).toBe(0);
+	const text = st.out.join("\n");
+	expect(text).toMatch(/caught \d+ distinct client break\(s\)/);
+	expect(text).toMatch(/diagnostics: \d+ error\(s\) · \d+ warning\(s\)/);
+	expect(text).toContain(`point your MQTT client at ws://localhost:${WS}`);
+});
+
+// --- runfile resolution (G14) ---
+
+test("client verbs resolve the runfile: live pid+port works, stale pid errors, no runfile errors", async () => {
+	const liveDir = join(base, "run-live");
+	await writeRunfile(liveDir, {
+		pid: process.pid, // alive, and CTRL answers as offbook
+		brokerWsPort: WS,
+		brokerTcpPort: TCP,
+		controlPlanePort: CTRL,
+		startedAt: "t",
+	});
+	const live = io();
+	expect(await run(["mode", "--run-dir", liveDir], live.io)).toBe(0);
+	expect(live.out.join("\n")).toContain("mode:");
+
+	// a pid that is definitely dead: a spawned-and-exited child
+	const dead = Bun.spawnSync(["true"]);
+	const staleDir = join(base, "run-stale");
+	await writeRunfile(staleDir, {
+		pid: dead.pid ?? 4_193_999,
+		brokerWsPort: WS,
+		brokerTcpPort: TCP,
+		controlPlanePort: CTRL,
+		startedAt: "t",
+	});
+	const stale = io();
+	expect(await run(["state", "--run-dir", staleDir], stale.io)).toBe(1);
+	expect(stale.err.join("\n")).toContain("stale runfile");
+
+	const none = io();
+	expect(
+		await run(["state", "--run-dir", join(base, "run-none")], none.io),
+	).toBe(1);
+	expect(none.err.join("\n")).toContain("not running");
+});
+
+test("topics falls back to the bundled demo spec when nothing is running (M0 discovery floor)", async () => {
+	const t = io();
+	expect(await run(["topics", "--run-dir", join(base, "run-none")], t.io)).toBe(
+		0,
+	);
+	const text = t.out.join("\n");
+	expect(text).toContain("bundled demo spec");
+	expect(text).toContain("state/{deviceId}");
+	expect(t.err).toEqual([]);
+});
+
+test("down is idempotent on a dead/absent runfile; status exits nonzero when down; logs reads the log file", async () => {
+	const deadPid = Bun.spawnSync(["true"]).pid ?? 4_193_998;
+	const dir = join(base, "run-down");
+	await writeRunfile(dir, {
+		pid: deadPid,
+		brokerWsPort: 1,
+		brokerTcpPort: 2,
+		controlPlanePort: 3,
+		startedAt: "t",
+	});
+	const d1 = io();
+	expect(await run(["down", "--run-dir", dir], d1.io)).toBe(0);
+	expect(d1.out.join("\n")).toContain("not running");
+	expect(await readRunfile(dir)).toBeUndefined();
+
+	const d2 = io();
+	expect(await run(["down", "--run-dir", dir], d2.io)).toBe(0); // idempotent
+
+	const st = io();
+	expect(await run(["status", "--run-dir", dir], st.io)).toBe(1);
+	expect(st.err.join("\n")).toContain("not running");
+
+	writeFileSync(join(dir, "offbook.log"), "[offbook] hello from the log\n");
+	const lg = io();
+	expect(await run(["logs", "--run-dir", dir], lg.io)).toBe(0);
+	expect(lg.out.join("\n")).toContain("hello from the log");
+
+	const noLog = io();
+	expect(
+		await run(["logs", "--run-dir", join(base, "run-none")], noLog.io),
+	).toBe(1);
+});
+
+test("init scaffolds only-when-absent and refuses a re-run", async () => {
+	const dir = join(base, "proj-init");
+	const first = io();
+	expect(await run(["init", dir], first.io)).toBe(0);
+	for (const f of [
+		"services.yaml",
+		"environments.yaml",
+		"scenarios/00-example.yaml",
+		".gitignore",
+	])
+		expect(existsSync(join(dir, f))).toBe(true);
+	expect(existsSync(join(dir, "handlers"))).toBe(true);
+	expect(existsSync(join(dir, "specs.lock"))).toBe(false); // never scaffolded
+
+	const again = io();
+	expect(await run(["init", dir], again.io)).toBe(1);
+	expect(again.err.join("\n")).toContain("already exists");
+});
+
+test("unknown verb prints usage and exits nonzero", async () => {
+	const u = io();
+	expect(await run(["frobnicate"], u.io)).toBe(1);
+	expect(u.err.join("\n")).toContain("usage: offbook");
+});
+
+// --- mergeRegistries (the multi-service boot path) ---
+
+test("mergeRegistries: one registry over all services — most-specific wins across services, declaration order breaks ties", () => {
+	const ch = (topic: string, service: string): Channel =>
+		({
+			topic,
+			direction: "toClient",
+			service,
+			schema: {},
+			validate: () => [],
+		}) as unknown as Channel;
+	const regOf = (...channels: Channel[]): SpecRegistry => ({
+		channels: () => channels,
+		match: () => undefined,
+		matchesFilter: () => false,
+	});
+	const a = regOf(ch("state/{deviceId}", "svc-a"));
+	const b = regOf(ch("state/main", "svc-b"), ch("alerts/{level}", "svc-b"));
+	const merged = mergeRegistries([a, b]);
+
+	expect(merged.channels().map((c) => c.service)).toEqual([
+		"svc-a",
+		"svc-b",
+		"svc-b",
+	]);
+	// literal beats {param} even though it was declared in the LATER registry
+	expect(merged.match("state/main")?.channel.service).toBe("svc-b");
+	expect(merged.match("state/other")?.channel.topic).toBe("state/{deviceId}");
+	expect(merged.match("alerts/red")?.params).toEqual({ level: "red" });
+	expect(merged.matchesFilter("state/+", "state/main")).toBe(true);
+});
+
+// --- suite B: the real up → status → specs → check → down process cycle ---
+
+test("up spawns the detached server from a local-git project, status/specs/logs read it, down stops it", async () => {
+	const projectDir = await gitSpecProject();
+	const runDir = join(projectDir, ".offbook");
+	const flags = [
+		"--run-dir",
+		runDir,
+		"--ws-port",
+		"19010",
+		"--tcp-port",
+		"12910",
+		"--ctrl-port",
+		"19810",
+	];
+	const prevCwd = process.cwd();
+	process.chdir(projectDir);
+	try {
+		const up = io();
+		const upCode = await run(["up", "--ci", "--seed", "7", ...flags], up.io);
+		if (upCode !== 0) throw new Error(`up failed:\n${up.err.join("\n")}`);
+		const upText = up.out.join("\n");
+		expect(upText).toContain(
+			"point your MQTT client at ws://localhost:19010 (MQTT 3.1.1)",
+		);
+		expect(upText).toContain("mode passive · seed 7 (--ci profile)"); // --ci co-sets
+		expect(existsSync(join(projectDir, "specs.lock"))).toBe(true);
+
+		// a second up refuses the live double-start (P7)
+		const dup = io();
+		expect(await run(["up", ...flags], dup.io)).toBe(1);
+		expect(dup.err.join("\n")).toContain("already running");
+
+		const st = io();
+		expect(await run(["status", "--run-dir", runDir], st.io)).toBe(0);
+		const stText = st.out.join("\n");
+		expect(stText).toContain("offbook: running");
+		expect(stText).toContain("mode passive · seed 7");
+		expect(stText).toMatch(
+			/spec thermostat: main@.*asyncapi\.yaml @ [0-9a-f]{8}/,
+		);
+		expect(stText).toMatch(/fetched .* \(\d+[smhd] ago\)/); // neutral spec age (P2)
+
+		const sp = io();
+		expect(await run(["specs", "--run-dir", runDir], sp.io)).toBe(0);
+		expect(sp.out.join("\n")).toContain("thermostat:");
+		expect(sp.out.join("\n")).toContain("branch tip");
+
+		const upd = io();
+		expect(await run(["specs", "update", "--run-dir", runDir], upd.io)).toBe(0);
+		expect(upd.out.join("\n")).toContain("specs refreshed (1 service(s))");
+
+		// the CI gate over the wire: clean → 0, off-contract publish → 1
+		expect(await run(["check", "--run-dir", runDir], io().io)).toBe(0);
+		await run(
+			[
+				"publish",
+				"command/thermostat-1/set",
+				"--payload",
+				'{"mode":"broil","target":22}',
+				"--wait",
+				"--run-dir",
+				runDir,
+			],
+			io().io,
+		);
+		expect(await run(["check", "--run-dir", runDir], io().io)).toBe(1);
+
+		const lg = io();
+		expect(await run(["logs", "--run-dir", runDir], lg.io)).toBe(0);
+		expect(lg.out.join("\n")).toContain("listening");
+
+		const down = io();
+		expect(await run(["down", "--run-dir", runDir], down.io)).toBe(0);
+		expect(down.out.join("\n")).toContain("stopped");
+		expect(await readRunfile(runDir)).toBeUndefined();
+		expect(await run(["down", "--run-dir", runDir], io().io)).toBe(0); // idempotent
+	} finally {
+		process.chdir(prevCwd);
+		// safety net: if down never ran, kill via the runfile
+		const leftover = await readRunfile(runDir);
+		if (leftover) {
+			try {
+				process.kill(leftover.pid, "SIGKILL");
+			} catch {}
+		}
+		await rm(projectDir, { recursive: true, force: true });
+	}
+}, 60_000);
+
+// --- R-022: up boot profiles + port lifecycle (P7/EH1) ---
+// [itest->R-022]
+
+test("up preflights the ports in the foreground (named fix, no detached EADDRINUSE) and auto-reclaims a stale runfile", async () => {
+	const dir = join(base, "run-preflight");
+	const dead = Bun.spawnSync(["true"]).pid ?? 4_193_997;
+	await writeRunfile(dir, {
+		pid: dead,
+		brokerWsPort: 1,
+		brokerTcpPort: 2,
+		controlPlanePort: 3,
+		startedAt: "t",
+	});
+	// CTRL is held by the suite-A server, so preflight must fail fast — after
+	// reclaiming the stale runfile, before anything spawns
+	const up = io();
+	expect(
+		await run(
+			[
+				"up",
+				"--run-dir",
+				dir,
+				"--ws-port",
+				"19021",
+				"--tcp-port",
+				"12921",
+				"--ctrl-port",
+				String(CTRL),
+			],
+			up.io,
+		),
+	).toBe(1);
+	expect(up.out.join("\n")).toContain("reclaiming stale runfile");
+	expect(up.err.join("\n")).toContain(`port ${CTRL} in use`);
+	expect(up.err.join("\n")).toContain("--ctrl-port");
+	expect(await readRunfile(dir)).toBeUndefined(); // reclaimed; nothing spawned
+});
+
+test("interactive default boots lenient-loud past a bad scenario (autonomous, strict=false); up --strict makes it fatal", async () => {
+	const projectDir = await gitSpecProject();
+	const scenariosDir = join(projectDir, "scenarios");
+	mkdirSync(scenariosDir);
+	// structurally broken: no `then` steps — a scenario-load error (l2 §7)
+	writeFileSync(join(scenariosDir, "10-broken.yaml"), "- name: broken\n");
+	const runDir = join(projectDir, ".offbook");
+	const flags = [
+		"--run-dir",
+		runDir,
+		"--ws-port",
+		"19022",
+		"--tcp-port",
+		"12922",
+		"--ctrl-port",
+		"19822",
+	];
+	const prevCwd = process.cwd();
+	process.chdir(projectDir);
+	try {
+		// interactive default: lenient-loud — boots, surfaces the load error
+		const up1 = io();
+		const code1 = await run(["up", ...flags], up1.io);
+		if (code1 !== 0) throw new Error(`up failed:\n${up1.err.join("\n")}`);
+		expect(up1.out.join("\n")).toContain("mode autonomous"); // interactive profile
+		expect(up1.out.join("\n")).not.toContain("--ci profile");
+
+		const m = io();
+		await run(["mode", "--run-dir", runDir], m.io);
+		expect(m.out.join("\n")).toContain("mode: autonomous");
+
+		const d = io();
+		expect(await run(["diagnostics", "--run-dir", runDir], d.io)).toBe(0);
+		expect(d.out.join("\n")).toMatch(/✗ scenario-load .*10-broken/);
+
+		expect(await run(["down", "--run-dir", runDir], io().io)).toBe(0);
+
+		// --strict (independent of --ci): the same bad scenario is now fatal —
+		// up surfaces the foreground failure and cleans the runfile
+		const up2 = io();
+		expect(await run(["up", "--strict", ...flags], up2.io)).toBe(1);
+		expect(up2.err.join("\n")).toContain("failed to start");
+		expect(up2.err.join("\n")).toMatch(/fatal|strict/);
+		expect(await readRunfile(runDir)).toBeUndefined();
+	} finally {
+		process.chdir(prevCwd);
+		const leftover = await readRunfile(runDir);
+		if (leftover) {
+			try {
+				process.kill(leftover.pid, "SIGKILL");
+			} catch {}
+		}
+		await rm(projectDir, { recursive: true, force: true });
+	}
+}, 60_000);
+
+// --- R-024: watch modes (EH1/EO1–EO4) ---
+// [itest->R-024]
+
+const BIN = `${import.meta.dir}/../bin/offbook`;
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+test("logs -f follows appended lines (EO1)", async () => {
+	const dir = join(base, "run-logs-f");
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(join(dir, "offbook.log"), "first line\n");
+	const proc = Bun.spawn([BIN, "logs", "-f", "--run-dir", dir], {
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	await pause(800);
+	appendFileSync(join(dir, "offbook.log"), "appended line\n");
+	await pause(1200);
+	proc.kill();
+	const out = await new Response(proc.stdout).text();
+	await proc.exited;
+	expect(out).toContain("first line");
+	expect(out).toContain("appended line");
+}, 15_000);
+
+test("validation --watch renders a new violation within one interval (EO2)", async () => {
+	const r = io();
+	await run(["reset", ...CTRL_FLAG], r.io);
+	const baseline = Number(/#(\d+)/.exec(r.out.join("\n"))?.[1]);
+	const proc = Bun.spawn(
+		[
+			BIN,
+			"validation",
+			"--watch",
+			"--interval",
+			"100",
+			"--since",
+			String(baseline),
+			...CTRL_FLAG,
+		],
+		{ stdout: "pipe", stderr: "pipe" },
+	);
+	await pause(1000); // CLI cold start + first poll
+	await run(
+		[
+			"publish",
+			"command/thermostat-1/set",
+			"--payload",
+			'{"mode":"broil","target":22}',
+			"--wait",
+			...CTRL_FLAG,
+		],
+		io().io,
+	);
+	await pause(2000); // > one interval
+	proc.kill();
+	const out = await new Response(proc.stdout).text();
+	await proc.exited;
+	expect(out).toMatch(
+		/×1 ✗ client schema command\/thermostat-1\/set — \/mode /,
+	);
+}, 20_000);
+
+test("diagnostics --watch diff-renders a hot-reloaded scenario-load error (EO3 + l2 §8 hot-reload)", async () => {
+	const proc = Bun.spawn(
+		[BIN, "diagnostics", "--watch", "--interval", "100", ...CTRL_FLAG],
+		{ stdout: "pipe", stderr: "pipe" },
+	);
+	await pause(1000);
+	// dropping a broken file into the WATCHED scenarios dir hot-reloads the
+	// table (compose wires runtime.watch() in autonomous) → a new diagnostic
+	const brokenPath = join(base, "scenarios", "90-broken.yaml");
+	writeFileSync(brokenPath, "- name: broken-watch\n");
+	await pause(2000);
+	proc.kill();
+	const out = await new Response(proc.stdout).text();
+	await proc.exited;
+	expect(out).toMatch(/✗ scenario-load .*90-broken/);
+	// clean up and let the watcher swap the good table back in
+	rmSync(brokenPath);
+	await pause(300);
+}, 20_000);
+
+test("up --ci ignores --watch (EH1 co-set)", async () => {
+	const dir = join(base, "run-ci-watch");
+	const up = io();
+	expect(
+		await run(
+			[
+				"up",
+				"--ci",
+				"--watch",
+				"--run-dir",
+				dir,
+				"--ws-port",
+				"19031",
+				"--tcp-port",
+				"12931",
+				"--ctrl-port",
+				String(CTRL), // occupied → preflight fails after the note (cheap)
+			],
+			up.io,
+		),
+	).toBe(1);
+	expect(up.out.join("\n")).toContain("--watch is ignored under --ci");
+});
+
+test("up --watch restarts the detached server on a handlers/**/*.ts change; the log stays continuous (EH1/G14)", async () => {
+	const projectDir = await gitSpecProject();
+	const handlersDir = join(projectDir, "handlers");
+	mkdirSync(handlersDir);
+	writeFileSync(join(handlersDir, "noop.ts"), "// no handlers yet\n");
+	const runDir = join(projectDir, ".offbook");
+	const flags = [
+		"--run-dir",
+		runDir,
+		"--ws-port",
+		"19030",
+		"--tcp-port",
+		"12930",
+		"--ctrl-port",
+		"19830",
+	];
+	const prevCwd = process.cwd();
+	process.chdir(projectDir);
+	try {
+		const up = io();
+		const code = await run(["up", "--watch", ...flags], up.io);
+		if (code !== 0) throw new Error(`up failed:\n${up.err.join("\n")}`);
+		const first = await readRunfile(runDir);
+		expect(first).toBeDefined();
+
+		// edit a handler → the serving process replaces itself (fresh module
+		// graph) and points the runfile at the new pid
+		writeFileSync(join(handlersDir, "noop.ts"), "// edited\n");
+		const deadline = Date.now() + 25_000;
+		let second = await readRunfile(runDir);
+		while ((!second || second.pid === first?.pid) && Date.now() < deadline) {
+			await pause(200);
+			second = await readRunfile(runDir);
+		}
+		expect(second?.pid).not.toBe(first?.pid);
+
+		// the replacement serves — wait for readiness, then status is green
+		const ready = Date.now() + 25_000;
+		while (
+			(await run(["status", "--run-dir", runDir], io().io)) !== 0 &&
+			Date.now() < ready
+		)
+			await pause(200);
+		expect(await run(["status", "--run-dir", runDir], io().io)).toBe(0);
+
+		// appended, never truncated: both boots' lines are in ONE log (G14)
+		const lg = io();
+		await run(["logs", "--run-dir", runDir], lg.io);
+		const logText = lg.out.join("\n");
+		expect(logText).toContain("restarting (up --watch)");
+		expect(logText.match(/listening —/g)?.length ?? 0).toBeGreaterThanOrEqual(
+			2,
+		);
+
+		expect(await run(["down", "--run-dir", runDir], io().io)).toBe(0);
+	} finally {
+		process.chdir(prevCwd);
+		const leftover = await readRunfile(runDir);
+		if (leftover) {
+			try {
+				process.kill(leftover.pid, "SIGKILL");
+			} catch {}
+		}
+		await rm(projectDir, { recursive: true, force: true });
+	}
+}, 90_000);
+
+// --- R-025: the init → up path + the L1-floor orientation banner (EI1/EI2) ---
+// [itest->R-025]
+
+test("EI1/EI2: init && <set services> && up reaches a running server; the fresh project shows the L1-floor banner, authored scenarios suppress it", async () => {
+	const projectDir = await mkdtemp(join(tmpdir(), "offbook-init-e2e-"));
+	const runDir = join(projectDir, ".offbook");
+	const flags = [
+		"--run-dir",
+		runDir,
+		"--ws-port",
+		"19040",
+		"--tcp-port",
+		"12940",
+		"--ctrl-port",
+		"19840",
+	];
+	const prevCwd = process.cwd();
+	try {
+		// 1. scaffold — the ONLY hand edit afterwards is services.yaml (EI1)
+		expect(await run(["init", projectDir], io().io)).toBe(0);
+		const repoDir = join(projectDir, "repo");
+		await makeSpecRepo(repoDir);
+		writeFileSync(join(projectDir, "services.yaml"), servicesYamlFor(repoDir));
+
+		process.chdir(projectDir);
+
+		// 2. up reaches a running server; the scaffold loads ZERO scenarios
+		// (00-example.yaml is comments-only) and handlers/ is empty → banner
+		const up1 = io();
+		const code1 = await run(["up", ...flags], up1.io);
+		if (code1 !== 0) throw new Error(`up failed:\n${up1.err.join("\n")}`);
+		expect(up1.out.join("\n")).toContain("L1 floor active");
+
+		const t = io();
+		expect(await run(["topics", "--run-dir", runDir], t.io)).toBe(0);
+		expect(t.out.join("\n")).toContain("state/{deviceId}"); // served, not fallback
+		expect(t.out.join("\n")).not.toContain("bundled demo spec");
+		expect(await run(["down", "--run-dir", runDir], io().io)).toBe(0);
+
+		// 3. author a real scenario → the banner is suppressed (EI2)
+		writeFileSync(join(projectDir, "scenarios", "10-real.yaml"), SCENARIO);
+		const up2 = io();
+		const code2 = await run(["up", ...flags], up2.io);
+		if (code2 !== 0) throw new Error(`up failed:\n${up2.err.join("\n")}`);
+		expect(up2.out.join("\n")).not.toContain("L1 floor active");
+		expect(await run(["down", "--run-dir", runDir], io().io)).toBe(0);
+	} finally {
+		process.chdir(prevCwd);
+		const leftover = await readRunfile(runDir);
+		if (leftover) {
+			try {
+				process.kill(leftover.pid, "SIGKILL");
+			} catch {}
+		}
+		await rm(projectDir, { recursive: true, force: true });
+	}
+}, 90_000);

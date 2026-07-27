@@ -107,3 +107,29 @@ export async function buildRegistry(opts: {
 		},
 	};
 }
+
+// One registry over every service's channels (the `up` boot path): same match
+// rule as buildRegistry — most-specific first (fewer params), then declaration
+// order, which across services is services.yaml key order.
+export function mergeRegistries(registries: SpecRegistry[]): SpecRegistry {
+	const channels = registries.flatMap((r) => [...r.channels()]);
+	const ordered = channels
+		.map((c, i) => ({ c, i }))
+		.sort((a, b) => {
+			const pa = (a.c.topic.match(/\{/g) ?? []).length;
+			const pb = (b.c.topic.match(/\{/g) ?? []).length;
+			return pa - pb || a.i - b.i;
+		});
+	return {
+		channels: () => channels,
+		matchesFilter: (filter, topic) => matches(filter, topic),
+		match: (topic) => {
+			for (const { c } of ordered) {
+				const params = exec(toPattern(c.topic), topic);
+				if (params)
+					return { channel: c, params: params as Record<string, string> };
+			}
+			return undefined;
+		},
+	};
+}
