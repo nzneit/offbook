@@ -4,3 +4,4 @@ node_modules/
 coverage/
 .stryker-tmp/
 reports/
+demo-app/dist/

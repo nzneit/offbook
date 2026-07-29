@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>offbook demo</title>
+		<style>
+			:root { color-scheme: dark; }
+			* { box-sizing: border-box; }
+			body { margin: 0; font: 14px/1.45 system-ui, sans-serif; background: #111418; color: #e6e9ee; }
+			header { padding: 12px 20px; border-bottom: 1px solid #2a2f37; display: flex; gap: 12px; align-items: baseline; }
+			header h1 { font-size: 16px; margin: 0; }
+			header .sub { color: #8a93a2; font-size: 12px; }
+			main { display: grid; grid-template-columns: 1fr 380px; gap: 16px; padding: 16px 20px; align-items: start; }
+			section { background: #171b21; border: 1px solid #2a2f37; border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; }
+			section h2 { font-size: 13px; margin: 0 0 10px; color: #aab3c0; text-transform: uppercase; letter-spacing: 0.04em; }
+			.banner { background: #3a1f22; border: 1px solid #6e3038; color: #f2b8bd; padding: 8px 12px; border-radius: 6px; margin: 12px 20px 0; }
+			.card { border: 1px solid #2a2f37; border-radius: 6px; padding: 10px 12px; display: inline-block; margin: 0 10px 10px 0; min-width: 180px; }
+			.card .status { font-size: 18px; font-weight: 600; }
+			.card .meta { color: #8a93a2; font-size: 12px; }
+			button { background: #2b3440; color: #e6e9ee; border: 1px solid #3a4553; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+			button.danger { background: #4a2328; border-color: #7a3740; }
+			select, input[type="range"] { accent-color: #5b8def; }
+			table { width: 100%; border-collapse: collapse; font-size: 12px; }
+			td, th { text-align: left; padding: 3px 6px; border-bottom: 1px solid #232830; vertical-align: top; }
+			.viol { color: #f2b8bd; }
+			.ok { color: #9ad1a5; }
+			.flag { color: #f2b8bd; font-weight: 600; }
+			.mono { font-family: ui-monospace, monospace; font-size: 12px; }
+			.check { list-style: none; padding: 0; margin: 0; }
+			.check li { padding: 2px 0; }
+		</style>
+	</head>
+	<body>
+		<div id="root"></div>
+		<script type="module" src="/main.js"></script>
+	</body>
+</html>

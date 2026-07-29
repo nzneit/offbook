@@ -8,12 +8,15 @@
 	},
 	"imports": {
 		"#src/*": "./src/*",
-		"#scripts/*": "./scripts/*"
+		"#scripts/*": "./scripts/*",
+		"#demo-app/*": "./demo-app/*"
 	},
 	"scripts": {
 		"test": "bun test",
 		"lint": "biome check .",
-		"mutate": "stryker run"
+		"mutate": "stryker run",
+		"demo-app:build": "bun build demo-app/src/main.tsx --outdir demo-app/dist --target browser",
+		"demo-app": "bun demo-app/serve.ts"
 	},
 	"dependencies": {
 		"@asyncapi/parser": "^3.4.0",
@@ -30,8 +33,12 @@
 		"@biomejs/biome": "^1.9.0",
 		"@hughescr/stryker-bun-runner": "^1.3.8",
 		"@stryker-mutator/core": "^9.6.1",
+		"@types/react": "^19.1.0",
+		"@types/react-dom": "^19.1.0",
 		"bun-types": "^1.3.14",
 		"mqtt": "^5.10.0",
+		"react": "^19.1.0",
+		"react-dom": "^19.1.0",
 		"typescript": "^5.6.0"
 	}
 }
