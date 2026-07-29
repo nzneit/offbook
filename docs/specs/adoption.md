@@ -61,13 +61,14 @@ A preflight verb: runs a fixed, ordered list of named checks, each reporting pas
 | 2 | `deps` | sentinel packages resolvable (`@asyncapi/parser`, `ajv` — chosen to not trip the transport-isolation gate) | — | missing ("run `bun install`") |
 | 3 | `project` | `services.yaml` + `environments.yaml` parse and are schema-valid | no `services.yaml` here ("not an offbook project — `offbook init`, or cd; `offbook demo` needs none") | parse/schema error (file + first error) |
 | 4 | `specs-reachable` | every configured service repo resolves (local path exists / `git ls-remote` succeeds, bounded timeout) | `--offline` given, or `services: {}` ("none configured yet") | unreachable ("check gitHost/repo/branch for `<service>`") |
-| 5 | `scenarios` | all `scenarios/*.yaml` load without diagnostics | no scenario files ("none found — see the cookbook") | load diagnostic (file + first diagnostic) |
+| 5 | `scenarios` | all `scenarios/*.yaml` are well-formed (YAML parses; a list of scenarios, each with `name` and `then` — `when` is optional, absent means on-demand-only) | no scenario files ("none found — see the cookbook") | parse/shape error (file + reason) |
 | 6 | `ports` | ws/tcp/ctrl ports free, **or** a live offbook owns them ("already up, pid N") | — | foreign process on a port ("port 9001 busy — stop it or pass `--ws-port`") |
 | 7 | `runfile` | no runfile, or runfile pid alive | stale runfile, pid dead ("stale `.offbook/run` — `offbook down` cleans it") | — |
 
-- **Ports checked**: the defaults `up` would use (ws 9001, tcp 1883, ctrl 9080) unless a live runfile exists, in which case the runfile's actual ports.
+- **Ports checked**: the defaults `up` would use (ws 9001, tcp 1883, ctrl 9080) unless a runfile exists — live *or* stale — in which case its recorded ports (a stale runfile's ports are exactly the ones `up` will reclaim).
 - **Version floor single source**: a new `engines.bun` field in `package.json`; `doctor` reads it (and it is exactly what a future release pipeline pins, §5). The floor value is fixed at implementation time: the Bun `major.minor` the repo is actually developed and tested against (read `bun --version`), never a guessed-lower bound.
-- **Flags**: `--offline` (skip check 4), `--json`, `--run-dir <dir>` (default `.offbook`, matching client verbs). The verb joins the `USAGE` block and the §2 verb overview under *maintain*.
+- **Flags**: `doctor [dir]` (the project dir to examine, default `.`, mirroring `init [dir]`), `--offline` (skip check 4), `--json`, `--run-dir <dir>` (default `.offbook`, matching client verbs). The verb joins the `USAGE` block and the §2 verb overview under *maintain*.
+- **Check 5 is shape-only by design**: full scenario validation (topic binding, `{{param}}` resolvability) requires the resolved spec registry, which requires the network fetch `up` performs — doctor stays fetch-free. On a live server those diagnostics are already surfaced by `/v1/diagnostics` (`offbook diagnostics`).
 - **Exit code**: 0 iff no check failed (warns allowed) — the quickstart's "if anything fails, run `offbook doctor`" escape hatch.
 - **`--json` shape**: `{ ok: boolean, checks: [{ name: string, status: "pass"|"warn"|"fail", detail: string, hint?: string }] }`.
 
@@ -79,7 +80,7 @@ type CheckResult = { status: CheckStatus; detail: string; hint?: string };
 type DoctorCheck = { name: string; run(ctx: DoctorCtx): Promise<CheckResult> };
 ```
 
-Checks are data, not prose in a switch: a future interactive init wizard iterates the same list and prompts fixes instead of printing hints (§5). Doctor reuses the existing ingestion/registry/scenario loaders for checks 3–5 (transport isolation only restricts `broker/`; unaffected).
+Checks are data, not prose in a switch: a future interactive init wizard iterates the same list and prompts fixes instead of printing hints (§5). Doctor reuses `config/`'s loaders and `ingestion/`'s repo-URL resolution for checks 3–4 (transport isolation only restricts `broker/`; unaffected).
 
 ## 4. First-run error audit & doc-rot gates <!-- anchor: first-run-gates -->
 
