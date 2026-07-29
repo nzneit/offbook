@@ -3,7 +3,7 @@
 // capabilities flow into control-plane by injection from here; control-plane
 // itself imports none of those modules. `offbook up` (tier 4) calls this
 // after resolving specs; tests and `offbook demo` call it directly.
-import { createBroker } from "#src/broker/index.ts";
+import { createBroker, fingerprintLine } from "#src/broker/index.ts";
 import type { ControlPlaneCaps } from "#src/control-plane/index.ts";
 import { createServer } from "#src/control-plane/index.ts";
 import { l1Floor } from "#src/engine/faker.ts";
@@ -79,6 +79,9 @@ export async function compose(parts: ComposeParts) {
 	}
 	broker.onInbound(inbound);
 	broker.onSubscribe(({ topic }) => engine.onSubscribe(topic));
+	// D-015: every connect/subscribe/publish fingerprint becomes a structured
+	// log line (the R-007 capture surface) — offbook.log via serve.ts's sink
+	broker.onFingerprint((event) => log(fingerprintLine(event)));
 
 	const caps: ControlPlaneCaps = {
 		registry: () => registry,

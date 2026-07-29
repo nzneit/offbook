@@ -5,7 +5,7 @@ import { MqttClient, connectAsync as mqttConnectAsync } from "mqtt";
 import tcpStreamBuilder from "mqtt/lib/connect/tcp";
 import { loadConfig } from "#src/config/index.ts";
 import type { BrokerModule, FingerprintEvent } from "./index.ts";
-import { createBroker } from "./index.ts";
+import { createBroker, fingerprintLine } from "./index.ts";
 
 // ports unique to this file: ws 19100 / tcp 12990
 const WS = 19100;
@@ -172,4 +172,38 @@ test("dedup keys cannot collide across distinct clientId/topic triples", async (
 	]);
 	await a.endAsync();
 	await b.endAsync();
+});
+
+test("fingerprintLine renders one greppable single-line-JSON entry per event", () => {
+	expect(
+		fingerprintLine({
+			kind: "connect",
+			clientId: "a",
+			protocolLevel: 4,
+			passwordPresent: false,
+			ws: {
+				path: "/",
+				subprotocolsOffered: ["mqtt"],
+				subprotocolSelected: "mqtt",
+				origin: undefined,
+				userAgent: undefined,
+			},
+		}),
+	).toBe(
+		'ws-connect {"clientId":"a","protocolLevel":4,"passwordPresent":false,"ws":{"path":"/","subprotocolsOffered":["mqtt"],"subprotocolSelected":"mqtt"}}',
+	);
+	expect(
+		fingerprintLine({ kind: "connect", clientId: "b", passwordPresent: false }),
+	).toStartWith("tcp-connect {");
+	expect(
+		fingerprintLine({
+			kind: "subscribe",
+			clientId: "a",
+			topic: "state/#",
+			qos: 1,
+		}),
+	).toBe('mqtt-subscribe {"clientId":"a","topic":"state/#","qos":1}');
+	expect(
+		fingerprintLine({ kind: "publish", clientId: "a", qos: 2, retain: false }),
+	).toBe('mqtt-publish {"clientId":"a","qos":2,"retain":false}');
 });

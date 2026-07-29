@@ -38,6 +38,21 @@ export interface FingerprintEvent {
 	retain?: boolean;
 }
 
+// One structured log line per fingerprint event — the R-007 capture surface
+// (D-015): `offbook logs` + demo-app's /spike/fingerprint parse exactly this.
+export function fingerprintLine(e: FingerprintEvent): string {
+	const { kind, ...fields } = e;
+	const prefix =
+		kind === "connect"
+			? e.ws
+				? "ws-connect"
+				: "tcp-connect"
+			: kind === "subscribe"
+				? "mqtt-subscribe"
+				: "mqtt-publish";
+	return `${prefix} ${JSON.stringify(fields)}`; // undefined fields drop out
+}
+
 // `aedes`'s .d.ts doesn't type the `persistence` property (it's typed `any`
 // in AedesOptions but not surfaced on the class), even though it's a real
 // runtime property (aedes.js: `this.persistence = opts.persistence || memory()`).
