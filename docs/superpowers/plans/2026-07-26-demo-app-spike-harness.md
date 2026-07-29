@@ -1749,7 +1749,7 @@ export interface DeviceState {
 	status: string;
 	target?: number;
 	units?: string;
-	updatedAt?: string;
+	updatedAt?: number; // logical-clock stamp ({{now}} is numeric — contracts §3)
 	receivedAt: number;
 }
 
