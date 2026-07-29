@@ -4,7 +4,7 @@
 import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { DoctorCtx, DoctorReport } from "./doctor.ts";
 import { DOCTOR_CHECKS, runDoctor, versionAtLeast } from "./doctor.ts";
 
@@ -197,6 +197,33 @@ test("specs-reachable: a reachable local repo passes; a missing one fails with t
 	expect(check.status).toBe("fail");
 	expect(check.detail).toContain("thermostat");
 	expect(check.hint).toContain("gitHost");
+}, 20_000);
+
+test("specs-reachable: a slug repo with no gitHost anywhere fails gracefully instead of throwing", async () => {
+	const dir = projectWith({
+		"services.yaml":
+			"services:\n  widget:\n    repo: org/thing\n    specPath: asyncapi.yaml\n",
+	});
+	const report = await runDoctor(
+		ctxWith({ repoRoot: GOOD_REPO_ROOT, projectDir: dir, offline: false }),
+	);
+	const check = byName(report, "specs-reachable");
+	expect(check.status).toBe("fail");
+	expect(check.detail).toContain("widget");
+	expect(check.hint).toContain("gitHost");
+});
+
+test("specs-reachable: a per-service gitHost override is honored even when the global config lacks one", async () => {
+	const repo = await localGitRepo();
+	const host = dirname(repo);
+	const slug = basename(repo);
+	const dir = projectWith({
+		"services.yaml": `services:\n  thermostat:\n    repo: "${slug}"\n    gitHost: "${host}"\n    specPath: asyncapi.yaml\n    branch: main\n`,
+	});
+	const report = await runDoctor(
+		ctxWith({ repoRoot: GOOD_REPO_ROOT, projectDir: dir, offline: false }),
+	);
+	expect(byName(report, "specs-reachable").status).toBe("pass");
 }, 20_000);
 
 test("scenarios: well-formed list passes; bad YAML, non-list, and missing name/then fail; empty dir warns", async () => {

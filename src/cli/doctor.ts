@@ -177,7 +177,10 @@ const specsReachable: DoctorCheck = {
 				detail: "skipped (no services.yaml — see `project`)",
 			};
 		let gitHost: string | undefined;
-		let services: Record<string, { repo: string; branch?: string }>;
+		let services: Record<
+			string,
+			{ repo: string; branch?: string; gitHost?: string }
+		>;
 		try {
 			({ gitHost, services } = await loadServices(servicesPath));
 		} catch {
@@ -196,14 +199,25 @@ const specsReachable: DoctorCheck = {
 		for (const name of names) {
 			const svc = services[name];
 			const branch = svc.branch ?? "main";
-			const url = resolveRepoUrl(svc.repo, gitHost);
-			const err = await refUnreachable(url, branch, 5_000);
-			if (err !== null)
+			try {
+				// per-service gitHost override wins over the global (G20, mirrors
+				// ingestion/'s resolveServices precedence); resolveRepoUrl throws for
+				// a slug with no host, which must become a graceful fail here.
+				const url = resolveRepoUrl(svc.repo, svc.gitHost ?? gitHost);
+				const err = await refUnreachable(url, branch, 5_000);
+				if (err !== null)
+					return {
+						status: "fail",
+						detail: `${name}: ${url}@${branch} unreachable (${err})`,
+						hint: `check gitHost/repo/branch for '${name}' in services.yaml`,
+					};
+			} catch (cause) {
 				return {
 					status: "fail",
-					detail: `${name}: ${url}@${branch} unreachable (${err})`,
+					detail: `${name}: ${(cause as Error).message}`,
 					hint: `check gitHost/repo/branch for '${name}' in services.yaml`,
 				};
+			}
 		}
 		return {
 			status: "pass",
