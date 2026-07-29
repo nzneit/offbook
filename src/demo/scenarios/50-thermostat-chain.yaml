@@ -1,0 +1,62 @@
+# Bundled with `offbook demo --serve` (docs/specs/demo-app.md §4): makes the
+# dashboard visibly REACT to commands, and demos payloadMatch + templating.
+- name: set-heat
+  when:
+    topic: command/{deviceId}/set
+    payloadMatch: { mode: heat }
+  then:
+    - emit:
+        topic: state/{{deviceId}}
+        payload:
+          deviceId: "{{deviceId}}"
+          status: accepted
+          target: "{{payload.target}}"
+          units: C
+          updatedAt: "{{now}}"
+        delay: 100-250ms
+    - emit:
+        topic: state/{{deviceId}}
+        payload:
+          deviceId: "{{deviceId}}"
+          status: heating
+          target: "{{payload.target}}"
+          units: C
+          updatedAt: "{{now}}"
+        delay: 400-900ms
+- name: set-cool
+  when:
+    topic: command/{deviceId}/set
+    payloadMatch: { mode: cool }
+  then:
+    - emit:
+        topic: state/{{deviceId}}
+        payload:
+          deviceId: "{{deviceId}}"
+          status: accepted
+          target: "{{payload.target}}"
+          units: C
+          updatedAt: "{{now}}"
+        delay: 100-250ms
+    - emit:
+        topic: state/{{deviceId}}
+        payload:
+          deviceId: "{{deviceId}}"
+          status: cooling
+          target: "{{payload.target}}"
+          units: C
+          updatedAt: "{{now}}"
+        delay: 400-900ms
+- name: set-off
+  when:
+    topic: command/{deviceId}/set
+    payloadMatch: { mode: "off" }
+  then:
+    - emit:
+        topic: state/{{deviceId}}
+        payload:
+          deviceId: "{{deviceId}}"
+          status: idle
+          target: "{{payload.target}}"
+          units: C
+          updatedAt: "{{now}}"
+        delay: 100-250ms

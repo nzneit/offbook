@@ -17,7 +17,7 @@ import { existsSync, watch as fsWatch, openSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "#src/config/index.ts";
 import type { Config } from "#src/model/index.ts";
-import { bootProject } from "./boot.ts";
+import { bootDemo, bootProject } from "./boot.ts";
 import { logPath, writeRunfile } from "./runfile.ts";
 
 interface BootFile {
@@ -25,6 +25,7 @@ interface BootFile {
 	config: Partial<Config>;
 	environment?: string;
 	watch?: boolean;
+	demo?: boolean; // demo --serve: bundled spec, no project files (D-015)
 }
 
 const bootPath = process.argv[2];
@@ -39,12 +40,15 @@ const log = (line: string) =>
 try {
 	const boot = JSON.parse(await Bun.file(bootPath).text()) as BootFile;
 	const config = loadConfig(boot.config);
-	const composed = await bootProject({
-		projectDir: boot.projectDir,
-		config,
-		environment: boot.environment,
-		log,
-	});
+	const composed =
+		boot.demo === true
+			? await bootDemo({ config, log })
+			: await bootProject({
+					projectDir: boot.projectDir,
+					config,
+					environment: boot.environment,
+					log,
+				});
 	await composed.start();
 	const ports = {
 		brokerWsPort: config.brokerWsPort,

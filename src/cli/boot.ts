@@ -112,3 +112,27 @@ export async function bootProject(opts: ProjectBootOptions): Promise<Composed> {
 		log: opts.log,
 	});
 }
+
+// `offbook demo --serve` (D-015): the bundled thermostat spec + bundled chain
+// scenarios, long-running — no services.yaml, no git, no specs.lock.
+export async function bootDemo(opts: {
+	config: Config;
+	log?: (line: string) => void;
+}): Promise<Composed> {
+	const demoDir = join(import.meta.dir, "../demo");
+	const specText = await Bun.file(join(demoDir, "thermostat.yaml")).text();
+	const registry = await buildRegistry({
+		specText,
+		service: "demo",
+		config: opts.config,
+	});
+	return compose({
+		config: opts.config,
+		registry,
+		scenariosDir: join(demoDir, "scenarios"),
+		// engine.start() materializes these and republishes initial retained
+		// state, so the dashboard has a device before any client subscribes
+		seedInstances: { "state/{deviceId}": [{ deviceId: "thermostat-1" }] },
+		log: opts.log,
+	});
+}

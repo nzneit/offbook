@@ -79,5 +79,8 @@ components:
           type: string
           enum: [C, F]
         updatedAt:
-          type: string
-          format: date-time
+          # the logical seeded clock (l2 §5/D4): {{now}} resolves to a NUMBER
+          # (fixedEpoch + Σ(seeded delays)), never wall-clock — matches the
+          # convention already established in scenarios/loader.test.ts and
+          # scenarios/index.test.ts's local stateSchema fixtures.
+          type: number
