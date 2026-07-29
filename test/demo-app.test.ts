@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 // R-033 — demo-app: build smoke, proxy server, pure UI logic
 // (docs/specs/demo-app.md §5/§8).
 // [itest->R-033]
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -46,6 +46,12 @@ test("parseFingerprintLines: filters by clientId, groups by kind, survives junk"
 	expect(
 		parseFingerprintLines("garbage\nws-connect notjson{", "x"),
 	).toBeUndefined();
+	const tornJson = "[offbook] 2026-07-26T10:00:08.000Z ws-connect {bad: json}";
+	expect(parseFingerprintLines(tornJson, "demo-app-x1")).toBeUndefined();
+	const withTorn = `${SAMPLE_LOG}\n${tornJson}`;
+	expect(parseFingerprintLines(withTorn, "demo-app-x1")?.subscribes).toEqual([
+		{ clientId: "demo-app-x1", topic: "state/#", qos: 1 },
+	]);
 });
 
 test("proxy: /v1 pass-through when offbook is up; 502 when unreachable; /spike/fingerprint 200/404", async () => {
@@ -101,6 +107,19 @@ test("proxy: /v1 pass-through when offbook is up; 502 when unreachable; /spike/f
 		const index = await fetch("http://localhost:19991/");
 		expect(index.status).toBe(200);
 		expect(await index.text()).toContain('<div id="root">');
+
+		const posted = await fetch("http://localhost:19991/v1/publish", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ topic: "state/thermostat-1", example: true }),
+		});
+		expect(posted.status).toBe(202);
+		const postedBody = (await posted.json()) as {
+			matched: boolean;
+			injected: boolean;
+		};
+		expect(postedBody.matched).toBe(true);
+		expect(postedBody.injected).toBe(true);
 	} finally {
 		server.stop(true);
 		deadServer.stop(true);
@@ -108,3 +127,28 @@ test("proxy: /v1 pass-through when offbook is up; 502 when unreachable; /spike/f
 		await rm(dir, { recursive: true, force: true });
 	}
 }, 30_000);
+
+test("static routes: /, /main.js, and the catch-all 404", async () => {
+	const root = mkdtempSync(join(tmpdir(), "demo-app-root-"));
+	mkdirSync(join(root, "dist"));
+	writeFileSync(join(root, "index.html"), '<div id="root"></div>');
+	writeFileSync(join(root, "dist/main.js"), "// stub bundle");
+	const server = createDemoAppServer({
+		port: 19993,
+		ctrlPort: 19899,
+		runDir: root,
+		root,
+	});
+	try {
+		expect(await (await fetch("http://localhost:19993/")).text()).toContain(
+			'<div id="root">',
+		);
+		const js = await fetch("http://localhost:19993/main.js");
+		expect(js.status).toBe(200);
+		expect(await js.text()).toBe("// stub bundle");
+		expect((await fetch("http://localhost:19993/nope")).status).toBe(404);
+	} finally {
+		server.stop(true);
+		await rm(root, { recursive: true, force: true });
+	}
+});
