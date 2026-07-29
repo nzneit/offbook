@@ -117,3 +117,33 @@ test("a tcp CONNECT emits a fingerprint with no ws block", async () => {
 	expect(connect?.passwordPresent).toBe(false);
 	await client.endAsync();
 });
+
+test("subscribe observations dedupe per clientId·topic·qos; publish per clientId·qos·retain", async () => {
+	const client = await connectAsync(`ws://localhost:${WS}`, {
+		forceNativeWebSocket: true,
+		reconnectPeriod: 0,
+		clientId: "fp-obs-1",
+	});
+	await client.subscribeAsync("state/#", { qos: 1 });
+	await client.subscribeAsync("state/#", { qos: 1 }); // repeat — no new event
+	await client.subscribeAsync("state/#", { qos: 2 }); // new qos — new event
+	await client.publishAsync("command/t/set", "{}", { qos: 1 });
+	await client.publishAsync("command/t/set", "{}", { qos: 1 }); // repeat class
+	await client.publishAsync("command/t/set", "{}", { qos: 1, retain: true }); // new class
+
+	const subs = events.filter(
+		(e) => e.kind === "subscribe" && e.clientId === "fp-obs-1",
+	);
+	expect(subs.map((s) => ({ topic: s.topic, qos: s.qos }))).toEqual([
+		{ topic: "state/#", qos: 1 },
+		{ topic: "state/#", qos: 2 },
+	]);
+	const pubs = events.filter(
+		(e) => e.kind === "publish" && e.clientId === "fp-obs-1",
+	);
+	expect(pubs.map((p) => ({ qos: p.qos, retain: p.retain }))).toEqual([
+		{ qos: 1, retain: false },
+		{ qos: 1, retain: true },
+	]);
+	await client.endAsync();
+});

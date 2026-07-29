@@ -25,14 +25,17 @@ export interface BrokerModule {
 // value itself — the redaction bar (fixtures/asyncapi's fixture-quality bar
 // applies here too: this is a security-relevant fact, not just a shape).
 export interface FingerprintEvent {
-	kind: "connect";
+	kind: "connect" | "subscribe" | "publish";
 	clientId: string;
-	protocolLevel: number | undefined;
-	username: string | undefined;
-	passwordPresent: boolean;
-	keepalive: number | undefined;
-	clean: boolean | undefined;
-	ws: WsFacts | undefined;
+	protocolLevel?: number;
+	username?: string;
+	passwordPresent?: boolean;
+	keepalive?: number;
+	clean?: boolean;
+	ws?: WsFacts;
+	topic?: string;
+	qos?: 0 | 1 | 2;
+	retain?: boolean;
 }
 
 // `aedes`'s .d.ts doesn't type the `persistence` property (it's typed `any`
@@ -266,9 +269,21 @@ export function createBroker(config: Config): BrokerModule {
 	let seq = 0;
 	const inbound: Array<(e: InboundEvent) => void> = [];
 	const subs: Array<(s: { topic: string; clientId: string }) => void> = [];
+	const seenSubs = new Set<string>();
+	const seenPubs = new Set<string>();
 
 	aedes.on("publish", (packet, client) => {
 		if (!client) return; // ignore our own emits (client === null)
+		const pubKey = `${client.id} ${packet.qos} ${packet.retain}`;
+		if (!seenPubs.has(pubKey)) {
+			seenPubs.add(pubKey);
+			emitFingerprint({
+				kind: "publish",
+				clientId: client.id,
+				qos: packet.qos,
+				retain: packet.retain,
+			});
+		}
 		const { payload, decodeError } = decode(packet.payload as Buffer);
 		const event: InboundEvent = {
 			message: {
@@ -287,8 +302,20 @@ export function createBroker(config: Config): BrokerModule {
 		for (const h of inbound) h(event);
 	});
 	aedes.on("subscribe", (subscriptions, client) => {
-		for (const s of subscriptions)
-			for (const h of subs) h({ topic: s.topic, clientId: client?.id ?? "" });
+		for (const s of subscriptions) {
+			const clientId = client?.id ?? "";
+			const key = `${clientId} ${s.topic} ${s.qos}`;
+			if (!seenSubs.has(key)) {
+				seenSubs.add(key);
+				emitFingerprint({
+					kind: "subscribe",
+					clientId,
+					topic: s.topic,
+					qos: s.qos as 0 | 1 | 2,
+				});
+			}
+			for (const h of subs) h({ topic: s.topic, clientId });
+		}
 	});
 
 	return {
