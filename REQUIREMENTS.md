@@ -270,6 +270,24 @@ The engine owns the instance-materialization ledger (contracts §2, F1): `Instan
 **TEST**: src/broker/fingerprint.test.ts, test/demo-serve.test.ts, test/demo-app.test.ts
 A React demo webapp (`demo-app/`, real `mqtt.js` over ws from a real browser) doubles as the showcase and the R-006/R-007 rehearsal harness: thermostat dashboard + `/v1/validation` feed (via a same-origin proxy, no CORS change) + a first-class spike panel (live R-006 checklist, sent-vs-seen comparison, R-007 capture download). `src/broker/` captures a normalized connect fingerprint (ws upgrade + CONNECT facts, password as presence only; deduped subscribe/publish QoS observations) surfaced as structured `offbook.log` lines — the R-007 capture surface (D-015) that also works against the real, unmodifiable browser application at work. `offbook demo --serve` boots the bundled spec + bundled chain scenarios long-running over the G14 machinery. R-006/R-007 remain open: the real browser application run stays the authoritative gate.
 
+#### Adopter document set — README front door + guides
+**UID**: R-034
+**STATUS**: specified
+**COVERS**: docs/specs/adoption.md#adopter-docs
+A newcomer-facing `README.md` (pitch, mental model, prerequisites, demo-first quickstart, lifecycle-grouped verb overview) plus task-oriented `docs/guides/` (getting-started, wiring-your-service, scenario-cookbook, daily-loop), all derived docs under the conflict rule (`contracts.md`/`l2-scenarios.md` stay canonical — a conflict means the guide is wrong); internal relative links across README + guides are validated by the doc-system gate.
+
+#### `offbook doctor` — first-run preflight
+**UID**: R-035
+**STATUS**: specified
+**COVERS**: docs/specs/adoption.md#doctor
+A preflight verb running a fixed ordered list of named checks (runtime floor via `engines.bun`, deps resolvable, project config parse/schema, spec-repo reachability, scenario load, port availability, runfile staleness), each pass/warn/fail with a one-line fix-it hint; `--offline`/`--json`/`--run-dir`; exit 0 iff no fail; checks are data (`DoctorCheck[]`), the future init-wizard substrate (D-016). CLI-local: no `/v1` or contract change.
+
+#### First-run error audit + executable doc gates
+**UID**: R-036
+**STATUS**: specified
+**COVERS**: docs/specs/adoption.md#first-run-gates
+Every error reachable on the clone→demo→init→wire→up→first-publish path names what failed plus one concrete next step (with a "(try `offbook doctor`)" suffix only where doctor genuinely diagnoses it), pinned by tests; the README quickstart and scenario-cookbook recipes are executable docs — the quickstart gate runs the canonical command sequence and asserts fence↔canonical equivalence, the cookbook gate loads every recipe against the bundled demo registry with zero diagnostics.
+
 <!--
 Seeding is staged (doc-system.md §7). Batch 1 (R-001..R-007) + R-008 (M0) + R-009 (broker tier-1 residual): seeded; reconciled where traces exist (the R-006/R-007 spikes remain open). Batch 2+ (R-010..R-031): the full module/spike/gate carve per D-007 and docs/archive/intake/2026-07-21-batch-2-seeding-carve.md.
 What remains unseeded resolves case by case (not bulk):

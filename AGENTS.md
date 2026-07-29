@@ -11,7 +11,9 @@ Guidance for any agent (or human) working in this repo. `CLAUDE.md` is a symlink
 - **`docs/specs/l2-scenarios.md`** — the L2 scenario authoring format.
 - **`docs/specs/build-plan.md`** — tech stack, repo scaffold, tiered dependency graph, per-module acceptance, spike specs.
 - **`docs/specs/demo-app.md`** — the demo webapp / R-006–R-007 spike-harness design (`demo-app/`, connect fingerprint, `demo --serve`; R-033).
+- **`docs/specs/adoption.md`** — the adoption surface: README + `docs/guides/`, `offbook doctor`, first-run error audit, executable doc gates (R-034–R-036, D-016).
 - **`docs/specs/doc-system.md`** — how this documentation system is organized.
+- **`README.md` + `docs/guides/`** *(planned, R-034)* — adopter-facing **derived** docs: on any conflict, `contracts.md`/`l2-scenarios.md` win — fix the guide.
 - **`REQUIREMENTS.md`** — the enumerable v1 requirements registry (`R-###`); the answer to "what needs building, and is it done".
 - **`DECISIONS.md`** — the decision ledger (`D-###`); forward-authoritative provenance.
 - **`docs/intake/`** — open review-round items (start from `_TEMPLATE.md`); resolve into `R-###`/`D-###`, then move to `docs/archive/`.
@@ -39,7 +41,7 @@ Guidance for any agent (or human) working in this repo. `CLAUDE.md` is a symlink
 2. **Fixture-semantics** — *"does this fixture actually test what it claims?"* See the **Fixture quality bar** in `fixtures/asyncapi/README.md` (no vacuous values; claim↔content; full-path/both-direction coverage; internal consistency; negative cases). The validity-only angle misses all of these.
 
 ## Status & next
-All build tiers and v1 gates are `tested` (31 of 33 requirements): `model` → `broker`/`registry`/`ingestion` → `engine`/`validation` → `scenarios`/`control-plane` → `cli` (the full verb set incl. `up`/`down` process management over the G14 runfile, watch modes, `init`), plus the four cross-cutting v1 gates (R-028–R-031). The open items: the two empirical spikes, `R-006` (WS-fidelity) and `R-007` (capture the browser application's `connect()`), which need the real browser application against `broker/`'s Aedes defaults and are hard gates on calling v1 done; plus `R-033` (`tested`): the `demo-app/` spike-harness webapp + connect fingerprint (`docs/specs/demo-app.md`), which rehearses both spikes — the at-work capture is now a no-app-change procedure (point the real client at offbook, read `offbook logs`).
+All build tiers and v1 gates are `tested` (31 of 36 requirements): `model` → `broker`/`registry`/`ingestion` → `engine`/`validation` → `scenarios`/`control-plane` → `cli` (the full verb set incl. `up`/`down` process management over the G14 runfile, watch modes, `init`), plus the four cross-cutting v1 gates (R-028–R-031). The open items: the two empirical spikes, `R-006` (WS-fidelity) and `R-007` (capture the browser application's `connect()`), which need the real browser application against `broker/`'s Aedes defaults and are hard gates on calling v1 done; plus `R-033` (`tested`): the `demo-app/` spike-harness webapp + connect fingerprint (`docs/specs/demo-app.md`), which rehearses both spikes — the at-work capture is now a no-app-change procedure (point the real client at offbook, read `offbook logs`). Next up: the adoption surface, `R-034`–`R-036` (`specified`, `docs/specs/adoption.md`): README + guides, `offbook doctor`, first-run error audit + executable doc gates.
 
 ## Working notes
 - **Git identity is the user's to set** — don't run `git config user.*` on their behalf. Commit/push **only when asked**.
