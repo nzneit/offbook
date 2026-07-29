@@ -15,7 +15,7 @@ const TCP = 12990;
 // module-level variable, computed once, on the FIRST connect()/connectAsync()
 // call anywhere in the process — gated on THAT call's `forceNativeWebSocket`
 // option, not each call's own. `bun test` runs the whole suite in one
-// process, and index.test.ts's ws tests (which must pass
+// process, and this file's own ws tests (which must pass
 // `forceNativeWebSocket: true` — Bun's "ws" stand-in makes the non-native
 // path throw, see index.ts) run first, so by the time this file's tcp test
 // runs, the table was already built without a `mqtt`/tcp builder at all —
@@ -41,7 +41,7 @@ function tcpConnectAsync(
 	});
 }
 function connectAsync(url: string, opts: ConnectOptions): Promise<MqttClient> {
-	return url.startsWith("mqtt://") || url.startsWith("mqtts://")
+	return url.startsWith("mqtt://")
 		? tcpConnectAsync(url, opts)
 		: mqttConnectAsync(url, opts);
 }

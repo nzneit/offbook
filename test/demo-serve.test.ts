@@ -7,6 +7,7 @@ import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connectAsync } from "mqtt";
+import { parseFingerprintLines } from "#demo-app/server.ts";
 import { bootDemo } from "#src/cli/boot.ts";
 import { run } from "#src/cli/index.ts";
 import { logPath, readRunfile } from "#src/cli/runfile.ts";
@@ -111,6 +112,11 @@ test("demo --serve: detached boot, fingerprint line in offbook.log, down cleans 
 			.split("\n")
 			.find((l) => l.includes("ws-connect ") && l.includes("demo-serve-probe"));
 		expect(line).toBeDefined();
+
+		// weld: the REAL log parses through the same function the proxy uses
+		expect(
+			parseFingerprintLines(logged, "demo-serve-probe")?.connect,
+		).toBeDefined();
 
 		expect(
 			await run(["down", "--run-dir", runDir], {

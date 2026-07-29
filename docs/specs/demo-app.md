@@ -15,24 +15,25 @@ Four pieces:
 
 ## 2. The webapp
 
-Stack: React + `react-dom` + `mqtt.js`, bundled by `Bun.build`; no router, no state library (plain hooks + one context holding the mqtt client). Dependencies land in the root `package.json` as devDependencies (single-package repo; `mqtt` is already there for tests).
+Stack: React + `react-dom` + `mqtt.js`, bundled by `Bun.build`; no router, no state library (plain hooks; the mqtt client lives in a ref in App.tsx). Dependencies land in the root `package.json` as devDependencies (single-package repo; `mqtt` is already there for tests).
 
 ```
 demo-app/
   index.html
-  serve.ts             # static + /v1 proxy + /spike/* (§5)
+  serve.ts             # thin CLI entry over server.ts
+  server.ts            # static + /v1 proxy + /spike/* (§5)
   src/
     main.tsx  App.tsx
-    mqtt.ts            # client setup, context, checklist event wiring
+    mqtt.ts            # client setup, ws probe, clientId helper
     components/        # Devices, CommandBar, ViolationsFeed, ContractStrip, SpikePanel
   dist/                # build output, gitignored
 ```
 
 One page, three zones plus the spike panel:
 
-- **Devices**: cards keyed by `deviceId`, fed by a `state/#` subscribe at QoS 1. Retained state paints the cards on first subscribe (itself an R-006 checklist item); live emissions update them (status, target, units, freshness from `updatedAt`).
+- **Devices**: cards keyed by `deviceId`, fed by a `state/#` subscribe at QoS 1. Retained state paints the cards on first subscribe (itself an R-006 checklist item); live emissions update them (status, target, units, freshness from the client-side receive time).
 - **Command bar**: mode selector (heat/cool/off) + target slider (5-35) publishing `command/{deviceId}/set` at QoS 1, plus two deliberately red buttons: **"Break the schema"** (sends `{ mode: "broil", target: 22 }`) and **"Wrong direction"** (publishes onto `state/{deviceId}`, a `toClient` topic).
-- **Violations feed**: polls `/v1/validation?sinceSeq=` through the proxy (~1s), rendering the CLI's distinct-collapsed style (`×N` · origin · kind · topic · headline) so a break button produces a visible catch within a second. A contract strip from `/v1/topics` shows each topic with direction ("you send" / "you receive") and its field list.
+- **Violations feed**: polls `/v1/validation` through the proxy (~1s), refetching the full window and recomputing the CLI's distinct collapse client-side (`×N` · origin · kind · topic · headline) so a break button produces a visible catch within a second. A contract strip from `/v1/topics` shows each topic with direction ("you send" / "you receive") and its field list.
 
 The client connects with a distinctive id (`demo-app-<random>`) so its fingerprint line is unambiguous among other clients.
 
@@ -92,7 +93,7 @@ A single `Bun.serve`:
 - `/v1/*`: forwarded verbatim to `http://localhost:<ctrl-port>/v1/*`. A connection failure maps to `502 { error: "offbook-unreachable" }`; the UI renders one banner, not per-widget errors.
 - `/spike/fingerprint?clientId=`: reads `<run-dir>/offbook.log`, scans for the prefixed JSON lines matching that clientId, and returns `{ connect, subscribes, publishes }` (or `404 { error: "no-fingerprint" }` when absent, the degraded case in §7).
 
-Flags: `--port` (default 9090), `--ctrl-port` (default 9080), `--run-dir` (default `./.offbook`). Parsing logic lives in exported pure functions (`parseFingerprintLines`, route table) so the unit tests import them directly.
+Flags: `--port` (default 9090), `--ctrl-port` (default 9080), `--run-dir` (default `./.offbook`). Parsing logic lives in the exported pure `parseFingerprintLines` (and `createDemoAppServer` itself is exported) so the unit tests import them directly.
 
 ## 6. The spike panel
 
@@ -130,7 +131,7 @@ Automated (in the repo `bun test` suite, arrow-tagged to R-033):
 
 Manual, by design: the real-browser walk (§9). No Playwright/headless dependency in v1; the empirical real-browser step is the point.
 
-Gate interplay: `demo-app/` sits outside `src/`, so the transport-isolation gate (which walks `src/`) is unaffected by its `mqtt` import; its internal imports are same-directory/downward relative, satisfying D-013 regardless of the gate's glob; the coverage floor judges only files imported by tests (`serve.ts`'s logic is factored into imported pure functions; React components are exercised in-browser).
+Gate interplay: `demo-app/` sits outside `src/`, so the transport-isolation gate (which walks `src/`) is unaffected by its `mqtt` import; its internal imports follow D-013 (same-directory/downward relative; upward reaches via the `#demo-app/*` alias), though the import-style gate does not yet walk demo-app/; the coverage floor judges only files imported by tests (`serve.ts`'s logic is factored into imported pure functions; React components are exercised in-browser).
 
 ## 9. Spike runbook
 
