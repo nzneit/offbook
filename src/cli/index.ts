@@ -844,6 +844,85 @@ function preflightPort(port: number, flag: string): void {
 	}
 }
 
+// shared by `up` and `demo --serve` (G14): guards, preflight, boot file,
+// detached spawn with the log APPENDED, runfile, readiness probe.
+// Returns the child pid, or null after printing the refusal/failure.
+async function launchDetached(
+	spec: {
+		runDir: string;
+		config: Config;
+		boot: {
+			projectDir: string;
+			config: Partial<Config>;
+			environment?: string;
+			watch?: boolean;
+			demo?: boolean;
+		};
+	},
+	io: Io,
+): Promise<number | null> {
+	const { runDir, config } = spec;
+	const existing = await resolveRunning(runDir);
+	if (existing?.live) {
+		io.err(
+			`offbook: already running (pid ${existing.run.pid}, ports ws ${existing.run.brokerWsPort} / tcp ${existing.run.brokerTcpPort} / http ${existing.run.controlPlanePort}) — run \`offbook down\` first`,
+		);
+		return null;
+	}
+	if (existing) {
+		io.out(`(reclaiming stale runfile — pid ${existing.run.pid} is gone)`);
+		clearRunfile(runDir);
+	}
+	preflightPort(config.brokerWsPort, "brokerWsPort or --ws-port");
+	preflightPort(config.brokerTcpPort, "brokerTcpPort or --tcp-port");
+	preflightPort(config.controlPlanePort, "controlPlanePort or --ctrl-port");
+	mkdirSync(runDir, { recursive: true });
+	const bootFile = join(runDir, "offbook.boot.json");
+	await Bun.write(bootFile, JSON.stringify(spec.boot, null, 2));
+	const logFd = openSync(logPath(runDir), "a");
+	const serveEntry = fileURLToPath(new URL("./serve.ts", import.meta.url));
+	const child = spawn(process.execPath, [serveEntry, bootFile], {
+		detached: true,
+		stdio: ["ignore", logFd, logFd],
+	});
+	closeSync(logFd);
+	child.unref();
+	const pid = child.pid;
+	if (pid === undefined) throw new CliError("up: failed to spawn the server");
+	await writeRunfile(runDir, {
+		pid,
+		brokerWsPort: config.brokerWsPort,
+		brokerTcpPort: config.brokerTcpPort,
+		controlPlanePort: config.controlPlanePort,
+		startedAt: new Date().toISOString(),
+	});
+	const deadline = Date.now() + 30_000;
+	let ready = false;
+	while (Date.now() < deadline) {
+		if (await probeOffbook(config.controlPlanePort, 300)) {
+			ready = true;
+			break;
+		}
+		if (!pidAlive(pid)) break;
+		await sleep(100);
+	}
+	if (!ready) {
+		clearRunfile(runDir);
+		io.err(`offbook up: server failed to start — ${logPath(runDir)} ends:`);
+		const tail = (
+			await Bun.file(logPath(runDir))
+				.text()
+				.catch(() => "")
+		)
+			.trimEnd()
+			.split("\n")
+			.slice(-15);
+		for (const line of tail) io.err(`  ${line}`);
+		return null;
+	}
+	return pid;
+}
+
 async function cmdUp(rest: string[], io: Io): Promise<number> {
 	const { values } = parseFlags(rest, {
 		"run-dir": { type: "string" },
@@ -857,18 +936,6 @@ async function cmdUp(rest: string[], io: Io): Promise<number> {
 		"ctrl-port": { type: "string" },
 	});
 	const runDir = runDirOf(values);
-
-	const existing = await resolveRunning(runDir);
-	if (existing?.live) {
-		io.err(
-			`offbook: already running (pid ${existing.run.pid}, ports ws ${existing.run.brokerWsPort} / tcp ${existing.run.brokerTcpPort} / http ${existing.run.controlPlanePort}) — run \`offbook down\` first`,
-		);
-		return 1;
-	}
-	if (existing) {
-		io.out(`(reclaiming stale runfile — pid ${existing.run.pid} is gone)`);
-		clearRunfile(runDir);
-	}
 
 	// two boot profiles: interactive default vs --ci (co-set, EH1/F10);
 	// --strict stays an independent flag (--frozen is v2)
@@ -898,74 +965,20 @@ async function cmdUp(rest: string[], io: Io): Promise<number> {
 		);
 	const config = loadConfig(overrides);
 
-	// foreground preflight — a conflict fails fast with a named fix, never a
-	// cryptic detached EADDRINUSE (P7)
-	preflightPort(config.brokerWsPort, "brokerWsPort or --ws-port");
-	preflightPort(config.brokerTcpPort, "brokerTcpPort or --tcp-port");
-	preflightPort(config.controlPlanePort, "controlPlanePort or --ctrl-port");
-
-	mkdirSync(runDir, { recursive: true });
-	const bootFile = join(runDir, "offbook.boot.json");
-	await Bun.write(
-		bootFile,
-		JSON.stringify(
-			{
+	const pid = await launchDetached(
+		{
+			runDir,
+			config,
+			boot: {
 				projectDir: process.cwd(),
 				config: overrides,
 				environment: str(values.env),
 				watch,
 			},
-			null,
-			2,
-		),
+		},
+		io,
 	);
-
-	// detach with stdout/stderr APPENDED to <runDir>/offbook.log (G14 — the
-	// log stays continuous across restarts; `offbook logs`/`status` read it)
-	const logFd = openSync(logPath(runDir), "a");
-	const serveEntry = fileURLToPath(new URL("./serve.ts", import.meta.url));
-	const child = spawn(process.execPath, [serveEntry, bootFile], {
-		detached: true,
-		stdio: ["ignore", logFd, logFd],
-	});
-	closeSync(logFd);
-	child.unref();
-	const pid = child.pid;
-	if (pid === undefined) throw new CliError("up: failed to spawn the server");
-	await writeRunfile(runDir, {
-		pid,
-		brokerWsPort: config.brokerWsPort,
-		brokerTcpPort: config.brokerTcpPort,
-		controlPlanePort: config.controlPlanePort,
-		startedAt: new Date().toISOString(),
-	});
-
-	// readiness probe — a child that dies first (fatal spec-load, design §7
-	// Mode 1) surfaces its log tail here, in the foreground
-	const deadline = Date.now() + 30_000;
-	let ready = false;
-	while (Date.now() < deadline) {
-		if (await probeOffbook(config.controlPlanePort, 300)) {
-			ready = true;
-			break;
-		}
-		if (!pidAlive(pid)) break;
-		await sleep(100);
-	}
-	if (!ready) {
-		clearRunfile(runDir);
-		io.err(`offbook up: server failed to start — ${logPath(runDir)} ends:`);
-		const tail = (
-			await Bun.file(logPath(runDir))
-				.text()
-				.catch(() => "")
-		)
-			.trimEnd()
-			.split("\n")
-			.slice(-15);
-		for (const line of tail) io.err(`  ${line}`);
-		return 1;
-	}
+	if (pid === null) return 1;
 
 	io.out(
 		`offbook up — pid ${pid} · mode ${config.mode} · seed ${config.seed}${ci ? " (--ci profile)" : ""}`,
@@ -991,6 +1004,59 @@ async function cmdUp(rest: string[], io: Io): Promise<number> {
 		io.out(
 			"L1 floor active: every toClient topic serves seeded, schema-valid examples — no scenarios or handlers loaded yet. Author scenarios/*.yaml (L2) or handlers/*.ts (L3) to script behavior; `offbook topics` shows what's flowing.",
 		);
+	return 0;
+}
+
+async function cmdDemoServe(rest: string[], io: Io): Promise<number> {
+	const { values } = parseFlags(rest, {
+		serve: { type: "boolean" },
+		"run-dir": { type: "string" },
+		seed: { type: "string" },
+		"ws-port": { type: "string" },
+		"tcp-port": { type: "string" },
+		"ctrl-port": { type: "string" },
+	});
+	const runDir = runDirOf(values);
+	// interactive profile — the demo should feel alive (wall-clock, autonomous)
+	const overrides: Partial<Config> = {
+		runDir,
+		mode: "autonomous",
+		wallClock: true,
+		strict: false,
+	};
+	if (values.seed !== undefined)
+		overrides.seed = toInt(str(values.seed) ?? "", "--seed");
+	if (values["ws-port"] !== undefined)
+		overrides.brokerWsPort = toInt(str(values["ws-port"]) ?? "", "--ws-port");
+	if (values["tcp-port"] !== undefined)
+		overrides.brokerTcpPort = toInt(
+			str(values["tcp-port"]) ?? "",
+			"--tcp-port",
+		);
+	if (values["ctrl-port"] !== undefined)
+		overrides.controlPlanePort = toInt(
+			str(values["ctrl-port"]) ?? "",
+			"--ctrl-port",
+		);
+	const config = loadConfig(overrides);
+	const pid = await launchDetached(
+		{
+			runDir,
+			config,
+			boot: { projectDir: process.cwd(), config: overrides, demo: true },
+		},
+		io,
+	);
+	if (pid === null) return 1;
+	io.out(
+		`offbook demo --serve — pid ${pid} · bundled thermostat spec · mode ${config.mode} · seed ${config.seed}`,
+	);
+	io.out(
+		`  control http://localhost:${config.controlPlanePort} · logs ${logPath(runDir)}`,
+	);
+	io.out(
+		`point your MQTT client at ws://localhost:${config.brokerWsPort} (MQTT 3.1.1) — \`offbook down\` stops it`,
+	);
 	return 0;
 }
 
@@ -1175,7 +1241,7 @@ async function cmdInit(rest: string[], io: Io): Promise<number> {
 const USAGE = `usage: offbook <command>
 
   init [dir]                 scaffold services.yaml, environments.yaml, scenarios/, handlers/
-  demo                       boot the bundled demo spec, catch an off-contract publish, exit
+  demo [--serve]             bundled demo spec — one-shot catch, or --serve to keep serving
   up [--ci] [--strict] [--watch] [--seed n] [--ws-port n] [--tcp-port n] [--ctrl-port n] [--env e]
   down                       stop the running server (idempotent)
   status [--json]            running/ports/mode/specs/violations at a glance
@@ -1218,6 +1284,7 @@ export async function run(argv: string[], io: Io = consoleIo): Promise<number> {
 	const [cmd, ...rest] = argv;
 	try {
 		if (cmd === "demo") {
+			if (rest.includes("--serve")) return await cmdDemoServe(rest, io);
 			const { output } = await runDemo();
 			io.out(output);
 			return 0;
