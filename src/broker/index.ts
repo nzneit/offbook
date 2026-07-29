@@ -271,10 +271,12 @@ export function createBroker(config: Config): BrokerModule {
 	const subs: Array<(s: { topic: string; clientId: string }) => void> = [];
 	const seenSubs = new Set<string>();
 	const seenPubs = new Set<string>();
+	// NUL — the one char MQTT forbids in topics/clientIds, so keys cannot collide
+	const SEP = String.fromCharCode(0);
 
 	aedes.on("publish", (packet, client) => {
 		if (!client) return; // ignore our own emits (client === null)
-		const pubKey = `${client.id} ${packet.qos} ${packet.retain}`;
+		const pubKey = client.id + SEP + packet.qos + SEP + packet.retain;
 		if (!seenPubs.has(pubKey)) {
 			seenPubs.add(pubKey);
 			emitFingerprint({
@@ -304,7 +306,7 @@ export function createBroker(config: Config): BrokerModule {
 	aedes.on("subscribe", (subscriptions, client) => {
 		for (const s of subscriptions) {
 			const clientId = client?.id ?? "";
-			const key = `${clientId} ${s.topic} ${s.qos}`;
+			const key = clientId + SEP + s.topic + SEP + s.qos;
 			if (!seenSubs.has(key)) {
 				seenSubs.add(key);
 				emitFingerprint({

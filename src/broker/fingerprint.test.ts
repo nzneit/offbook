@@ -147,3 +147,29 @@ test("subscribe observations dedupe per clientId·topic·qos; publish per client
 	]);
 	await client.endAsync();
 });
+
+test("dedup keys cannot collide across distinct clientId/topic triples", async () => {
+	const a = await connectAsync(`ws://localhost:${WS}`, {
+		forceNativeWebSocket: true,
+		reconnectPeriod: 0,
+		clientId: "dev",
+	});
+	await a.subscribeAsync("cmd 1", { qos: 2 });
+	const b = await connectAsync(`ws://localhost:${WS}`, {
+		forceNativeWebSocket: true,
+		reconnectPeriod: 0,
+		clientId: "dev cmd",
+	});
+	await b.subscribeAsync("1", { qos: 2 });
+	const subs = events.filter(
+		(e) =>
+			e.kind === "subscribe" &&
+			(e.clientId === "dev" || e.clientId === "dev cmd"),
+	);
+	expect(subs.map((s) => ({ clientId: s.clientId, topic: s.topic }))).toEqual([
+		{ clientId: "dev", topic: "cmd 1" },
+		{ clientId: "dev cmd", topic: "1" },
+	]);
+	await a.endAsync();
+	await b.endAsync();
+});
