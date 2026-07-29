@@ -181,11 +181,13 @@ test("distinctRows collapses repeats on origin·kind·channel·instancePath·key
 		detail: "x",
 		errors: [{ instancePath, keyword: "enum", message: "must be equal" }],
 	});
-	const rows = distinctRows([v(1, "schema"), v(2, "schema"), v(3, "decode")]);
+	const rows = distinctRows([v(2, "schema"), v(3, "decode"), v(1, "schema")]);
 	expect(rows).toHaveLength(2);
+	// row order: descending by latest seq (decode seq 3 first)
+	expect(rows.map((r) => r.latest.kind)).toEqual(["decode", "schema"]);
 	const schema = rows.find((r) => r.latest.kind === "schema");
 	expect(schema?.count).toBe(2);
-	expect(schema?.latest.seq).toBe(3 - 1); // latest schema seq is 2
+	expect(schema?.latest.seq).toBe(2); // latest wins by seq, not by array position
 });
 
 test("buildCapture: server view wins, client options fill, qos/retain from observations", () => {
@@ -204,8 +206,9 @@ test("buildCapture: server view wins, client options fill, qos/retain from obser
 			connect: {
 				clientId: "demo-app-abc",
 				protocolLevel: 4,
-				keepalive: 60,
-				clean: true,
+				keepalive: 30,
+				clean: false,
+				username: "alice",
 				passwordPresent: false,
 				ws: {
 					path: "/",
@@ -224,11 +227,31 @@ test("buildCapture: server view wins, client options fill, qos/retain from obser
 		subprotocol: "mqtt",
 		protocolLevel: 4,
 		clientIdPattern: "demo-app-*",
-		auth: { username: null, passwordPresent: false },
-		keepalive: 60,
-		clean: true,
+		auth: { username: "alice", passwordPresent: false },
+		keepalive: 30,
+		clean: false,
 		qosUsed: [1],
 		retainUsed: false,
 	});
 	expect(typeof capture.capturedAt).toBe("string");
+
+	const fallback = buildCapture({
+		clientOptions: {
+			wsUrl: "ws://localhost:9001",
+			clientId: "mqttjs_ab12",
+			protocolVersion: 4,
+			keepalive: 60,
+			clean: true,
+			passwordPresent: false,
+		},
+		probe: { subprotocolSelected: "mqtt" },
+	});
+	expect(fallback).toMatchObject({
+		subprotocol: "mqtt", // probe fills when no fingerprint
+		keepalive: 60,
+		clean: true,
+		clientIdPattern: "mqttjs_ab12*", // literal prefix, never bare "*"
+		qosUsed: [],
+		retainUsed: false,
+	});
 });

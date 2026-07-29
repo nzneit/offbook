@@ -17,6 +17,13 @@ export interface CaptureInputs {
 	fingerprint?: FingerprintBundle;
 }
 
+function clientIdPattern(id: string): string {
+	// strip the random trailing segment after the LAST dash; a dash-less id
+	// stays a literal prefix — never a bare "*" wildcard
+	const lastDash = id.lastIndexOf("-");
+	return lastDash === -1 ? `${id}*` : `${id.slice(0, lastDash + 1)}*`;
+}
+
 export function buildCapture(i: CaptureInputs): Record<string, unknown> {
 	const c = i.fingerprint?.connect ?? {};
 	const ws = (c.ws ?? {}) as Record<string, unknown>;
@@ -29,7 +36,7 @@ export function buildCapture(i: CaptureInputs): Record<string, unknown> {
 				.map((o) => o.qos)
 				.filter((q): q is number => typeof q === "number"),
 		),
-	].sort();
+	].sort((a, b) => a - b);
 	return {
 		capturedAt: new Date().toISOString(),
 		source: "demo-app",
@@ -42,7 +49,7 @@ export function buildCapture(i: CaptureInputs): Record<string, unknown> {
 		protocolLevel:
 			(c.protocolLevel as number | undefined) ??
 			i.clientOptions.protocolVersion,
-		clientIdPattern: `${i.clientOptions.clientId.replace(/[^-]*$/, "")}*`,
+		clientIdPattern: clientIdPattern(i.clientOptions.clientId),
 		auth: {
 			username:
 				(c.username as string | undefined) ?? i.clientOptions.username ?? null,
