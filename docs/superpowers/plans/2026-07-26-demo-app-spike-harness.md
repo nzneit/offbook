@@ -406,6 +406,8 @@ In `createBroker`, alongside the arrays:
 ```ts
 	const seenSubs = new Set<string>();
 	const seenPubs = new Set<string>();
+	// NUL is the one char MQTT forbids in topics/clientIds — collision-proof separator
+	const SEP = String.fromCharCode(0);
 ```
 
 Extend the existing `aedes.on("subscribe", ...)` handler:
@@ -414,7 +416,7 @@ Extend the existing `aedes.on("subscribe", ...)` handler:
 	aedes.on("subscribe", (subscriptions, client) => {
 		for (const s of subscriptions) {
 			const clientId = client?.id ?? "";
-			const key = `${clientId} ${s.topic} ${s.qos}`;
+			const key = clientId + SEP + s.topic + SEP + s.qos;
 			if (!seenSubs.has(key)) {
 				seenSubs.add(key);
 				emitFingerprint({
@@ -432,7 +434,7 @@ Extend the existing `aedes.on("subscribe", ...)` handler:
 Extend the existing `aedes.on("publish", ...)` handler — add right after the `if (!client) return;` guard:
 
 ```ts
-		const pubKey = `${client.id} ${packet.qos} ${packet.retain}`;
+		const pubKey = client.id + SEP + packet.qos + SEP + packet.retain;
 		if (!seenPubs.has(pubKey)) {
 			seenPubs.add(pubKey);
 			emitFingerprint({
@@ -1592,7 +1594,7 @@ export interface DistinctRow {
 export function distinctRows(violations: ViolationLite[]): DistinctRow[] {
 	const rows = new Map<string, DistinctRow>();
 	for (const v of violations) {
-		const key = `${v.origin} ${v.kind} ${v.channel ?? v.topic} ${v.errors?.[0]?.instancePath ?? ""} ${v.errors?.[0]?.keyword ?? ""}`;
+		const key = `${v.origin}·${v.kind}·${v.channel ?? v.topic}·${v.errors?.[0]?.instancePath ?? ""}·${v.errors?.[0]?.keyword ?? ""}`;
 		const row = rows.get(key);
 		if (row) {
 			row.count += 1;
