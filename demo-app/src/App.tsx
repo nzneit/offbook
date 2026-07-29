@@ -46,6 +46,7 @@ export function App() {
 			const client = connectClient({ wsUrl: WS_URL, clientId: CLIENT_ID });
 			clientRef.current = client;
 			client.on("connect", () => {
+				tick({ type: "ws-upgrade" });
 				tick({ type: "connack" });
 				client.subscribe("state/#", { qos: 1 }, (err, granted) => {
 					if (!err && granted?.[0])
@@ -60,7 +61,8 @@ export function App() {
 					const body = JSON.parse(payload.toString()) as Omit<
 						DeviceState,
 						"receivedAt"
-					>;
+					> | null;
+					if (typeof body !== "object" || body === null) return; // off-contract state — the feed surfaces it
 					setDevices((prev) => {
 						const next = new Map(prev);
 						next.set(body.deviceId ?? topic.slice("state/".length), {
@@ -106,9 +108,12 @@ export function App() {
 				.catch(() => {});
 		}, 2000);
 		void fetch("/v1/topics")
-			.then((r) => r.json() as Promise<{ topics: TopicRow[] }>)
+			.then((r) => {
+				if (!r.ok) throw new Error("offbook unreachable");
+				return r.json() as Promise<{ topics: TopicRow[] }>;
+			})
 			.then((body) => setTopics(body.topics))
-			.catch(() => {});
+			.catch(() => {}); // strip stays empty until offbook is up
 		return () => {
 			clearInterval(poll);
 			clearInterval(fpPoll);

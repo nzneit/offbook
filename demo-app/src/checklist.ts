@@ -51,5 +51,6 @@ export function checklistReduce(
 	if (e.type === "reconnect") return { ...s, reconnects: s.reconnects + 1 };
 	if (e.type === "suback")
 		return { ...s, grantedQos: e.qos, done: { ...s.done, suback: true } };
+	if (s.done[e.type]) return s;
 	return { ...s, done: { ...s.done, [e.type]: true } };
 }

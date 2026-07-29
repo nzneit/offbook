@@ -23,8 +23,8 @@ export function Devices({ devices }: { devices: Map<string, DeviceState> }) {
 					<div className="meta">{d.deviceId}</div>
 					<div className="status">{d.status}</div>
 					<div className="meta">
-						target {d.target ?? "—"}
-						{d.units ?? ""} · {new Date(d.receivedAt).toLocaleTimeString()}
+						target {d.target ?? "—"} {d.units ?? ""} ·{" "}
+						{new Date(d.receivedAt).toLocaleTimeString()}
 					</div>
 				</div>
 			))}

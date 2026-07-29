@@ -63,7 +63,9 @@ export function SpikePanel({
 		const a = document.createElement("a");
 		a.href = URL.createObjectURL(blob);
 		a.download = "offbook-connect-capture.json";
+		document.body.append(a);
 		a.click();
+		a.remove();
 		URL.revokeObjectURL(a.href);
 	};
 	const fp: FingerprintBundle | undefined = inputs.fingerprint;
