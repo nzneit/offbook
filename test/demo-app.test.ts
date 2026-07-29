@@ -10,6 +10,9 @@ import {
 	createDemoAppServer,
 	parseFingerprintLines,
 } from "#demo-app/server.ts";
+import { buildCapture } from "#demo-app/src/capture.ts";
+import { checklistReduce, initialChecklist } from "#demo-app/src/checklist.ts";
+import { distinctRows } from "#demo-app/src/distinct.ts";
 import { compose } from "#src/compose/index.ts";
 import { loadConfig } from "#src/config/index.ts";
 import { buildRegistry } from "#src/registry/index.ts";
@@ -151,4 +154,81 @@ test("static routes: /, /main.js, and the catch-all 404", async () => {
 		server.stop(true);
 		await rm(root, { recursive: true, force: true });
 	}
+});
+
+test("checklist: events check items off; reconnects count without unchecking", () => {
+	let s = initialChecklist;
+	s = checklistReduce(s, { type: "ws-upgrade" });
+	s = checklistReduce(s, { type: "connack" });
+	s = checklistReduce(s, { type: "suback", qos: 1 });
+	expect(s.done["ws-upgrade"]).toBe(true);
+	expect(s.done.connack).toBe(true);
+	expect(s.done.suback).toBe(true);
+	expect(s.grantedQos).toBe(1);
+	expect(s.done.retained).toBe(false);
+	s = checklistReduce(s, { type: "reconnect" });
+	expect(s.reconnects).toBe(1);
+	expect(s.done.connack).toBe(true); // history is not rewritten
+});
+
+test("distinctRows collapses repeats on origin·kind·channel·instancePath·keyword", () => {
+	const v = (seq: number, kind: string, instancePath = "/mode") => ({
+		seq,
+		origin: "client",
+		kind,
+		topic: "command/thermostat-1/set",
+		channel: "command/{deviceId}/set",
+		detail: "x",
+		errors: [{ instancePath, keyword: "enum", message: "must be equal" }],
+	});
+	const rows = distinctRows([v(1, "schema"), v(2, "schema"), v(3, "decode")]);
+	expect(rows).toHaveLength(2);
+	const schema = rows.find((r) => r.latest.kind === "schema");
+	expect(schema?.count).toBe(2);
+	expect(schema?.latest.seq).toBe(3 - 1); // latest schema seq is 2
+});
+
+test("buildCapture: server view wins, client options fill, qos/retain from observations", () => {
+	const capture = buildCapture({
+		clientOptions: {
+			wsUrl: "ws://localhost:9001",
+			clientId: "demo-app-abc",
+			protocolVersion: 4,
+			keepalive: 60,
+			clean: true,
+			username: undefined,
+			passwordPresent: false,
+		},
+		probe: { subprotocolSelected: "mqtt" },
+		fingerprint: {
+			connect: {
+				clientId: "demo-app-abc",
+				protocolLevel: 4,
+				keepalive: 60,
+				clean: true,
+				passwordPresent: false,
+				ws: {
+					path: "/",
+					subprotocolsOffered: ["mqtt"],
+					subprotocolSelected: "mqtt",
+				},
+			},
+			subscribes: [{ clientId: "demo-app-abc", topic: "state/#", qos: 1 }],
+			publishes: [{ clientId: "demo-app-abc", qos: 1, retain: false }],
+		},
+	});
+	expect(capture).toMatchObject({
+		source: "demo-app",
+		wsUrl: "ws://localhost:9001",
+		path: "/",
+		subprotocol: "mqtt",
+		protocolLevel: 4,
+		clientIdPattern: "demo-app-*",
+		auth: { username: null, passwordPresent: false },
+		keepalive: 60,
+		clean: true,
+		qosUsed: [1],
+		retainUsed: false,
+	});
+	expect(typeof capture.capturedAt).toBe("string");
 });
