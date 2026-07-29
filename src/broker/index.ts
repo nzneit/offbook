@@ -15,8 +15,24 @@ export interface BrokerModule {
 	onSubscribe(
 		handler: (sub: { topic: string; clientId: string }) => void,
 	): void;
+	onFingerprint(handler: (e: FingerprintEvent) => void): void;
 	emit(message: NormalizedMessage): Promise<void>;
 	getState(): Promise<ReadonlyMap<string, NormalizedMessage>>;
+}
+
+// R-033 — the connect fingerprint: ws upgrade facts (when present) correlated
+// with the CONNECT packet's own facts. Password is presence-only, never the
+// value itself — the redaction bar (fixtures/asyncapi's fixture-quality bar
+// applies here too: this is a security-relevant fact, not just a shape).
+export interface FingerprintEvent {
+	kind: "connect";
+	clientId: string;
+	protocolLevel: number | undefined;
+	username: string | undefined;
+	passwordPresent: boolean;
+	keepalive: number | undefined;
+	clean: boolean | undefined;
+	ws: WsFacts | undefined;
 }
 
 // `aedes`'s .d.ts doesn't type the `persistence` property (it's typed `any`
@@ -212,10 +228,39 @@ function decode(buf: Buffer): { payload: unknown; decodeError?: string } {
 }
 
 export function createBroker(config: Config): BrokerModule {
-	const aedes = new Aedes() as AedesWithPersistence;
-	// consumed by Task 2's CONNECT-handling code to correlate a packet's
+	// consumed by the CONNECT-handling code below to correlate a packet's
 	// client-facing facts back to the ws upgrade it arrived on
 	const wsFacts = new WeakMap<object, WsFacts>();
+	const fingerprints: Array<(e: FingerprintEvent) => void> = [];
+	const emitFingerprint = (e: FingerprintEvent) => {
+		for (const h of fingerprints) h(e);
+	};
+	// narrow view of the CONNECT packet — no mqtt-packet type import needed
+	interface ConnectFacts {
+		clientId: string;
+		protocolVersion?: number;
+		keepalive?: number;
+		clean?: boolean;
+		username?: string;
+		password?: unknown;
+	}
+	const aedes = new Aedes({
+		preConnect: (client, packet, done) => {
+			const p = packet as unknown as ConnectFacts;
+			const conn = (client as unknown as { conn: object }).conn;
+			emitFingerprint({
+				kind: "connect",
+				clientId: p.clientId,
+				protocolLevel: p.protocolVersion,
+				username: typeof p.username === "string" ? p.username : undefined,
+				passwordPresent: p.password !== undefined && p.password !== null,
+				keepalive: p.keepalive,
+				clean: p.clean,
+				ws: wsFacts.get(conn), // undefined for tcp — that IS the signal
+			});
+			done(null, true); // accept-all auth (design §8) is unchanged
+		},
+	}) as AedesWithPersistence;
 	const wsServer = createWsListener(aedes, wsFacts);
 	const tcpServer = createServer(aedes);
 	let seq = 0;
@@ -267,6 +312,9 @@ export function createBroker(config: Config): BrokerModule {
 		},
 		onSubscribe: (h) => {
 			subs.push(h);
+		},
+		onFingerprint: (h) => {
+			fingerprints.push(h);
 		},
 		emit: (m) =>
 			new Promise<void>((resolve, reject) => {
