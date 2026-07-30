@@ -272,20 +272,26 @@ A React demo webapp (`demo-app/`, real `mqtt.js` over ws from a real browser) do
 
 #### Adopter document set — README front door + guides
 **UID**: R-034
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/adoption.md#adopter-docs
+**IMPL**: README.md, docs/guides/, scripts/check-docs.ts
+**TEST**: test/readme-quickstart.test.ts, test/guides-cookbook.test.ts, scripts/check-docs.test.ts
 A newcomer-facing `README.md` (pitch, mental model, prerequisites, demo-first quickstart, lifecycle-grouped verb overview) plus task-oriented `docs/guides/` (getting-started, wiring-your-service, scenario-cookbook, daily-loop), all derived docs under the conflict rule (`contracts.md`/`l2-scenarios.md` stay canonical — a conflict means the guide is wrong); internal relative links across README + guides are validated by the doc-system gate.
 
 #### `offbook doctor` — first-run preflight
 **UID**: R-035
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/adoption.md#doctor
+**IMPL**: src/cli/doctor.ts, src/cli/index.ts, package.json
+**TEST**: src/cli/doctor.test.ts
 A preflight verb running a fixed ordered list of named checks (runtime floor via `engines.bun`, deps resolvable, project config parse/schema, spec-repo reachability, scenario load, port availability, runfile staleness), each pass/warn/fail with a one-line fix-it hint; `--offline`/`--json`/`--run-dir`; exit 0 iff no fail; checks are data (`DoctorCheck[]`), the future init-wizard substrate (D-016). CLI-local: no `/v1` or contract change.
 
 #### First-run error audit + executable doc gates
 **UID**: R-036
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/adoption.md#first-run-gates
+**IMPL**: src/cli/index.ts, README.md, docs/guides/scenario-cookbook.md
+**TEST**: test/readme-quickstart.test.ts, test/guides-cookbook.test.ts, test/cli-dispatch.test.ts
 Every error reachable on the clone→demo→init→wire→up→first-publish path names what failed plus one concrete next step (with a "(try `offbook doctor`)" suffix only where doctor genuinely diagnoses it), pinned by tests; the README quickstart and scenario-cookbook recipes are executable docs — the quickstart gate runs the canonical command sequence and asserts fence↔canonical equivalence, the cookbook gate loads every recipe against the bundled demo registry with zero diagnostics.
 
 <!--
