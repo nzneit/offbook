@@ -294,6 +294,24 @@ A preflight verb running a fixed ordered list of named checks (runtime floor via
 **TEST**: test/readme-quickstart.test.ts, test/guides-cookbook.test.ts, test/cli-dispatch.test.ts
 Every error reachable on the clone→demo→init→wire→up→first-publish path names what failed plus one concrete next step (with a "(try `offbook doctor`)" suffix only where doctor genuinely diagnoses it), pinned by tests; the README quickstart and scenario-cookbook recipes are executable docs — the quickstart gate runs the canonical command sequence and asserts fence↔canonical equivalence, the cookbook gate loads every recipe against the bundled demo registry with zero diagnostics.
 
+#### AsyncAPI supported-version contract and preflight
+**UID**: R-037
+**STATUS**: specified
+**COVERS**: docs/superpowers/specs/2026-07-30-asyncapi-version-support-design.md
+`registry/` refuses any spec outside the tested support set (2.0.0-2.6.0, 3.0.0, 3.1.0) with a branded, actionable error naming the version, the range, and the convert remedy, checked parser-free before `parse()`; the declared version is recorded as `spec-version` in `specs.lock` and on `SpecInfo`.
+
+#### AsyncAPI payload schema boundary
+**UID**: R-038
+**STATUS**: specified
+**COVERS**: docs/superpowers/specs/2026-07-30-asyncapi-version-support-design.md
+`registry/` extracts the payload schema from the Multi Format Schema Object wrapper, validates under draft-07 with an explicit stamp, diagnoses post-draft-07 keywords it cannot honor, contains a compile failure as a violation rather than a crash or a green pass, and validates an operation's multiple messages as `anyOf`.
+
+#### MQTT binding integrity across spec majors
+**UID**: R-039
+**STATUS**: specified
+**COVERS**: docs/superpowers/specs/2026-07-30-asyncapi-version-support-design.md
+`registry/` guards binding-supplied `qos`/`retain` values (falling through the §2 precedence chain on a bad value), reports unknown keys against the official mqtt operation-binding key set, reports an mqtt CHANNEL binding as ignored, and reports MQTT-5-only binding fields as unhonored under the MQTT 3.1.1-only constraint.
+
 <!--
 Seeding is staged (doc-system.md §7). Batch 1 (R-001..R-007) + R-008 (M0) + R-009 (broker tier-1 residual): seeded; reconciled where traces exist (the R-006/R-007 spikes remain open). Batch 2+ (R-010..R-031): the full module/spike/gate carve per D-007 and docs/archive/intake/2026-07-21-batch-2-seeding-carve.md.
 What remains unseeded resolves case by case (not bulk):

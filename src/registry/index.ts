@@ -9,6 +9,11 @@ import type {
 	ServiceConfig,
 	SpecRegistry,
 } from "#src/model/index.ts";
+import {
+	SUPPORTED_SPEC_VERSIONS,
+	isSupportedSpecVersion,
+	readSpecVersion,
+} from "#src/model/spec-version.ts";
 
 const parser = new Parser();
 
@@ -34,6 +39,23 @@ export async function buildRegistry(opts: {
 	// base path/URI so the parser can resolve external $refs (e.g. shared/common.yaml); omit for self-contained specs
 	source?: string;
 }): Promise<SpecRegistry> {
+	// R-037 preflight: check the declared version BEFORE handing the document to
+	// the parser. The parser's own gate is derived from @asyncapi/specs at
+	// install time, so an unsupported-but-present version can pass it and then
+	// fail deep in the Spectral ruleset with an opaque "Error running Nimma".
+	// Offbook's supported set is a promise it tests, so it is checked here (D-018).
+	const specVersion = readSpecVersion(opts.specText);
+	if (!isSupportedSpecVersion(specVersion)) {
+		throw new Error(
+			`unsupported AsyncAPI version ${
+				specVersion === undefined
+					? "(no `asyncapi` field found)"
+					: `"${specVersion}"`
+			} in service '${opts.service}': offbook supports ${SUPPORTED_SPEC_VERSIONS[0]} through ${
+				SUPPORTED_SPEC_VERSIONS[SUPPORTED_SPEC_VERSIONS.length - 1]
+			}. Convert the spec first: \`asyncapi convert <file> --target-version 3.1.0\``,
+		);
+	}
 	const parsed = opts.source
 		? await parser.parse(opts.specText, { source: opts.source })
 		: await parser.parse(opts.specText);

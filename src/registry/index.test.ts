@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
 import { loadConfig, loadServices } from "#src/config/index.ts";
-import type { ServiceConfig } from "#src/model/index.ts";
+import { DEFAULT_CONFIG, type ServiceConfig } from "#src/model/index.ts";
+import { SUPPORTED_SPEC_VERSIONS } from "#src/model/spec-version.ts";
 import { buildRegistry } from "./index.ts";
 
 // [utest->R-004]
@@ -200,4 +201,68 @@ test("external-ref: KNOWN LIMITATION (D-005, §12.4) — a $ref-sibling keyword 
 			value: 1,
 		}),
 	).toEqual([]);
+});
+
+// [utest->R-037]
+test("refuses a 1.x spec with an actionable, branded error", async () => {
+	const spec = `asyncapi: '1.2.0'
+info: { title: Legacy, version: 1.0.0 }
+topics:
+  t.one:
+    publish:
+      payload: { type: object }
+`;
+	const attempt = buildRegistry({
+		specText: spec,
+		service: "legacy",
+		config: DEFAULT_CONFIG,
+	});
+	await expect(attempt).rejects.toThrow(
+		/unsupported AsyncAPI version "1\.2\.0"/,
+	);
+	// names the supported range and the remedy, not just the problem
+	await expect(attempt).rejects.toThrow(/2\.0\.0/);
+	await expect(attempt).rejects.toThrow(/asyncapi convert/);
+});
+
+// [utest->R-037]
+test("refuses a spec with no asyncapi field", async () => {
+	await expect(
+		buildRegistry({
+			specText: "info: { title: T, version: 1.0.0 }",
+			service: "nover",
+			config: DEFAULT_CONFIG,
+		}),
+	).rejects.toThrow(/unsupported AsyncAPI version/);
+});
+
+// [utest->R-037]
+test("accepts every version in the supported contract", async () => {
+	for (const v of SUPPORTED_SPEC_VERSIONS) {
+		const spec = v.startsWith("3.")
+			? `asyncapi: ${v}
+info: { title: T, version: 1.0.0 }
+channels:
+  c: { address: t/one, messages: { M: { payload: { type: object, properties: { a: { type: string } } } } } }
+operations:
+  o: { action: send, channel: { $ref: '#/channels/c' } }
+`
+			: `asyncapi: ${v}
+info: { title: T, version: 1.0.0 }
+channels:
+  t/one:
+    subscribe:
+      operationId: s
+      message:
+        payload: { type: object, properties: { a: { type: string } } }
+`;
+		const reg = await buildRegistry({
+			specText: spec,
+			service: "s",
+			config: DEFAULT_CONFIG,
+		});
+		expect(reg.channels().length, `version ${v} should yield one channel`).toBe(
+			1,
+		);
+	}
 });
