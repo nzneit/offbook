@@ -24,6 +24,7 @@ Every task's requirements implicitly include these.
 - **`bun scripts/check-docs.ts` must exit 0 at every commit.** Requirement ids must stay unique and contiguous; a `tested` requirement needs a `TEST` trace whose files carry matching arrow tags (`// [utest->R-###]`, or `itest`/`stest`), verified in both directions.
 - **Commit messages carry no `Co-Authored-By` and no AI-attribution trailer.**
 - **Prose in docs and comments avoids em-dashes.** Use commas, colons, parentheses, or separate sentences.
+- **Touching `fixtures/asyncapi/` couples to the R-027 spike tripwire.** `test/spikes/jsf-fidelity.test.ts` asserts that `SPIKE_FIXTURES` (in `scripts/spike-jsf-fidelity.ts`) covers the `fixtures/asyncapi/*.yaml` listing *exactly*, and its `EXPECTED` map pins draws (channels x 10 seeds) and failures per fixture. So **adding a fixture, or adding a channel to an existing one, makes the full suite red until you update both.** Do the maintenance the tripwire itself prescribes: register the fixture, re-measure, and note the re-measurement citing D-018. Never exempt a fixture from the listing assertion and never relax `failures: 0` to accommodate a draw. Discovered in Task 2, which had to register `multi-format.yaml`; it recurs in Task 3 (a new `composition.yaml` channel) and Task 8 (`v2-oldest.yaml`).
 
 ## Deviations from the spec (read before starting)
 
@@ -81,11 +82,12 @@ Create `src/model/spec-version.test.ts`:
 ```ts
 // [utest->R-037]
 import { expect, test } from "bun:test";
+// same directory as its subject, so relative per D-013 (NOT the #src/ alias)
 import {
 	SUPPORTED_SPEC_VERSIONS,
 	isSupportedSpecVersion,
 	readSpecVersion,
-} from "#src/model/spec-version.ts";
+} from "./spec-version.ts";
 
 test("reads the asyncapi version from spec text without a parser", () => {
 	expect(readSpecVersion("asyncapi: 3.0.0\ninfo: { title: T, version: 1.0.0 }")).toBe("3.0.0");
@@ -252,11 +254,13 @@ channels:
 });
 ```
 
-Add `SUPPORTED_SPEC_VERSIONS` to the test file's imports:
+Add `SUPPORTED_SPEC_VERSIONS` to the test file's imports. This one is a genuine upward reach from `src/registry/`, so the alias is correct here:
 
 ```ts
 import { SUPPORTED_SPEC_VERSIONS } from "#src/model/spec-version.ts";
 ```
+
+Note the contrast with Step 1: `src/model/spec-version.test.ts` sits in the same directory as its subject, so it imports `./spec-version.ts` relatively, per D-013. Apply the rule from `CLAUDE.md`, not the shape of a neighbouring import.
 
 - [ ] **Step 6: Run it to verify it fails**
 
@@ -609,6 +613,14 @@ Add under `operations:`:
     channel:
       $ref: '#/channels/window'
 ```
+
+- [ ] **Step 1b: Re-measure the spike expectation for composition.yaml**
+
+Adding the `window` channel gives `composition.yaml` a third channel, so the R-027 tripwire's pinned draw count changes (see the Global Constraints bullet on this coupling). In `test/spikes/jsf-fidelity.test.ts`, update the `composition.yaml` entry from `{ draws: 20, failures: 0 }` to the freshly measured value, which should be `{ draws: 30, failures: 0 }` for three channels at ten seeds each, and add a comment noting the re-measurement and citing D-018.
+
+**Measure, do not assume.** Run the suite and read the actual numbers rather than trusting the arithmetic. If `failures` comes back non-zero, STOP and report: it would mean json-schema-faker cannot draw valid data for a draft-07 tuple, which is a genuine finding about the dialect change and not something to paper over by adjusting the expectation.
+
+No fixture is being added here, so `SPIKE_FIXTURES` itself needs no change.
 
 - [ ] **Step 2: Write the failing dialect tests**
 
@@ -1408,6 +1420,12 @@ components:
             type: string
             enum: [heat, cool, off]
 ```
+
+- [ ] **Step 1b: Register the new fixture with the spike tripwire**
+
+`v2-oldest.yaml` joins `fixtures/asyncapi/`, so the R-027 tripwire goes red until it is registered (see the Global Constraints bullet on this coupling; Task 2 hit the same thing with `multi-format.yaml`). Add `"v2-oldest.yaml"` to `SPIKE_FIXTURES` in `scripts/spike-jsf-fidelity.ts`, keeping the list alphabetically sorted, and add a measured `EXPECTED` entry in `test/spikes/jsf-fidelity.test.ts` with a comment citing D-018. Two channels at ten seeds each should give `{ draws: 20, failures: 0 }`.
+
+**Measure, do not assume**, and if `failures` is non-zero, STOP and report rather than adjusting the expectation. Include both files in this task's `git add`.
 
 - [ ] **Step 2: Write the failing tests**
 
