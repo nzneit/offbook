@@ -30,6 +30,27 @@ function directionOf(action: string): "toClient" | "fromClient" {
 		: "fromClient";
 }
 
+// AsyncAPI 3.x lets a payload be a Multi Format Schema Object (`{schemaFormat,
+// schema}`), permitted even for the default JSON-Schema format. `BaseModel.json()`
+// returns that wrapper verbatim (the parser's own Schema model unwraps
+// `_json.schema` internally for its typed accessors), so spreading it yields a
+// schema with NO validation keywords: a validator that accepts everything (D-018).
+// Deliberately does NOT branch on the schemaFormat STRING: the implementation
+// emits `application/vnd.aai.asyncapi;version=X` while the spec text mandates a
+// `+json` suffix, so a literal comparison would silently stop matching.
+function extractPayloadSchema(payloadJson: unknown): object {
+	if (payloadJson === null || typeof payloadJson !== "object") return {};
+	const p = payloadJson as Record<string, unknown>;
+	if (
+		"schemaFormat" in p &&
+		typeof p.schema === "object" &&
+		p.schema !== null
+	) {
+		return p.schema as object;
+	}
+	return p;
+}
+
 export async function buildRegistry(opts: {
 	specText: string;
 	service: string;
@@ -75,7 +96,7 @@ export async function buildRegistry(opts: {
 		const msg = op.messages().all()[0];
 		const schema = {
 			$schema: "https://json-schema.org/draft/2020-12/schema",
-			...((msg?.payload()?.json() ?? {}) as object),
+			...extractPayloadSchema(msg?.payload()?.json()),
 		};
 		const validateFn = ajv.compile(schema);
 		const mqtt = op.bindings().get("mqtt")?.value<{

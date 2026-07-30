@@ -266,3 +266,33 @@ channels:
 		);
 	}
 });
+
+// [utest->R-038]
+test("a multi-format payload still VALIDATES (the wrapper must be unwrapped)", async () => {
+	const reg = await registryFor("multi-format.yaml");
+	const reading = reg.match("reading/s1")?.channel;
+	expect(reading).toBeDefined();
+	// the schema handed to Ajv must be the payload schema, not the wrapper
+	expect(Object.keys(reading?.schema as object)).not.toContain("schemaFormat");
+	expect(Object.keys(reading?.schema as object)).not.toContain("schema");
+	// conforming payload passes
+	expect(reading?.validate({ sensorId: "s1", celsius: 21.5 })).toEqual([]);
+	// and the tripwire: garbage must NOT pass. Before the unwrap every one of
+	// these validated green, which is the false-negative class R-028 forbids.
+	expect(
+		reading?.validate({ sensorId: 42, celsius: "hot" }).length,
+	).toBeGreaterThan(0);
+	expect(reading?.validate({ unrelated: true }).length).toBeGreaterThan(0);
+	expect(reading?.validate("not-an-object").length).toBeGreaterThan(0);
+	expect(reading?.validate(null).length).toBeGreaterThan(0);
+});
+
+// [utest->R-038]
+test("the multi-format wrapper is unwrapped on the client-publish path too", async () => {
+	const reg = await registryFor("multi-format.yaml");
+	const calibrate = reg.match("calibrate/s1")?.channel;
+	expect(calibrate?.direction).toBe("fromClient");
+	expect(calibrate?.validate({ offset: 0.5 })).toEqual([]);
+	expect(calibrate?.validate({ offset: "half" }).length).toBeGreaterThan(0);
+	expect(calibrate?.validate({}).length).toBeGreaterThan(0);
+});

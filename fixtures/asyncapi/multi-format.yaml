@@ -1,0 +1,63 @@
+asyncapi: 3.1.0
+info:
+  title: Multi Format Payloads
+  version: 1.0.0
+  description: >-
+    Payloads authored as the explicit Multi Format Schema Object
+    (`{schemaFormat, schema}`), which AsyncAPI 3.x permits for the DEFAULT
+    JSON-Schema format, not just for Avro or Protobuf. The parser returns that
+    wrapper verbatim from `payload().json()`, so a consumer that spreads it gets
+    a schema with no validation keywords: a validator that accepts everything
+    (D-018). Both directions carry the form, so the client-publish path is
+    covered too. Also the newest-supported-major acceptance fixture.
+servers:
+  mosquitto:
+    host: localhost:1883
+    protocol: mqtt
+    protocolVersion: '3.1.1'
+channels:
+  reading:
+    address: reading/{sensorId}
+    parameters:
+      sensorId:
+        description: sensor instance id
+    messages:
+      Reading:
+        name: Reading
+        payload:
+          schemaFormat: 'application/vnd.aai.asyncapi;version=3.1.0'
+          schema:
+            type: object
+            required: [sensorId, celsius]
+            additionalProperties: false
+            properties:
+              sensorId:
+                type: string
+              celsius:
+                type: number
+  calibrate:
+    address: calibrate/{sensorId}
+    parameters:
+      sensorId:
+        description: sensor instance id
+    messages:
+      Calibrate:
+        name: Calibrate
+        payload:
+          schemaFormat: 'application/vnd.aai.asyncapi;version=3.1.0'
+          schema:
+            type: object
+            required: [offset]
+            additionalProperties: false
+            properties:
+              offset:
+                type: number
+operations:
+  sendReading:
+    action: send
+    channel:
+      $ref: '#/channels/reading'
+  receiveCalibrate:
+    action: receive
+    channel:
+      $ref: '#/channels/calibrate'
