@@ -6,7 +6,7 @@ on:
     branches: [main]
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}  # never cancel main runs
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}  # cancel superseded PR runs only; in-progress main runs always complete
 permissions:
   contents: read
 jobs:
@@ -26,7 +26,7 @@ jobs:
       - run: bun test                    # authoritative full run; carries the coverage floors
       - if: github.event_name == 'push'
         uses: actions/upload-artifact@v7
-        with: { name: demo-app-dist, path: demo-app/dist/, retention-days: 14 }
+        with: { name: demo-app-dist, path: demo-app/dist/, retention-days: 14, overwrite: true, if-no-files-found: error }
       - if: github.event_name == 'push'
         uses: actions/upload-artifact@v7
-        with: { name: coverage, path: coverage/, retention-days: 14 }
+        with: { name: coverage, path: coverage/, retention-days: 14, overwrite: true, if-no-files-found: error }
