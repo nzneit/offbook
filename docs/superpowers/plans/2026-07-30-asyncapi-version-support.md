@@ -1894,6 +1894,22 @@ For `R-039`:
 Run: `bun scripts/check-docs.ts; echo "EXIT=$?"`
 Expected: `EXIT=0`. The checker verifies arrow tags in both directions, so every file named in a `TEST` trace must carry at least one `// [utest->R-###]` for that id, and no tag may reference a missing requirement. If it reports a dangling or missing tag, fix the tag rather than the trace.
 
+- [ ] **Step 5b: Finish the D-005 decision sweep**
+
+Task 3 reversed the canonical dialect statement in `contracts.md` and closed D-005 as superseded, but two files still assert the old story and now **contradict the canonical contract**. Under this repo's conflict rule, contracts wins and these must be fixed. Both were found during Task 3 execution and neither is listed in any other step.
+
+In `fixtures/asyncapi/README.md`, the `external-ref.yaml` row still reads "a `$ref` **sibling keyword** (`minLength`) that a 2020-12 dialect *should* honor but the draft-07 parser drops: a **known limitation (D-005)**, pinned by a tripwire test, deferred to a 2020-12 schema-parser spike". Reword to match the shipped behaviour: the sibling is not enforced because draft-07 is the dialect both majors declare and offbook validates under, which is correct rather than a limitation, pinned by a tripwire so a future dialect change is loud (D-018 supersedes D-005).
+
+In `REQUIREMENTS.md`, R-004's prose still says "the 2020-12 `$ref`-sibling edge is carved out to D-005, pinned by a tripwire test". Reword to reference the draft-07 dialect and D-018. Do not change R-004's `STATUS` or traces.
+
+Grep for any remaining stale claims before moving on:
+
+```bash
+grep -rn "D-005\|2020-12" --include="*.md" --include="*.yaml" --include="*.ts" . | grep -v node_modules | grep -v "docs/superpowers/" | grep -v coverage/
+```
+
+Expected: every surviving mention is either inside D-005's own ledger entry (history, which stays intact), inside D-018's supersede note, or a deliberate statement that 2020-12 is **not** what offbook validates under. Anything else is an unswept claim.
+
 - [ ] **Step 6: Update the fixtures README**
 
 In `fixtures/asyncapi/README.md`, add two rows to the table:
