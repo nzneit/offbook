@@ -30,7 +30,7 @@ import { buildRegistry } from "#src/registry/index.ts";
 import type { Api } from "./client.ts";
 import { CliError, api, resolveCtrlPort } from "./client.ts";
 import type { CheckStatus, DoctorCtx } from "./doctor.ts";
-import { DOCTOR_CHECKS, runDoctor } from "./doctor.ts";
+import { runDoctor } from "./doctor.ts";
 import {
 	clearRunfile,
 	logPath,
@@ -709,7 +709,7 @@ async function cmdPublish(rest: string[], io: Io): Promise<number> {
 	const topic = positionals[0];
 	if (!topic)
 		throw new CliError(
-			"publish: missing <topic> — `offbook topics` lists what the client may send",
+			"publish: missing <topic> — `offbook topics` lists every topic and its direction",
 		);
 	const body: Record<string, unknown> = {
 		topic,
@@ -775,10 +775,25 @@ async function cmdScenario(rest: string[], io: Io): Promise<number> {
 	const fromFlags = await payloadBody(values, { bareIsExample: false });
 	if ("payload" in fromFlags) body.payload = fromFlags.payload;
 	const a = await clientFor(values);
-	const res = (await a.post(
-		`/v1/trigger/${encodeURIComponent(name)}`,
-		body,
-	)) as { scenario: string; fired: boolean; sinceSeq: number };
+	let res: { scenario: string; fired: boolean; sinceSeq: number };
+	try {
+		res = (await a.post(`/v1/trigger/${encodeURIComponent(name)}`, body)) as {
+			scenario: string;
+			fired: boolean;
+			sinceSeq: number;
+		};
+	} catch (cause) {
+		// R-036: the server's unknown-scenario envelope names no next step —
+		// add one here, same as the missing-<name> case above.
+		if (
+			cause instanceof CliError &&
+			cause.message.startsWith("unknown-scenario")
+		)
+			throw new CliError(
+				`${cause.message} — \`offbook scenarios\` lists what's loaded`,
+			);
+		throw cause;
+	}
 	io.out(
 		`fired → scenario '${res.scenario}' · violation baseline #${res.sinceSeq}`,
 	);
@@ -1298,7 +1313,7 @@ async function cmdDoctor(rest: string[], io: Io): Promise<number> {
 const USAGE = `usage: offbook <command>
 
   init [dir]                 scaffold services.yaml, environments.yaml, scenarios/, handlers/
-  doctor [dir] [--offline] [--json]  preflight: runtime, deps, config, spec reachability, ports
+  doctor [dir] [--offline] [--json] [--run-dir <dir>]  preflight: runtime, deps, config, spec reachability, ports
   demo [--serve]             bundled demo spec — one-shot catch, or --serve to keep serving
   up [--ci] [--strict] [--watch] [--seed n] [--ws-port n] [--tcp-port n] [--ctrl-port n] [--env e]
   down                       stop the running server (idempotent)

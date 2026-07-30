@@ -302,6 +302,8 @@ test("scenario fires POST /v1/trigger/:name with --param; unknown name renders t
 	const missing = io();
 	expect(await run(["scenario", "ghost", ...CTRL_FLAG], missing.io)).toBe(1);
 	expect(missing.err.join("\n")).toContain("unknown-scenario");
+	// R-036: the failure names a next step, same as the missing-<name> case
+	expect(missing.err.join("\n")).toContain("offbook scenarios");
 });
 
 test("scenarios lists the loaded L2 table", async () => {

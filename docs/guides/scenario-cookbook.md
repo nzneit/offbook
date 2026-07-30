@@ -10,8 +10,12 @@ binds the value), double braces **substitute** (`{{deviceId}}` writes it
 back out). Delays like `50-80ms` draw from the run's seed: deterministic
 per seed, never wall-clock-random.
 
-All recipes below target the bundled demo spec (`offbook demo --serve`) so
-you can paste and try them; swap in your own topics and payload fields.
+All recipes below are written against the bundled demo spec's topics
+(`state/{deviceId}`, `command/{deviceId}/set`) so they read realistically and
+load clean against the cookbook gate. `offbook demo --serve` boots its own
+bundled scenarios and never reads a project's `scenarios/`, though — to
+actually run one of these: `offbook init`, drop the file in `scenarios/`,
+then `offbook up`. Swap in your own topics and payload fields once you do.
 
 ## Ack a command
 
@@ -71,7 +75,8 @@ seeded logical clock (a number).
 ## A scripted moment, on demand
 
 No `when` means nothing triggers it automatically — you fire it by name
-while watching your UI (`{{deviceId}}` binds from `--param`):
+while watching your UI (`{{deviceId}}` binds from `--param`). Loaded from
+your own project's `scenarios/` (see above):
 
 ```yaml scenario
 - name: device-offline
