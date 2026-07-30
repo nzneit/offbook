@@ -1,7 +1,7 @@
 # GitHub CI pipeline: design
 
 **Date**: 2026-07-30
-**Status**: approved (design dialog 2026-07-30); implementation pending
+**Status**: implemented 2026-07-30 (workflow + typecheck: 946833f; ruleset live; docs via gated PR: b0c3ef4; see D-017)
 **Provenance**: brainstorm dialog 2026-07-30. Action versions and both compile findings below were verified live during the dialog (GitHub releases API; local `bun build --compile` runs on Bun 1.3.14).
 
 ## Problem
