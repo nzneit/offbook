@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { DoctorCtx, DoctorReport } from "./doctor.ts";
 import { DOCTOR_CHECKS, runDoctor, versionAtLeast } from "./doctor.ts";
+import { run } from "./index.ts";
+import { writeRunfile } from "./runfile.ts";
 
 // ports for this file (repo convention: unique per file): 19130-19133, 12995
 
@@ -288,4 +290,131 @@ test("scenarios: well-formed list passes; bad YAML, non-list, and missing name/t
 			"scenarios",
 		).status,
 	).toBe("warn");
+});
+
+// --- checks 6-7 (ports, runfile) + the verb ---
+
+test("ports: a busy port fails and names it; free ports pass", async () => {
+	// 127.0.0.1: Bun.listen("localhost") on a dual-stack host can bind a
+	// DIFFERENT loopback address than a prior "localhost" bind (::1 vs
+	// 127.0.0.1), so `portFree` uses 127.0.0.1 too — this test's fake
+	// occupant must contend on the exact same address.
+	const listener = Bun.listen({
+		hostname: "127.0.0.1",
+		port: 19130,
+		socket: { data() {} },
+	});
+	try {
+		const busy = await runDoctor(
+			ctxWith({
+				repoRoot: GOOD_REPO_ROOT,
+				projectDir: projectWith({}),
+				ports: { ws: 19130, tcp: 12995, ctrl: 19131 },
+			}),
+		);
+		const check = byName(busy, "ports");
+		expect(check.status).toBe("fail");
+		expect(check.detail).toContain("19130");
+	} finally {
+		listener.stop(true);
+	}
+	const free = await runDoctor(
+		ctxWith({
+			repoRoot: GOOD_REPO_ROOT,
+			projectDir: projectWith({}),
+			ports: { ws: 19130, tcp: 12995, ctrl: 19131 },
+		}),
+	);
+	expect(byName(free, "ports").status).toBe("pass");
+});
+
+test("runfile: absent passes; stale (alive pid, dead port) warns with a `down` hint; live passes as already-up", async () => {
+	const none = await runDoctor(
+		ctxWith({ repoRoot: GOOD_REPO_ROOT, projectDir: projectWith({}) }),
+	);
+	expect(byName(none, "runfile").status).toBe("pass");
+
+	const staleDir = mkdtempSync(join(tmpdir(), "offbook-doctor-stale-"));
+	await writeRunfile(staleDir, {
+		pid: process.pid, // alive, but the control port answers nothing → stale
+		brokerWsPort: 19130,
+		brokerTcpPort: 12995,
+		controlPlanePort: 19132,
+		startedAt: "2026-07-29T00:00:00.000Z",
+	});
+	const stale = await runDoctor(
+		ctxWith({
+			repoRoot: GOOD_REPO_ROOT,
+			projectDir: projectWith({}),
+			runDir: staleDir,
+		}),
+	);
+	const staleCheck = byName(stale, "runfile");
+	expect(staleCheck.status).toBe("warn");
+	expect(staleCheck.hint).toContain("offbook down");
+
+	// live: a fake control plane answering GET /v1/mode marks the runfile live
+	const server = Bun.serve({
+		port: 19133,
+		fetch: () => Response.json({ mode: "passive" }),
+	});
+	try {
+		const liveDir = mkdtempSync(join(tmpdir(), "offbook-doctor-live-"));
+		await writeRunfile(liveDir, {
+			pid: process.pid,
+			brokerWsPort: 19130,
+			brokerTcpPort: 12995,
+			controlPlanePort: 19133,
+			startedAt: "2026-07-29T00:00:00.000Z",
+		});
+		const live = await runDoctor(
+			ctxWith({
+				repoRoot: GOOD_REPO_ROOT,
+				projectDir: projectWith({}),
+				runDir: liveDir,
+			}),
+		);
+		expect(byName(live, "runfile").status).toBe("pass");
+		expect(byName(live, "ports").detail).toContain("already up");
+	} finally {
+		server.stop(true);
+	}
+});
+
+test("`offbook doctor` verb: --json shape, exit codes, USAGE listing", async () => {
+	const outLines: string[] = [];
+	const io = { out: (l: string) => outLines.push(l), err: () => {} };
+	const clean = projectWith({ "services.yaml": "services: {}\n" });
+	const cleanDir = mkdtempSync(join(tmpdir(), "offbook-doctor-run-"));
+	expect(
+		await run(
+			["doctor", clean, "--offline", "--json", "--run-dir", cleanDir],
+			io,
+		),
+	).toBe(0);
+	const report = JSON.parse(outLines.join("\n")) as DoctorReport;
+	expect(report.checks.map((c) => c.name)).toEqual([
+		"runtime",
+		"deps",
+		"project",
+		"specs-reachable",
+		"scenarios",
+		"ports",
+		"runfile",
+	]);
+	expect(report.ok).toBe(true);
+
+	const broken = projectWith({
+		"services.yaml": "services: [not: valid: yaml",
+	});
+	expect(
+		await run(["doctor", broken, "--offline", "--run-dir", cleanDir], {
+			out: () => {},
+			err: () => {},
+		}),
+	).toBe(1);
+
+	const usage: string[] = [];
+	await run([], { out: () => {}, err: (l: string) => usage.push(l) });
+	expect(usage.join("\n")).toContain("doctor");
 });

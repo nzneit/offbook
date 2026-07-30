@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { loadEnvironments, loadServices } from "#src/config/index.ts";
 import { resolveRepoUrl } from "#src/ingestion/index.ts";
+import { resolveRunning } from "./runfile.ts";
 
 export type CheckStatus = "pass" | "warn" | "fail";
 
@@ -287,12 +288,80 @@ const scenarios: DoctorCheck = {
 	},
 };
 
+async function portFree(port: number): Promise<boolean> {
+	try {
+		// 127.0.0.1, not "localhost": on a dual-stack host, hostname resolution
+		// can hand back a DIFFERENT loopback address than an existing bind, so a
+		// second Bun.listen("localhost") silently succeeds on ::1 vs 127.0.0.1
+		// (matches `preflightPort`'s address for the same reason).
+		const listener = Bun.listen({
+			hostname: "127.0.0.1",
+			port,
+			socket: { data() {} },
+		});
+		listener.stop(true);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+const ports: DoctorCheck = {
+	name: "ports",
+	async run(ctx) {
+		const running = await resolveRunning(ctx.runDir);
+		if (running?.live === true) {
+			const r = running.run;
+			return {
+				status: "pass",
+				detail: `offbook already up (pid ${r.pid}: ws ${r.brokerWsPort}, tcp ${r.brokerTcpPort}, ctrl ${r.controlPlanePort})`,
+			};
+		}
+		const busy: string[] = [];
+		const labeled: [string, number][] = [
+			["ws", ctx.ports.ws],
+			["tcp", ctx.ports.tcp],
+			["ctrl", ctx.ports.ctrl],
+		];
+		for (const [label, port] of labeled)
+			if (!(await portFree(port))) busy.push(`${label} ${port}`);
+		return busy.length === 0
+			? {
+					status: "pass",
+					detail: `ports free (ws ${ctx.ports.ws}, tcp ${ctx.ports.tcp}, ctrl ${ctx.ports.ctrl})`,
+				}
+			: {
+					status: "fail",
+					detail: `port(s) busy: ${busy.join(", ")}`,
+					hint: "stop the other process, or pass --ws-port/--tcp-port/--ctrl-port to `offbook up`",
+				};
+	},
+};
+
+const runfileCheck: DoctorCheck = {
+	name: "runfile",
+	async run(ctx) {
+		const resolved = await resolveRunning(ctx.runDir);
+		if (resolved === undefined)
+			return { status: "pass", detail: "no runfile (nothing running here)" };
+		return resolved.live
+			? { status: "pass", detail: `live (pid ${resolved.run.pid})` }
+			: {
+					status: "warn",
+					detail: `stale runfile (pid ${resolved.run.pid} not answering)`,
+					hint: "`offbook down` cleans it up",
+				};
+	},
+};
+
 export const DOCTOR_CHECKS: DoctorCheck[] = [
 	runtime,
 	deps,
 	project,
 	specsReachable,
 	scenarios,
+	ports,
+	runfileCheck,
 ];
 
 export async function runDoctor(

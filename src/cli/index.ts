@@ -29,6 +29,8 @@ import { DEFAULT_CONFIG } from "#src/model/index.ts";
 import { buildRegistry } from "#src/registry/index.ts";
 import type { Api } from "./client.ts";
 import { CliError, api, resolveCtrlPort } from "./client.ts";
+import type { CheckStatus, DoctorCtx } from "./doctor.ts";
+import { DOCTOR_CHECKS, runDoctor } from "./doctor.ts";
 import {
 	clearRunfile,
 	logPath,
@@ -1236,11 +1238,56 @@ async function cmdInit(rest: string[], io: Io): Promise<number> {
 	return 0;
 }
 
+// --- doctor (R-035 — preflight; adoption.md §3; CLI-local, no /v1) ---
+
+const DOCTOR_GLYPH: Record<CheckStatus, string> = {
+	pass: "✓",
+	warn: "!",
+	fail: "✗",
+};
+
+async function cmdDoctor(rest: string[], io: Io): Promise<number> {
+	const { values, positionals } = parseFlags(rest, {
+		offline: { type: "boolean" },
+		json: { type: "boolean" },
+		"run-dir": { type: "string" },
+	});
+	const runDir = runDirOf(values);
+	const run = await readRunfile(runDir); // live or stale: its ports are the ones that matter
+	const ctx: DoctorCtx = {
+		repoRoot: join(import.meta.dir, "../.."),
+		projectDir: positionals[0] ?? ".",
+		runDir,
+		offline: values.offline === true,
+		bunVersion: Bun.version,
+		ports: run
+			? {
+					ws: run.brokerWsPort,
+					tcp: run.brokerTcpPort,
+					ctrl: run.controlPlanePort,
+				}
+			: { ws: 9001, tcp: 1883, ctrl: 9080 },
+	};
+	const report = await runDoctor(ctx);
+	if (values.json === true) {
+		io.out(JSON.stringify(report));
+	} else {
+		for (const c of report.checks) {
+			io.out(`${DOCTOR_GLYPH[c.status]} ${c.name} — ${c.detail}`);
+			if (c.hint !== undefined) io.out(`    ↳ ${c.hint}`);
+		}
+		const fails = report.checks.filter((c) => c.status === "fail").length;
+		io.out(fails === 0 ? "doctor: ok" : `doctor: ${fails} problem(s)`);
+	}
+	return report.ok ? 0 : 1;
+}
+
 // --- dispatch ---
 
 const USAGE = `usage: offbook <command>
 
   init [dir]                 scaffold services.yaml, environments.yaml, scenarios/, handlers/
+  doctor [dir] [--offline] [--json]  preflight: runtime, deps, config, spec reachability, ports
   demo [--serve]             bundled demo spec — one-shot catch, or --serve to keep serving
   up [--ci] [--strict] [--watch] [--seed n] [--ws-port n] [--tcp-port n] [--ctrl-port n] [--env e]
   down                       stop the running server (idempotent)
@@ -1278,6 +1325,7 @@ const VERBS: Record<string, (rest: string[], io: Io) => Promise<number>> = {
 	status: cmdStatus,
 	logs: cmdLogs,
 	init: cmdInit,
+	doctor: cmdDoctor,
 };
 
 export async function run(argv: string[], io: Io = consoleIo): Promise<number> {
