@@ -614,7 +614,9 @@ Add under `operations:`:
       $ref: '#/channels/window'
 ```
 
-- [ ] **Step 1b: Re-measure the spike expectation for composition.yaml**
+> **AMENDED DURING EXECUTION (2026-07-30).** Steps 1 and 1b below were **not** taken. Implementation measured that **json-schema-faker 0.6.2 cannot draw a valid draft-07 tuple**: it emits objects with numeric keys (for example `[{"0":"aG88rL","1":441.48}, ...]`) and fails the Ajv recheck **10/10 seeds**, unchanged by `additionalItems` or `minItems`. A tuple channel in `composition.yaml` therefore fails the R-027 faker-floor spike and would flip **D-008**'s measured verdict, which is a separate question from the dialect. The tuple regression case was implemented as an **inline test spec** in `src/registry/index.test.ts` instead, `composition.yaml` and the spike expectation were left untouched, and the finding is recorded in D-018 with the keyed-fallback question left open. Steps 2 onward were followed as written.
+
+- [ ] ~~**Step 1b: Re-measure the spike expectation for composition.yaml**~~ (superseded, see above)
 
 Adding the `window` channel gives `composition.yaml` a third channel, so the R-027 tripwire's pinned draw count changes (see the Global Constraints bullet on this coupling). In `test/spikes/jsf-fidelity.test.ts`, update the `composition.yaml` entry from `{ draws: 20, failures: 0 }` to the freshly measured value, which should be `{ draws: 30, failures: 0 }` for three channels at ten seeds each, and add a comment noting the re-measurement and citing D-018.
 
