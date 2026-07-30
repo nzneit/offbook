@@ -79,7 +79,9 @@ function parseFlags(
 			strict: true,
 		}) as unknown as { values: FlagValues; positionals: string[] };
 	} catch (cause) {
-		throw new CliError((cause as Error).message);
+		throw new CliError(
+			`${(cause as Error).message} — run \`offbook\` with no arguments for usage`,
+		);
 	}
 }
 
@@ -705,7 +707,10 @@ async function cmdPublish(rest: string[], io: Io): Promise<number> {
 		wait: { type: "boolean" },
 	});
 	const topic = positionals[0];
-	if (!topic) throw new CliError("publish: missing <topic>");
+	if (!topic)
+		throw new CliError(
+			"publish: missing <topic> — `offbook topics` lists what the client may send",
+		);
 	const body: Record<string, unknown> = {
 		topic,
 		...(await payloadBody(values, { bareIsExample: true })), // bare = --example (EQ1)
@@ -754,7 +759,10 @@ async function cmdScenario(rest: string[], io: Io): Promise<number> {
 		wait: { type: "boolean" },
 	});
 	const name = positionals[0];
-	if (!name) throw new CliError("scenario: missing <name>");
+	if (!name)
+		throw new CliError(
+			"scenario: missing <name> — `offbook scenarios` lists what's loaded",
+		);
 	const params: Record<string, string> = {};
 	for (const p of (values.param as string[] | undefined) ?? []) {
 		const i = p.indexOf("=");
@@ -841,7 +849,7 @@ function preflightPort(port: number, flag: string): void {
 		listener.stop(true);
 	} catch {
 		throw new CliError(
-			`port ${port} in use — another broker/server? set ${flag} (P7)`,
+			`port ${port} in use — another broker/server? set ${flag} (P7); \`offbook doctor\` checks all three ports`,
 		);
 	}
 }
@@ -920,6 +928,9 @@ async function launchDetached(
 			.split("\n")
 			.slice(-15);
 		for (const line of tail) io.err(`  ${line}`);
+		io.err(
+			"(try `offbook doctor` — it checks config, spec reachability, and ports)",
+		);
 		return null;
 	}
 	return pid;

@@ -4,11 +4,13 @@
 // composed server; suite B runs the real `up → status → … → down` process
 // cycle against a local-git project fixture.
 // [itest->R-019]
+// [itest->R-036]
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import {
 	appendFileSync,
 	existsSync,
 	mkdirSync,
+	mkdtempSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -1150,3 +1152,77 @@ test("EI1/EI2: init && <set services> && up reaches a running server; the fresh 
 		await rm(projectDir, { recursive: true, force: true });
 	}
 }, 90_000);
+
+// --- R-036 first-run error audit: every error names a next step ---
+// ports for these pins: 19140/19141, 12996/12997, 19896/19897
+
+test("unknown flag points at usage", async () => {
+	const err: string[] = [];
+	await run(["topics", "--bogus"], { out: () => {}, err: (l) => err.push(l) });
+	expect(err.join("\n")).toContain("for usage");
+});
+
+test("bare publish/scenario point at their listing verbs", async () => {
+	const pubErr: string[] = [];
+	await run(["publish"], { out: () => {}, err: (l) => pubErr.push(l) });
+	expect(pubErr.join("\n")).toContain("offbook topics");
+	const scnErr: string[] = [];
+	await run(["scenario"], { out: () => {}, err: (l) => scnErr.push(l) });
+	expect(scnErr.join("\n")).toContain("offbook scenarios");
+});
+
+test("up: busy port and failed boot both point at doctor", async () => {
+	const tmp = mkdtempSync(join(tmpdir(), "offbook-audit-"));
+	try {
+		// busy ws port → preflight fails before any spawn
+		const listener = Bun.listen({
+			hostname: "127.0.0.1",
+			port: 19140,
+			socket: { data() {} },
+		});
+		try {
+			const busyErr: string[] = [];
+			expect(
+				await run(
+					[
+						"up",
+						"--run-dir",
+						join(tmp, "a"),
+						"--ws-port",
+						"19140",
+						"--tcp-port",
+						"12996",
+						"--ctrl-port",
+						"19896",
+					],
+					{ out: () => {}, err: (l) => busyErr.push(l) },
+				),
+			).not.toBe(0);
+			expect(busyErr.join("\n")).toContain("offbook doctor");
+		} finally {
+			listener.stop(true);
+		}
+
+		// no services.yaml in cwd → the spawned server dies at boot → doctor hint
+		const bootErr: string[] = [];
+		expect(
+			await run(
+				[
+					"up",
+					"--run-dir",
+					join(tmp, "b"),
+					"--ws-port",
+					"19141",
+					"--tcp-port",
+					"12997",
+					"--ctrl-port",
+					"19897",
+				],
+				{ out: () => {}, err: (l) => bootErr.push(l) },
+			),
+		).not.toBe(0);
+		expect(bootErr.join("\n")).toContain("offbook doctor");
+	} finally {
+		rmSync(tmp, { recursive: true, force: true });
+	}
+}, 60_000); // the failed-boot case rides out `up`'s full readiness deadline
