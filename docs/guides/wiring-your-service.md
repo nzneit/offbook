@@ -43,7 +43,8 @@ offbook topics
 `up` fetches each spec at its branch tip, records exactly what it fetched
 (commit SHA + content hash) to `specs.lock`, compiles the merged contract,
 and boots. `offbook topics` shows what got ingested — check the directions
-("you send" / "you receive") match your mental model before going further.
+("client sends" / "client receives") match your mental model before going
+further.
 
 A fetch failure aborts `up` (no half-booted mock). The error names the
 service; `offbook doctor` checks all repos' reachability in one pass.
