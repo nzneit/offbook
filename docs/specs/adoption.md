@@ -46,7 +46,7 @@ Task-oriented, adopter-facing — distinct from builder-facing `docs/specs/`. Fo
 
 - **`getting-started.md`** — the quickstart expanded: what the demo showed, then `init`, then the first real spec; ends by handing off to the wiring guide.
 - **`wiring-your-service.md`** — `services.yaml` (gitHost, repo slug/URL/path, specPath, branch), `environments.yaml`, what `specs.lock` records, `offbook specs update`, reading `offbook topics` to confirm what got ingested, first `offbook up`.
-- **`scenario-cookbook.md`** — L2 recipes by task ("ack a command", "chain emissions", "emit on a timer", "parameterized scenario"), each a paste-able snippet written against the bundled demo thermostat spec's topics so every recipe is loadable (§4 gate). Derived from `l2-scenarios.md`; never contradicts it.
+- **`scenario-cookbook.md`** — L2 recipes by task ("ack a command", "chain emissions", "a scripted moment on demand", "deterministic changing values" — L2 has no timer firing, only reactive and on-demand), each a paste-able snippet written against the bundled demo thermostat spec's topics so every recipe is loadable (§4 gate). Derived from `l2-scenarios.md`; never contradicts it.
 - **`daily-loop.md`** — embedding offbook in the app repo: a package script starting offbook alongside the dev server, reading `validation`/`status` during development, `offbook check` in CI, watch modes.
 
 **Doc-map rule (added to `AGENTS.md`):** guides are *derived* docs. `contracts.md` and `l2-scenarios.md` stay canonical; a conflict means the guide is wrong — fix the guide.
