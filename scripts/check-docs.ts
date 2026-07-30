@@ -2,7 +2,7 @@
 // check-docs.ts — validate the Offbook documentation-system invariants.
 // Zero dependencies: node:fs + hand-parsing, matching the retired docs-index.ts.
 import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
 
@@ -207,6 +207,25 @@ export function checkTagSweep(files: { path: string; content: string }[], reqs: 
   return errs;
 }
 
+// R-034 — adopter docs must not rot: every relative markdown link in
+// README.md + docs/guides/ resolves to a real file (fragments ignored, v1).
+export function checkLinks(
+  files: { path: string; text: string }[],
+  exists: (rel: string) => boolean,
+): string[] {
+  const errs: string[] = [];
+  for (const f of files)
+    for (const m of f.text.matchAll(/\]\(([^)\s]+)\)/g)) {
+      const target = m[1];
+      if (/^[a-z][a-z+.-]*:/.test(target) || target.startsWith("#")) continue;
+      const rel = target.split("#")[0];
+      if (rel === "") continue;
+      const resolved = join(dirname(f.path), rel);
+      if (!exists(resolved)) errs.push(`${f.path}: broken link → ${target}`);
+    }
+  return errs;
+}
+
 function main(): void {
   const reqs = parseEntries(read("REQUIREMENTS.md") ?? "", 4).filter((e) => e.meta.UID);
   const decs = parseEntries(read("DECISIONS.md") ?? "", 3).filter((e) => /^D-\d+/.test(e.title));
@@ -216,6 +235,14 @@ function main(): void {
     ? readdirSync(intakeDir).filter((n) => n.endsWith(".md")).map((n) => ({ name: n, content: readFileSync(join(intakeDir, n), "utf8") }))
     : [];
 
+  const adopterDocs: { path: string; text: string }[] = [];
+  const readme = read("README.md");
+  if (readme !== null) adopterDocs.push({ path: "README.md", text: readme });
+  const guidesDir = join(ROOT, "docs/guides");
+  if (existsSync(guidesDir))
+    for (const name of readdirSync(guidesDir).filter((n) => n.endsWith(".md")))
+      adopterDocs.push({ path: `docs/guides/${name}`, text: readFileSync(join(guidesDir, name), "utf8") });
+
   const errors = [
     ...checkIds(reqs, "R", (e) => e.meta.UID ?? ""),
     ...checkIds(decs, "D", (e) => e.title.match(/^(D-\d+)/)?.[1] ?? ""),
@@ -224,6 +251,7 @@ function main(): void {
     ...checkIntake(intakeFiles),
     ...checkTestTraces(reqs, read),
     ...checkTagSweep(listTestFiles(), reqs),
+    ...checkLinks(adopterDocs, (rel) => existsSync(join(ROOT, rel))),
   ];
 
   if (errors.length) {

@@ -1,3 +1,4 @@
+// [utest->R-034]
 import { test, expect } from "bun:test";
 import { parseEntries, checkIds, parseCovers, resolveAnchor, checkCovers, slugify } from "./check-docs.ts";
 
@@ -244,4 +245,33 @@ test("checkTagSweep accepts a tag on a built requirement (early coverage)", () =
 test("checkTagSweep surfaces malformed tags with file:line", () => {
   const files = [{ path: "src/a.test.ts", content: `// ${mktag("utest", "R-14")}` }];
   expect(checkTagSweep(files, []).some((m) => m.includes("malformed") && m.includes("src/a.test.ts:1"))).toBe(true);
+});
+
+import { checkLinks } from "./check-docs.ts";
+
+test("checkLinks flags a relative link to a missing file, with the source named", () => {
+  const errs = checkLinks(
+    [{ path: "README.md", text: "see [guide](docs/guides/nope.md) for more" }],
+    () => false,
+  );
+  expect(errs.length).toBe(1);
+  expect(errs[0]).toContain("README.md");
+  expect(errs[0]).toContain("docs/guides/nope.md");
+});
+
+test("checkLinks resolves relative to the linking file and strips fragments", () => {
+  const seen: string[] = [];
+  checkLinks(
+    [{ path: "docs/guides/a.md", text: "[b](b.md#section) and [up](../specs/adoption.md)" }],
+    (rel) => { seen.push(rel); return true; },
+  );
+  expect(seen).toEqual(["docs/guides/b.md", "docs/specs/adoption.md"]);
+});
+
+test("checkLinks ignores absolute URLs, mailto, and in-page anchors", () => {
+  const errs = checkLinks(
+    [{ path: "README.md", text: "[a](https://bun.sh) [b](mailto:x@y.z) [c](#quickstart)" }],
+    () => false,
+  );
+  expect(errs).toEqual([]);
 });
