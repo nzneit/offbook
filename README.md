@@ -83,3 +83,12 @@ Full walkthrough: [wiring your service](docs/guides/wiring-your-service.md).
 - [The daily loop](docs/guides/daily-loop.md) — offbook alongside your dev server and in CI
 
 Contributing, or how this repo itself is organized: [AGENTS.md](AGENTS.md).
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+## Maintainers
+
+See [MAINTAINERS.md](MAINTAINERS.md). Origin and authorship:
+[PROVENANCE.md](PROVENANCE.md).

@@ -1,0 +1,14 @@
+# Ownership routing. Listed owners are auto-requested on PRs
+# touching these paths.
+#
+# GitHub applies the last matching rule, so the specific paths below
+# override the wildcard. They name the same owner today; they are
+# listed separately so that ownership of the architectural core
+# survives any later narrowing of the wildcard.
+
+*                       @nzneit
+
+/src/                   @nzneit
+/docs/specs/            @nzneit
+/REQUIREMENTS.md        @nzneit
+/DECISIONS.md           @nzneit
