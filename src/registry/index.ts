@@ -171,7 +171,33 @@ export async function buildRegistry(opts: {
 				source: address,
 			});
 		}
-		const validateFn = ajv.compile(schema);
+		// A schema Ajv refuses must never validate GREEN: that is false
+		// confidence, the failure mode this tool exists to prevent. The channel
+		// still enters the catalog because discovery is a v1 floor that survives
+		// weak specs, but every payload on it reports one explicit violation
+		// (D-018).
+		let validate: (payload: unknown) => SchemaError[];
+		try {
+			const validateFn = ajv.compile(schema);
+			validate = (payload: unknown): SchemaError[] =>
+				validateFn(payload) ? [] : ((validateFn.errors ?? []) as SchemaError[]);
+		} catch (cause) {
+			const reason = (cause as Error).message;
+			diagnostics.push({
+				kind: "spec-load",
+				severity: "error",
+				detail: `schema-compile-failed: '${address}' payload schema did not compile, so nothing on this channel is validated: ${reason}`,
+				source: address,
+			});
+			const compileError: SchemaError = {
+				instancePath: "",
+				schemaPath: "#",
+				keyword: "offbook:schema-compile-failed",
+				params: {},
+				message: `payload schema did not compile: ${reason}`,
+			};
+			validate = () => [compileError];
+		}
 		const mqtt = op.bindings().get("mqtt")?.value<{
 			qos?: 0 | 1 | 2;
 			retain?: boolean;
@@ -192,8 +218,7 @@ export async function buildRegistry(opts: {
 			direction: directionOf(op.action()),
 			service: opts.service,
 			schema,
-			validate: (payload: unknown): SchemaError[] =>
-				validateFn(payload) ? [] : ((validateFn.errors ?? []) as SchemaError[]),
+			validate,
 			qos,
 			retain,
 			title: msg?.title() ?? undefined,

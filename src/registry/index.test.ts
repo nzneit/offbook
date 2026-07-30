@@ -429,3 +429,41 @@ test("$defs and definitions are NOT reported: both work under draft-07", async (
 		reg.diagnostics().filter((d) => d.detail.startsWith("dialect-mismatch:")),
 	).toEqual([]);
 });
+
+// [utest->R-038]
+test("a schema that will not compile yields violations, never a crash and never green", async () => {
+	const spec = `asyncapi: 3.0.0
+info: { title: T, version: 1.0.0 }
+channels:
+  c:
+    address: t/broken
+    messages:
+      M:
+        payload:
+          type: object
+          properties:
+            bad:
+              type: string
+              pattern: '['
+operations:
+  o: { action: send, channel: { $ref: '#/channels/c' } }
+`;
+	// does not throw: discovery is a v1 floor that must survive a weak spec
+	const reg = await buildRegistry({
+		specText: spec,
+		service: "s",
+		config: DEFAULT_CONFIG,
+	});
+	const broken = reg.match("t/broken")?.channel;
+	expect(broken).toBeDefined();
+	// and it must NOT validate green, which would be false confidence
+	const errs = broken?.validate({ anything: true }) ?? [];
+	expect(errs.length).toBe(1);
+	expect(errs[0].keyword).toBe("offbook:schema-compile-failed");
+	const found = reg
+		.diagnostics()
+		.filter((d) => d.detail.startsWith("schema-compile-failed:"));
+	expect(found.length).toBe(1);
+	expect(found[0].severity).toBe("error");
+	expect(found[0].source).toBe("t/broken");
+});
