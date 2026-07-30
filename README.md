@@ -1,5 +1,7 @@
 # Offbook
 
+[![ci](https://github.com/nzneit/offbook/actions/workflows/ci.yml/badge.svg)](https://github.com/nzneit/offbook/actions/workflows/ci.yml)
+
 Mock your MQTT-over-WebSockets backend from its AsyncAPI specs — so contract
 breaks and async bugs surface at dev time, not deploy time.
 
