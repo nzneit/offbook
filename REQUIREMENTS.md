@@ -155,7 +155,7 @@ The `reset → publish → GET /pending?wait → GET /validation?sinceSeq=` CI f
 **STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#tier-4
 **IMPL**: src/cli/, src/registry/
-**TEST**: test/cli-dispatch.test.ts
+**TEST**: test/cli-dispatch.test.ts, test/boot-project.test.ts
 The Bun CLI is a thin client over the HTTP API: every verb (`init/demo/up/down/topics/publish/state/scenarios/scenario/reset/mode/validation/check/diagnostics/logs/status/specs update`) hits its endpoint (or does its local file/process work) and renders the response, resolving the runfile where needed. (`up` spawns `src/cli/serve.ts` detached over the `src/cli/boot.ts` project boot — services.yaml → ingestion → per-service registries merged by `mergeRegistries` → compose — which also wires the real `POST /specs/refresh` re-resolve pipeline deferred from R-017: content-hash short-circuit + lockfile rewrite. `check` reads `--since <seq>` or the full retained log; the server-retained reset baseline is R-023. Rendering depth, boot-profile edge cases, watch modes, and the init contract are R-020–R-025.)
 
 #### cli/ publish + scenario input ergonomics
