@@ -59,6 +59,42 @@ function extractPayloadSchema(payloadJson: unknown): object {
 // `channel.schema`, which GET /topics hands out, is self-describing.
 const DRAFT_07 = "http://json-schema.org/draft-07/schema#";
 
+// Keywords JSON Schema introduced after draft-07. offbook validates under
+// draft-07, where these are unknown and therefore SILENTLY IGNORED, which is
+// the worst failure mode for a contract checker, so their presence is surfaced
+// (D-018). `$defs` and `definitions` are deliberately absent: both resolve
+// correctly under draft-07, and fixtures/asyncapi/shared/common.yaml
+// legitimately uses `$defs`.
+const POST_DRAFT07_KEYWORDS = new Set([
+	"prefixItems",
+	"unevaluatedProperties",
+	"unevaluatedItems",
+	"dependentRequired",
+	"dependentSchemas",
+	"minContains",
+	"maxContains",
+	"$dynamicRef",
+	"$dynamicAnchor",
+	"$recursiveRef",
+	"$recursiveAnchor",
+]);
+
+function postDraft07Keywords(
+	node: unknown,
+	found: Set<string> = new Set(),
+): Set<string> {
+	if (Array.isArray(node)) {
+		for (const item of node) postDraft07Keywords(item, found);
+		return found;
+	}
+	if (node === null || typeof node !== "object") return found;
+	for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+		if (POST_DRAFT07_KEYWORDS.has(key)) found.add(key);
+		postDraft07Keywords(value, found);
+	}
+	return found;
+}
+
 export async function buildRegistry(opts: {
 	specText: string;
 	service: string;
@@ -125,6 +161,16 @@ export async function buildRegistry(opts: {
 			$schema: DRAFT_07,
 			...extractPayloadSchema(msg?.payload()?.json()),
 		};
+		const modernKeywords = postDraft07Keywords(schema);
+		if (modernKeywords.size > 0) {
+			const names = [...modernKeywords].sort().join(", ");
+			diagnostics.push({
+				kind: "spec-load",
+				severity: "warning",
+				detail: `dialect-mismatch: '${address}' uses post-draft-07 keyword(s) ${names}; offbook validates under draft-07 (the dialect both AsyncAPI majors declare), so these are NOT enforced`,
+				source: address,
+			});
+		}
 		const validateFn = ajv.compile(schema);
 		const mqtt = op.bindings().get("mqtt")?.value<{
 			qos?: 0 | 1 | 2;

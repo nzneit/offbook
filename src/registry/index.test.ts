@@ -383,3 +383,49 @@ test("a clean spec produces no registry diagnostics", async () => {
 	const reg = await registryFor("thermostat.yaml");
 	expect(reg.diagnostics()).toEqual([]);
 });
+
+// [utest->R-038]
+test("post-draft-07 keywords are surfaced, since draft-07 ignores them silently", async () => {
+	const spec = `asyncapi: 3.0.0
+info: { title: T, version: 1.0.0 }
+channels:
+  c:
+    address: t/modern
+    messages:
+      M:
+        payload:
+          type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              prefixItems:
+                - type: string
+          unevaluatedProperties: false
+operations:
+  o: { action: send, channel: { $ref: '#/channels/c' } }
+`;
+	const reg = await buildRegistry({
+		specText: spec,
+		service: "s",
+		config: DEFAULT_CONFIG,
+	});
+	const found = reg
+		.diagnostics()
+		.filter((d) => d.detail.startsWith("dialect-mismatch:"));
+	expect(found.length).toBe(1);
+	expect(found[0].severity).toBe("warning");
+	expect(found[0].source).toBe("t/modern");
+	// names every offending keyword so the author can fix them all at once
+	expect(found[0].detail).toContain("prefixItems");
+	expect(found[0].detail).toContain("unevaluatedProperties");
+});
+
+// [utest->R-038]
+test("$defs and definitions are NOT reported: both work under draft-07", async () => {
+	// the repo's own shared/common.yaml uses $defs, so flagging it would cry wolf
+	const reg = await registryFor("external-ref.yaml");
+	expect(
+		reg.diagnostics().filter((d) => d.detail.startsWith("dialect-mismatch:")),
+	).toEqual([]);
+});
