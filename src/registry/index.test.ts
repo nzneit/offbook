@@ -347,3 +347,39 @@ test("channel schemas declare the draft-07 dialect they are validated under", as
 	const schema = reg.channels()[0].schema as { $schema?: string };
 	expect(schema.$schema).toBe("http://json-schema.org/draft-07/schema#");
 });
+
+// [utest->R-039]
+test("an mqtt CHANNEL binding is reported as ignored, not silently dropped", async () => {
+	const spec = `asyncapi: 3.0.0
+info: { title: T, version: 1.0.0 }
+channels:
+  c:
+    address: t/chanbound
+    bindings: { mqtt: { qos: 2, retain: true } }
+    messages: { M: { payload: { type: object, properties: { a: { type: string } } } } }
+operations:
+  o: { action: send, channel: { $ref: '#/channels/c' } }
+`;
+	const reg = await buildRegistry({
+		specText: spec,
+		service: "s",
+		config: DEFAULT_CONFIG,
+	});
+	// MQTT defines qos/retain on the OPERATION only: the Channel Binding Object
+	// "MUST NOT contain any properties" at every binding version, so the values
+	// are ignored and the channel keeps the global defaults.
+	expect(reg.match("t/chanbound")?.channel.qos).toBe(1);
+	const found = reg
+		.diagnostics()
+		.filter((d) => d.detail.startsWith("binding-on-channel:"));
+	expect(found.length).toBe(1);
+	expect(found[0].kind).toBe("spec-load");
+	expect(found[0].severity).toBe("warning");
+	expect(found[0].source).toBe("t/chanbound");
+});
+
+// [utest->R-039]
+test("a clean spec produces no registry diagnostics", async () => {
+	const reg = await registryFor("thermostat.yaml");
+	expect(reg.diagnostics()).toEqual([]);
+});

@@ -100,6 +100,7 @@ function makeWiringRegistry(): SpecRegistry {
 	const command = makeChannel("command/{deviceId}/set", "fromClient", false);
 	const all = [status, state, command];
 	return {
+		diagnostics: () => [],
 		match(topic: string) {
 			if (topic === "status/all")
 				return { channel: status, params: {} as Record<string, string> };

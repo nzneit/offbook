@@ -38,6 +38,13 @@ export interface SpecRegistry {
 	): { channel: Channel; params: Record<string, string> } | undefined;
 	matchesFilter(filter: string, topic: string): boolean;
 	channels(): readonly Channel[];
+	// Registry-time spec-QUALITY findings (D-018): problems discoverable only
+	// while building the catalog, so they cannot be recomputed from Channel
+	// later (binding placement, dialect mismatch, a schema that would not
+	// compile). Collected once at build; the composition root merges them into
+	// GET /v1/diagnostics beside the computed ones. Uses the existing closed
+	// `spec-load` kind with a machine-greppable `detail` tag prefix.
+	diagnostics(): readonly Diagnostic[];
 }
 
 export interface Config {

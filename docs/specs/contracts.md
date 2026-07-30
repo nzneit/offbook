@@ -46,6 +46,7 @@ interface SpecRegistry {  // the ONE concrete-topic → Channel matcher; lives i
   match(topic: string): { channel: Channel; params: Record<string, string> } | undefined;
   matchesFilter(filter: string, topic: string): boolean;  // MQTT +/# SUBSCRIBE-side filter test (F6); shared by engine (wildcard replay, §2) + scenarios (when.topic, §3a)
   channels(): readonly Channel[];
+  diagnostics(): readonly Diagnostic[];  // registry-time spec-QUALITY findings (D-018): discoverable only while BUILDING the catalog, so they cannot be recomputed from a Channel later (binding placement, dialect mismatch, a schema that would not compile). Collected once at build; the composition root merges them into GET /v1/diagnostics (§5) beside the computed ones. Reuses the closed `spec-load` kind with a machine-greppable `detail` tag prefix; `mergeRegistries` concatenates its inputs'
 }
 ```
 
@@ -299,6 +300,12 @@ interface Diagnostic { kind: 'scenario-load' | 'overlap' | 'spec-load' | 'uninst
 //   ADDRESS goes in `source?`; teaching `detail` ("validates green but its schema constrains nothing — passing here is
 //   unverified"). Scoped tight to the unambiguous vacuous shapes — NOT a graded quality score (deferred). FATAL load
 //   failures (unreachable/unparseable spec) do NOT appear here — they abort `up` in the foreground (design §7 Mode 1).
+//   'spec-load' ALSO carries the REGISTRY-TIME findings of `SpecRegistry.diagnostics()` (§1, D-018): findings only the
+//   catalog build can see, so they cannot be recomputed from a Channel. The kind union stays closed (four values, and
+//   DiagnosticSummary.byKind keeps exactly those four keys, zero-filled); each finding is instead machine-identified by
+//   a stable tag prefix on `detail` (the tag, then `: `, then the sentence): 'binding-on-channel',
+//   'binding-invalid-value', 'binding-unknown-key', 'mqtt5-field-ignored', 'dialect-mismatch', 'schema-compile-failed'.
+//   Channel ADDRESS in `source?` as above, so filtering by tag and by address both work.
 
 interface ValidationSummary {    // the CI-facing payload of GET /v1/validation
   errors: number;                // count of severity === 'error' violations (within the retained window)

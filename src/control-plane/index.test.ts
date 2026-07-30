@@ -113,6 +113,7 @@ function makeChannel(
 
 function fakeRegistry(channels: Channel[]): SpecRegistry {
 	return {
+		diagnostics: () => [],
 		channels: () => channels,
 		match: (topic) => {
 			const c = channels.find((ch) => ch.topic === topic);

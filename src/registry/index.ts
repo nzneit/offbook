@@ -5,6 +5,7 @@ import { exec, matches } from "mqtt-pattern";
 import type {
 	Channel,
 	Config,
+	Diagnostic,
 	SchemaError,
 	ServiceConfig,
 	SpecRegistry,
@@ -97,9 +98,28 @@ export async function buildRegistry(opts: {
 	const ajv = addFormats(new Ajv({ allErrors: true, strict: false }));
 
 	const channels: Channel[] = [];
+	const diagnostics: Diagnostic[] = [];
 	for (const op of document.operations().all()) {
 		const ch = op.channels().all()[0];
 		const address = ch.address() ?? "";
+		// MQTT defines qos/retain on the OPERATION binding only: the Channel
+		// Binding Object "MUST NOT contain any properties. Its name is reserved
+		// for future use." at every binding version. A channel-level mqtt binding
+		// nonetheless parses clean, so say it is ignored rather than defaulting
+		// in silence (D-018).
+		const channelMqtt = ch
+			.bindings()
+			.get("mqtt")
+			?.value<Record<string, unknown>>();
+		if (channelMqtt && Object.keys(channelMqtt).length > 0) {
+			const keys = Object.keys(channelMqtt).join(", ");
+			diagnostics.push({
+				kind: "spec-load",
+				severity: "warning",
+				detail: `binding-on-channel: '${address}' declares an mqtt CHANNEL binding (${keys}); MQTT defines qos/retain on the operation only, so these are ignored`,
+				source: address,
+			});
+		}
 		const msg = op.messages().all()[0];
 		const schema = {
 			$schema: DRAFT_07,
@@ -146,6 +166,7 @@ export async function buildRegistry(opts: {
 
 	return {
 		channels: () => channels,
+		diagnostics: () => diagnostics,
 		matchesFilter: (filter, topic) => matches(filter, topic),
 		match: (topic) => {
 			for (const { c } of ordered) {
@@ -172,6 +193,7 @@ export function mergeRegistries(registries: SpecRegistry[]): SpecRegistry {
 		});
 	return {
 		channels: () => channels,
+		diagnostics: () => registries.flatMap((r) => [...r.diagnostics()]),
 		matchesFilter: (filter, topic) => matches(filter, topic),
 		match: (topic) => {
 			for (const { c } of ordered) {

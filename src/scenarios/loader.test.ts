@@ -57,6 +57,7 @@ const channels = [
 ];
 
 const registry: SpecRegistry = {
+	diagnostics: () => [],
 	match(topic) {
 		for (const channel of channels) {
 			const params = matchTopic(channel.topic, topic);
