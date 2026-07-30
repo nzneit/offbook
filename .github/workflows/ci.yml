@@ -1,0 +1,32 @@
+name: ci
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}  # never cancel main runs
+permissions:
+  contents: read
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"  # pinned: coverage-gate semantics verified on this version (see bunfig.toml)
+      - run: bun install --frozen-lockfile
+      - run: bun scripts/check-docs.ts   # doc-system gate
+      - run: bun run lint                # Biome, incl. transport isolation
+      - run: bun run typecheck           # tsc --noEmit
+      - run: bun run demo-app:build
+      - run: bun test                    # authoritative full run; carries the coverage floors
+      - if: github.event_name == 'push'
+        uses: actions/upload-artifact@v7
+        with: { name: demo-app-dist, path: demo-app/dist/, retention-days: 14 }
+      - if: github.event_name == 'push'
+        uses: actions/upload-artifact@v7
+        with: { name: coverage, path: coverage/, retention-days: 14 }

@@ -17,6 +17,7 @@
 	"scripts": {
 		"test": "bun test",
 		"lint": "biome check .",
+		"typecheck": "tsc --noEmit",
 		"mutate": "stryker run",
 		"demo-app:build": "bun build demo-app/src/main.tsx --outdir demo-app/dist --target browser",
 		"demo-app": "bun demo-app/serve.ts"
