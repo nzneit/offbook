@@ -467,3 +467,38 @@ operations:
 	expect(found[0].severity).toBe("error");
 	expect(found[0].source).toBe("t/broken");
 });
+
+// [utest->R-038]
+test("a v2 message.oneOf union validates EITHER variant, not just the first", async () => {
+	const spec = `asyncapi: 2.6.0
+info: { title: T, version: 1.0.0 }
+channels:
+  t/union:
+    subscribe:
+      operationId: s
+      message:
+        oneOf:
+          - payload: { type: object, required: [a], additionalProperties: false, properties: { a: { type: string } } }
+          - payload: { type: object, required: [b], additionalProperties: false, properties: { b: { type: number } } }
+`;
+	const reg = await buildRegistry({
+		specText: spec,
+		service: "s",
+		config: DEFAULT_CONFIG,
+	});
+	const union = reg.match("t/union")?.channel;
+	expect(union?.validate({ a: "x" })).toEqual([]);
+	// before the anyOf, variant two was reported as a violation because only
+	// messages()[0] was read
+	expect(union?.validate({ b: 2 })).toEqual([]);
+	// and something matching NEITHER variant is still caught
+	expect(union?.validate({ c: true }).length).toBeGreaterThan(0);
+});
+
+// [utest->R-038]
+test("a single-message operation keeps its schema unwrapped by anyOf", async () => {
+	const reg = await registryFor("thermostat.yaml");
+	const schema = reg.channels()[0].schema as Record<string, unknown>;
+	expect(schema.anyOf).toBeUndefined();
+	expect(schema.type).toBe("object");
+});

@@ -156,11 +156,20 @@ export async function buildRegistry(opts: {
 				source: address,
 			});
 		}
-		const msg = op.messages().all()[0];
-		const schema = {
-			$schema: DRAFT_07,
-			...extractPayloadSchema(msg?.payload()?.json()),
-		};
+		// An MQTT topic can legitimately carry one of several declared message
+		// types (a v2 `message.oneOf` union, or a v3 operation listing several
+		// messages). Reading only messages()[0] reported every other variant as a
+		// violation. `anyOf` keeps Channel.schema singular, so the faker and
+		// /topics are unaffected (D-018).
+		const messages = op.messages().all();
+		const msg = messages[0];
+		const payloadSchemas = messages.map((m) =>
+			extractPayloadSchema(m.payload()?.json()),
+		);
+		const schema =
+			payloadSchemas.length > 1
+				? { $schema: DRAFT_07, anyOf: payloadSchemas }
+				: { $schema: DRAFT_07, ...(payloadSchemas[0] ?? {}) };
 		const modernKeywords = postDraft07Keywords(schema);
 		if (modernKeywords.size > 0) {
 			const names = [...modernKeywords].sort().join(", ");
