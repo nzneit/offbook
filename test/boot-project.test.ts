@@ -7,7 +7,7 @@
 // the no-services.yaml fatal-boot error (design §7 Mode 1), and the F21
 // unchanged-content-hash short-circuit exercised a second time through the
 // resolveSpecs capability behind POST /v1/specs/refresh.
-// [utest->R-019]
+// [itest->R-019]
 import { afterEach, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -18,7 +18,8 @@ import type { Composed } from "#src/compose/index.ts";
 import { loadConfig } from "#src/config/index.ts";
 import { gitSpecProject } from "./project-fixture.ts";
 
-// ports unique to this file: ws 19150 / tcp 12998 / ctrl 19151
+// ports unique to this file (suite-wide collision registry): test 1 — ws
+// 19150 / tcp 12998 / ctrl 19151; test 2 — ws 19152 / tcp 12999 / ctrl 19153
 const servers: Composed[] = [];
 afterEach(async () => {
 	while (servers.length) await servers.pop()?.stop();
@@ -65,12 +66,29 @@ test("bootProject: services.yaml + environments.yaml compose a working registry,
 		expect(before.specs[0]?.service).toBe("thermostat");
 		expect(before.specs[0]?.contentHash).toMatch(/^sha256:/);
 
+		// the SAME Channel instance the pre-refresh registry hands out for this
+		// topic — the fact a genuine cache hit and an unconditional rebuild
+		// disagree on, captured before the refresh below
+		const channelBefore = composed
+			.registry()
+			.channels()
+			.find((c) => c.topic === "state/{deviceId}");
+		expect(channelBefore).toBeDefined();
+
 		// F21: a second resolve (via POST /v1/specs/refresh's injected
-		// resolveSpecs capability, boot.ts lines 108-111) hits the content-hash
-		// cache — same content, same compiled registry — instead of rebuilding.
-		// The repo content hasn't changed, so the resolved hash must be
-		// IDENTICAL to the initial resolve (a format check alone can't tell a
-		// cache hit from an unconditional rebuild; equality can).
+		// resolveSpecs capability) hits the content-hash cache — same content,
+		// same compiled registry — instead of rebuilding. The two checks below
+		// prove two different things. Hash equality is the wire-level check
+		// only: resolveServices computes contentHash upstream of the
+		// compiled-registry cache (src/cli/boot.ts), so equality here proves
+		// content stability across resolves but would still pass even if the
+		// cache were deleted outright. The channel-identity check further down
+		// (toBe, not toEqual) is the actual proof the cache hit skipped
+		// buildRegistry: buildRegistry mints a fresh Channel object on every
+		// compile, and mergeRegistries flatMaps those objects straight through
+		// (src/registry/index.ts), so only a genuine cache hit — never an
+		// unconditional rebuild that happens to reproduce the same hash — can
+		// hand back the SAME Channel instance.
 		const refreshed = await composed.app.request("/v1/specs/refresh", {
 			method: "POST",
 		});
@@ -89,6 +107,33 @@ test("bootProject: services.yaml + environments.yaml compose a working registry,
 				.map((c) => c.topic)
 				.sort(),
 		).toEqual(["command/{deviceId}/set", "state/{deviceId}"]);
+		const channelAfter = composed
+			.registry()
+			.channels()
+			.find((c) => c.topic === "state/{deviceId}");
+		expect(channelAfter).toBe(channelBefore);
+
+		// the `log` callback bootProject was given is exercised for real, not
+		// just plumbed through unused: control-plane's tier-3 divergence warn
+		// (an explicit qos overriding the channel's spec-bound qos) runs
+		// through that same sink, so a deliberately off-spec /publish must
+		// show up in `logs`.
+		const publishResp = await composed.app.request("/v1/publish", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				topic: "state/thermostat-1",
+				payload: {
+					deviceId: "thermostat-1",
+					status: "idle",
+					target: 20,
+					units: "C",
+				},
+				qos: 0,
+			}),
+		});
+		expect(publishResp.status).toBe(202);
+		expect(logs.some((l) => l.includes("off-spec emit"))).toBe(true);
 	} finally {
 		await rm(projectDir, { recursive: true, force: true });
 	}
