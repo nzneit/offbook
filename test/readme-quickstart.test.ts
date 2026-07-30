@@ -95,6 +95,9 @@ test("README quickstart: fences match the canonical sequence, and it executes", 
 		}
 		expect(ready).toBe(true);
 		expect((await fetch(`http://localhost:${APP}/v1/topics`)).ok).toBe(true);
+		// C1: a fresh clone has no demo-app/dist/ (gitignored, no postinstall
+		// build step) — serve.ts must self-build the bundle before serving.
+		expect((await fetch(`http://localhost:${APP}/main.js`)).status).toBe(200);
 
 		// teardown is part of the documented sequence
 		expect(await run(["down", "--run-dir", runDir], io)).toBe(0);
