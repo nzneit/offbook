@@ -29,8 +29,8 @@ offbook publish command/thermostat-1/set --example --wait
 offbook validation -v # violations, oldest first
 ```
 
-`offbook topics` is the contract at a glance: "you send" topics are what your
-app publishes; "you receive" topics are what the mock emits.
+`offbook topics` is the contract at a glance: "client sends" topics are what your
+app publishes; "client receives" topics are what the mock emits.
 
 ## Your own project
 

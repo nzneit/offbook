@@ -53,7 +53,6 @@ service; `offbook doctor` checks all repos' reachability in one pass.
 ```sh
 offbook specs          # provenance: what was fetched, when, which SHA
 offbook specs update   # re-resolve branch tips + hot-swap the running mock
-offbook up --watch     # re-resolve periodically while developing
 ```
 
 ## 5. Make it answer: scenarios
