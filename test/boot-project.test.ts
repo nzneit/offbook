@@ -10,7 +10,7 @@
 // [utest->R-019]
 import { afterEach, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bootProject } from "#src/cli/boot.ts";
@@ -26,67 +26,86 @@ afterEach(async () => {
 
 test("bootProject: services.yaml + environments.yaml compose a working registry, specs.lock written, F21 cache-hit re-resolve", async () => {
 	const projectDir = await gitSpecProject();
-	await writeFile(
-		join(projectDir, "environments.yaml"),
-		"environments:\n  default:\n    thermostat: '1.4.0'\n",
-	);
-	const config = loadConfig({
-		brokerWsPort: 19150,
-		brokerTcpPort: 12998,
-		controlPlanePort: 19151,
-	});
-	const logs: string[] = [];
-	const composed = await bootProject({
-		projectDir,
-		config,
-		log: (l) => logs.push(l),
-	});
-	servers.push(composed);
-	await composed.start();
+	try {
+		await writeFile(
+			join(projectDir, "environments.yaml"),
+			"environments:\n  default:\n    thermostat: '1.4.0'\n",
+		);
+		const config = loadConfig({
+			brokerWsPort: 19150,
+			brokerTcpPort: 12998,
+			controlPlanePort: 19151,
+		});
+		const logs: string[] = [];
+		const composed = await bootProject({
+			projectDir,
+			config,
+			log: (l) => logs.push(l),
+		});
+		servers.push(composed);
+		await composed.start();
 
-	// the merged registry reflects the fixture's bundled thermostat spec —
-	// both channels present (fromClient + toClient), so this is a real
-	// composed stack, not a stub
-	expect(
-		composed
-			.registry()
-			.channels()
-			.map((c) => c.topic)
-			.sort(),
-	).toEqual(["command/{deviceId}/set", "state/{deviceId}"]);
-	expect(existsSync(join(projectDir, "specs.lock"))).toBe(true);
+		// the merged registry reflects the fixture's bundled thermostat spec —
+		// both channels present (fromClient + toClient), so this is a real
+		// composed stack, not a stub
+		expect(
+			composed
+				.registry()
+				.channels()
+				.map((c) => c.topic)
+				.sort(),
+		).toEqual(["command/{deviceId}/set", "state/{deviceId}"]);
+		expect(existsSync(join(projectDir, "specs.lock"))).toBe(true);
 
-	// F21: a second resolve (via POST /v1/specs/refresh's injected
-	// resolveSpecs capability, boot.ts lines 108-111) hits the content-hash
-	// cache — same content, same compiled registry — instead of rebuilding.
-	const refreshed = await composed.app.request("/v1/specs/refresh", {
-		method: "POST",
-	});
-	expect(refreshed.status).toBe(200);
-	const body = (await refreshed.json()) as {
-		specs: { service: string; contentHash: string }[];
-	};
-	expect(body.specs).toHaveLength(1);
-	expect(body.specs[0]?.service).toBe("thermostat");
-	expect(body.specs[0]?.contentHash).toMatch(/^sha256:/);
-	// post-refresh the swapped-in registry is still fully functional
-	expect(
-		composed
-			.registry()
-			.channels()
-			.map((c) => c.topic)
-			.sort(),
-	).toEqual(["command/{deviceId}/set", "state/{deviceId}"]);
+		// baseline contentHash from the INITIAL resolve, read back over the wire
+		const before = (await (await composed.app.request("/v1/specs")).json()) as {
+			specs: { service: string; contentHash: string }[];
+		};
+		expect(before.specs).toHaveLength(1);
+		expect(before.specs[0]?.service).toBe("thermostat");
+		expect(before.specs[0]?.contentHash).toMatch(/^sha256:/);
+
+		// F21: a second resolve (via POST /v1/specs/refresh's injected
+		// resolveSpecs capability, boot.ts lines 108-111) hits the content-hash
+		// cache — same content, same compiled registry — instead of rebuilding.
+		// The repo content hasn't changed, so the resolved hash must be
+		// IDENTICAL to the initial resolve (a format check alone can't tell a
+		// cache hit from an unconditional rebuild; equality can).
+		const refreshed = await composed.app.request("/v1/specs/refresh", {
+			method: "POST",
+		});
+		expect(refreshed.status).toBe(200);
+		const body = (await refreshed.json()) as {
+			specs: { service: string; contentHash: string }[];
+		};
+		expect(body.specs).toHaveLength(1);
+		expect(body.specs[0]?.service).toBe("thermostat");
+		expect(body.specs[0]?.contentHash).toBe(before.specs[0]?.contentHash);
+		// post-refresh the swapped-in registry is still fully functional
+		expect(
+			composed
+				.registry()
+				.channels()
+				.map((c) => c.topic)
+				.sort(),
+		).toEqual(["command/{deviceId}/set", "state/{deviceId}"]);
+	} finally {
+		await rm(projectDir, { recursive: true, force: true });
+	}
 });
 
 test("bootProject: no services.yaml is a fatal boot error naming `offbook init`", async () => {
 	const projectDir = await mkdtemp(join(tmpdir(), "offbook-noservices-"));
-	const config = loadConfig({
-		brokerWsPort: 19152,
-		brokerTcpPort: 12999,
-		controlPlanePort: 19153,
-	});
-	await expect(bootProject({ projectDir, config })).rejects.toThrow(
-		/offbook init/,
-	);
+	try {
+		const config = loadConfig({
+			brokerWsPort: 19152,
+			brokerTcpPort: 12999,
+			controlPlanePort: 19153,
+		});
+		await expect(bootProject({ projectDir, config })).rejects.toThrow(
+			/offbook init/,
+		);
+	} finally {
+		await rm(projectDir, { recursive: true, force: true });
+	}
 });
