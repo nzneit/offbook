@@ -1,6 +1,6 @@
 import { Parser } from "@asyncapi/parser";
+import Ajv from "ajv";
 import addFormats from "ajv-formats";
-import Ajv2020 from "ajv/dist/2020";
 import { exec, matches } from "mqtt-pattern";
 import type {
 	Channel,
@@ -51,6 +51,13 @@ function extractPayloadSchema(payloadJson: unknown): object {
 	return p;
 }
 
+// The dialect BOTH spec majors declare for the Schema Object ("a superset of
+// JSON Schema Draft 07") and the one @asyncapi/parser actually emits. Stamping
+// 2020-12 over it was the root cause of the tuple-compile crash and of
+// `additionalItems` being silently ignored (D-018). Stamped explicitly so
+// `channel.schema`, which GET /topics hands out, is self-describing.
+const DRAFT_07 = "http://json-schema.org/draft-07/schema#";
+
 export async function buildRegistry(opts: {
 	specText: string;
 	service: string;
@@ -87,7 +94,7 @@ export async function buildRegistry(opts: {
 			.map((d) => d.message);
 		throw new Error(`failed to parse spec: ${errs.join("; ")}`);
 	}
-	const ajv = addFormats(new Ajv2020({ allErrors: true, strict: false }));
+	const ajv = addFormats(new Ajv({ allErrors: true, strict: false }));
 
 	const channels: Channel[] = [];
 	for (const op of document.operations().all()) {
@@ -95,7 +102,7 @@ export async function buildRegistry(opts: {
 		const address = ch.address() ?? "";
 		const msg = op.messages().all()[0];
 		const schema = {
-			$schema: "https://json-schema.org/draft/2020-12/schema",
+			$schema: DRAFT_07,
 			...extractPayloadSchema(msg?.payload()?.json()),
 		};
 		const validateFn = ajv.compile(schema);

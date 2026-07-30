@@ -170,7 +170,7 @@ test("composition: validates allOf+oneOf on BOTH the toClient and fromClient pat
 	expect((submissions?.validate(bad) ?? []).length).toBeGreaterThan(0);
 });
 
-test("external-ref: bundles a cross-file $ref (+$id base) into an Ajv-2020 standalone schema", async () => {
+test("external-ref: bundles a cross-file $ref (+$id base) into an Ajv standalone schema", async () => {
 	const ch = (await registryFor("external-ref.yaml")).match(
 		"telemetry/node-1",
 	)?.channel;
@@ -187,13 +187,14 @@ test("external-ref: bundles a cross-file $ref (+$id base) into an Ajv-2020 stand
 	).toBeGreaterThan(0);
 });
 
-test("external-ref: KNOWN LIMITATION (D-005, §12.4) — a $ref-sibling keyword under 2020-12 is dropped", async () => {
+test("external-ref: a $ref-sibling keyword is not enforced, which is draft-07-correct (D-018)", async () => {
 	const ch = (await registryFor("external-ref.yaml")).match(
 		"telemetry/node-1",
 	)?.channel;
-	// nodeId carries `minLength: 3` as a $ref sibling. @asyncapi/parser normalizes to draft-07,
-	// which drops $ref siblings — so a 2-char (pattern-valid) id is WRONGLY accepted. This test
-	// pins that limitation; it flips red when the 2020-12 schema-parser spike lands (revisit D-005).
+	// nodeId carries `minLength: 3` as a $ref sibling. draft-07 ignores $ref siblings, and it is
+	// the dialect both spec majors declare and the parser emits, so a 2-char (pattern-valid) id is
+	// accepted BY DESIGN rather than by accident (D-018 supersedes D-005's deferred spike). Pinned
+	// so that a future dialect change, which would start enforcing it, is loud.
 	expect(
 		ch?.validate({
 			nodeId: "ab",
@@ -295,4 +296,54 @@ test("the multi-format wrapper is unwrapped on the client-publish path too", asy
 	expect(calibrate?.validate({ offset: 0.5 })).toEqual([]);
 	expect(calibrate?.validate({ offset: "half" }).length).toBeGreaterThan(0);
 	expect(calibrate?.validate({}).length).toBeGreaterThan(0);
+});
+
+// [utest->R-038]
+// Inline rather than a fixture on purpose: json-schema-faker 0.6.2 cannot draw a
+// valid draft-07 tuple (it emits objects with numeric keys, e.g.
+// [{"0":"ab","1":1.5}], failing the Ajv recheck 10/10 regardless of
+// additionalItems or minItems). A tuple channel in fixtures/asyncapi/ would
+// therefore fail the R-027 faker-floor spike and flip D-008's measured verdict,
+// which is a separate question from the dialect this test pins. See D-018.
+test("draft-07 tuple `items` validates positionally instead of crashing the build", async () => {
+	const spec = `asyncapi: 3.0.0
+info: { title: T, version: 1.0.0 }
+channels:
+  c:
+    address: window/{sensorId}
+    parameters:
+      sensorId:
+        description: sensor instance id
+    messages:
+      Window:
+        payload:
+          type: array
+          items:
+            - type: string
+            - type: number
+          additionalItems: false
+operations:
+  o: { action: send, channel: { $ref: '#/channels/c' } }
+`;
+	// under the old 2020-12 stamp this THREW out of buildRegistry, uncaught
+	const reg = await buildRegistry({
+		specText: spec,
+		service: "s",
+		config: DEFAULT_CONFIG,
+	});
+	const window = reg.match("window/s1")?.channel;
+	expect(window).toBeDefined();
+	expect(window?.validate(["a", 1])).toEqual([]);
+	// wrong order and wrong type at position 1 are both caught
+	expect(window?.validate([1, "a"]).length).toBeGreaterThan(0);
+	expect(window?.validate(["a", "b"]).length).toBeGreaterThan(0);
+	// additionalItems: false is honored under draft-07 (2020-12 ignores it)
+	expect(window?.validate(["a", 1, "extra"]).length).toBeGreaterThan(0);
+});
+
+// [utest->R-038]
+test("channel schemas declare the draft-07 dialect they are validated under", async () => {
+	const reg = await registryFor("thermostat.yaml");
+	const schema = reg.channels()[0].schema as { $schema?: string };
+	expect(schema.$schema).toBe("http://json-schema.org/draft-07/schema#");
 });
