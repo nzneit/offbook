@@ -70,6 +70,20 @@ test("resolveRepoUrl: slug resolves against gitHost, full URL used as-is, bare s
 	expect(() => resolveRepoUrl("org/svc")).toThrow(/gitHost/);
 });
 
+test("resolveRepoUrl rejects a repo/gitHost/resolved URL that starts with '-' (option-injection guard)", () => {
+	// a resolved value starting with '-' is parsed by git as an option, not a
+	// repository (e.g. --upload-pack=<shell command> executes on fetch)
+	expect(() => resolveRepoUrl("-x", "https://git.example.com")).toThrow(
+		/^repo '-x' starts with '-'/,
+	);
+	expect(() => resolveRepoUrl("org/svc", "-x")).toThrow(
+		/^gitHost '-x' starts with '-'/,
+	);
+	expect(() =>
+		resolveRepoUrl("org/name", '--upload-pack=sh -c "touch /tmp/ob-poc" #'),
+	).toThrow(/starts with '-'/);
+});
+
 test("resolve() fetches a branch tip and records full sha + content-hash + declared-version", async () => {
 	const spec = await new GitRefResolver().resolve(
 		`file://${repoDir}`,

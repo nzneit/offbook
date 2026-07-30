@@ -28,16 +28,32 @@ export function looksLikeUrl(repo: string): boolean {
 	);
 }
 
+// Option-injection guard: the resolved value becomes an argv element of `git ls-remote`/`git
+// fetch` (below, and doctor's specs-reachable). A value starting with '-' is parsed by git as an
+// option rather than a repository — e.g. a gitHost of `--upload-pack=sh -c '...' #` executes an
+// arbitrary command via git's upload-pack hook. Reject at the source rather than trust
+// services.yaml (which may be shared/committed) not to contain one.
+function rejectOptionLike(value: string, label: string): void {
+	if (value.startsWith("-"))
+		throw new Error(
+			`${label} '${value}' starts with '-' — refusing (it would be parsed by git as an option, not a repository; option-injection guard)`,
+		);
+}
+
 // Full URL used as-is; an 'org/name' slug is joined onto gitHost. A slug with no gitHost is a
 // config error (G20) — host-agnostic, so there is no built-in default host.
 export function resolveRepoUrl(repo: string, gitHost?: string): string {
+	rejectOptionLike(repo, "repo");
 	if (looksLikeUrl(repo)) return repo;
 	if (!gitHost) {
 		throw new Error(
 			`repo '${repo}' is an org/name slug but no gitHost is configured (G20)`,
 		);
 	}
-	return `${gitHost.replace(/\/+$/, "")}/${repo}`;
+	rejectOptionLike(gitHost, "gitHost");
+	const url = `${gitHost.replace(/\/+$/, "")}/${repo}`;
+	rejectOptionLike(url, "resolved repo URL");
+	return url;
 }
 
 // --- git shell-out (host-agnostic; reuses the host's ambient creds) ---
