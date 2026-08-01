@@ -28,6 +28,9 @@ function walk(dir: string): string[] {
 	});
 }
 
+const ASYNCAPI_SPECS_IMPORT =
+	/from\s+["']@asyncapi\/specs(\/[^"']*)?["']|require\(\s*["']@asyncapi\/specs(\/[^"']*)?["']\s*\)/;
+
 test("SUPPORTED_SPEC_VERSIONS matches the versions @asyncapi/specs exposes", () => {
 	// Exact equality, no filtering: the 2.0.0-rc1/rc2 schemas exist on disk but
 	// are excluded from the export map, so `schemas` is exactly the release set.
@@ -60,14 +63,11 @@ test("@asyncapi/specs stays a devDependency: nothing under src/ imports it", () 
 	// Biome's noRestrictedImports matches whole module specifiers, so it cannot
 	// express "this package at any subpath", and the realistic regression is a
 	// deep JSON import like the one this gate replaced (D-019). Same idiom as
-	// test/transport-isolation.test.ts and ingestion's G12 guard: match the
-	// import edge, not mentions of the name in prose comments.
+	// test/transport-isolation.test.ts and ingestion's G12 guard: match both the
+	// `from "…"` and `require("…")` import edges, not mentions of the name in
+	// prose comments.
 	const offenders = walk("src")
 		.filter((p) => p.endsWith(".ts"))
-		.filter((p) =>
-			/from\s+["']@asyncapi\/specs(\/[^"']*)?["']/.test(
-				readFileSync(p, "utf8"),
-			),
-		);
+		.filter((p) => ASYNCAPI_SPECS_IMPORT.test(readFileSync(p, "utf8")));
 	expect(offenders).toEqual([]);
 });
