@@ -107,7 +107,9 @@ const MQTT_EXTENSION_KEY = /^x-[\w\d\.\x2d_]+$/;
 
 The transcription round-trips exactly: `MQTT_EXTENSION_KEY.source === Object.keys(schema.patternProperties)[0]` is `true`. The unknown-key filter gains `&& !MQTT_EXTENSION_KEY.test(k)`, which is the whole of the defect-3 fix.
 
-`biome.json` adds `@asyncapi/specs` to `noRestrictedImports` for `src/**`, message: *"@asyncapi/specs is a devDependency: import it only from test/ (the upstream-drift gate)."* Same mechanism as the existing aedes transport-isolation rule. Because the gate lives in `test/` rather than beside `registry/`, no override needs carving out.
+**The re-import guard is a source-text check, not a lint rule.** Biome 1.9's `noRestrictedImports.paths` matches the exact module specifier string: a bare `@asyncapi/specs` entry does not flag `@asyncapi/specs/bindings/mqtt/0.2.0/operation.json` (verified both ways, see **Verification**). Since the realistic regression is a deep JSON path, a lint rule would be a no-op against the very import it is meant to prevent, and listing today's path would catch only today's path.
+
+The guard therefore follows the repo's established idiom for this constraint, the one `test/transport-isolation.test.ts` uses for the aedes family and `src/ingestion/index.test.ts` uses for G12: walk `src/**/*.ts` and regex the import edge. That catches every subpath, present and future. It lives as a third check in `test/upstream-drift.test.ts`, beside the two drift checks it belongs with.
 
 One consequence worth naming: the `binding-unknown-key` diagnostic's `detail` lists the legal keys, and it now lists them from the constant rather than from the derived set. The same four names today, and the drift test is what keeps that true.
 
@@ -120,6 +122,8 @@ One consequence worth naming: the `binding-unknown-key` diagnostic's `detail` li
    This does not reopen what D-018 rejected. D-018 refused to *derive* the constant, because a schema being present does not mean the ruleset handles it (parser 3.4.0 and 3.5.0 accepted 3.1.0 and then died in Nimma, which this test would not have caught, since 3.1.0 was present and listed). The constant stays hand-authored and separately tested against the real parser; this test only makes upstream drift loud so a human decides whether to test-and-add.
 
 2. **Binding key set.** `MQTT_OPERATION_KEYS` equals the schema's `properties` keys, and `MQTT_EXTENSION_KEY.source` equals its sole `patternProperties` key.
+
+3. **Re-import guard.** No file under `src/` imports `@asyncapi/specs` at any subpath, so the devDependency boundary holds.
 
 ## 4. Tests
 
@@ -150,7 +154,7 @@ Three assertions are worth a mutation check before calling this done, because ea
 
 **`DECISIONS.md`.** One new entry, **D-019**, amending D-018 rather than superseding it, recording the four decisions above plus the two defects found while designing (the unquoted-`2.6` parser TypeError, and the derived key set rejecting legal `x-` extensions).
 
-**`docs/specs/build-plan.md`** §1 gets a note on the AsyncAPI row naming `@asyncapi/specs` as a dev-only drift-gate dependency.
+**`docs/specs/build-plan.md`** §1 gets a note on the AsyncAPI row naming `@asyncapi/specs` as a dev-only drift-gate dependency. **`biome.json` is untouched**, per the source-text-guard decision in §2.
 
 **`docs/specs/contracts.md` needs no change.** The preflight's error text and the binding key set are `registry/` internals; neither the `Diagnostic` shape nor the `spec-load` tag list moves, so the canonical contract is untouched.
 
@@ -202,5 +206,7 @@ is not an object (evaluating 'patchWithRc.split'), stack: TypeError: … at getS
 - all three malformed inputs above produce the version error with the `asyncapi convert` remedy;
 - `x-vendor-thing` on an mqtt operation binding produces `binding-unknown-key: 't/ext' mqtt operation binding has unknown key(s) x-vendor-thing; the mqtt binding defines bindingVersion, messageExpiryInterval, qos, retain`;
 - `@asyncapi/specs` appears in `bun.lock` only as a dependency of `@asyncapi/parser`, and `package.json` declares neither a dependency nor a devDependency on it.
+
+**Biome `noRestrictedImports` specifier matching** (why the guard is a source-text check). With `"@asyncapi/specs"` added to `paths` for `src/**`, `bun run lint` does not flag `src/registry/index.ts:2`. With the exact string `"@asyncapi/specs/bindings/mqtt/0.2.0/operation.json"` instead, it flags that line immediately. The rule matches whole specifiers, not package prefixes, so it cannot express "this package at any subpath". `biome.json` was restored unmodified after the probe.
 
 **Baseline at `f6abb11`** (the state this design amends): `bun scripts/check-docs.ts`, `bun run lint`, `bun run typecheck`, and `bun test` (423 pass, 0 fail) each exit 0.
