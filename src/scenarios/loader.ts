@@ -16,7 +16,7 @@ import type {
 } from "#src/model/index.ts";
 import { fillRequired, schemaHasPath } from "./fill.ts";
 import { comparePatterns, resolvePath } from "./matcher.ts";
-import { TEMPLATE_RE, parseRef, scanValue } from "./template.ts";
+import { parseRef, scanValue, TEMPLATE_RE } from "./template.ts";
 
 export interface LoadedScenario {
 	scenario: Scenario;

@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Handler, SpecRegistry } from "#src/model/index.ts";
 import {
-	type Registration,
 	createDispatchRegistry,
 	defaultDispatch,
 	precedence,
+	type Registration,
 } from "./dispatch.ts";
 
 // [utest->R-012]

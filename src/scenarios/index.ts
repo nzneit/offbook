@@ -23,7 +23,7 @@ import type {
 import { fillRequired } from "./fill.ts";
 import { type LoadedScenario, loadScenarios } from "./loader.ts";
 import { matchTopic, payloadMatches, resolvePath } from "./matcher.ts";
-import { OMIT, type TemplateRef, seededUuid, substitute } from "./template.ts";
+import { OMIT, seededUuid, substitute, type TemplateRef } from "./template.ts";
 
 // What the runtime needs back from the engine — structurally satisfied by
 // Engine (engine/index.ts); the composition root wires the cycle via the

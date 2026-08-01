@@ -129,7 +129,9 @@ test("qos-retain: the binding tier reaches the wire (qos 2 + retained); an off-t
 	expect(flagged[0]?.errors?.[0]?.keyword).toBe("type");
 	// raw delivery even off-spec: the retained store now holds the bad payload
 	const after = (await fx.state()).find((e) => e.topic === "presence/p-1");
-	expect((after?.payload as { online: unknown }).online).toBe("yes");
+	expect((after?.payload as { online: unknown } | undefined)?.online).toBe(
+		"yes",
+	);
 });
 
 test("qos-overrides: tier-2 topicOverrides beats the tier-3 per-service default on the wire (F14), schema bar intact", async () => {

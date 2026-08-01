@@ -124,7 +124,9 @@ test("same seed ⇒ byte-identical F9 violation stream + final retained state ac
 		expect(second.state).toEqual(first.state);
 		// the chain's final word won both runs (ordering, not just membership)
 		const final = first.state.find((e) => e.topic === "state/thermostat-1");
-		expect((final?.payload as { status: string }).status).toBe("heating");
+		expect((final?.payload as { status: string } | undefined)?.status).toBe(
+			"heating",
+		);
 	} finally {
 		process.chdir(prevCwd);
 		const leftover = await readRunfile(runDir);

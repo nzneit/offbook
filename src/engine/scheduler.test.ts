@@ -238,7 +238,7 @@ test("default reporter: a throwing task without onTaskError surfaces via console
 	}
 	expect(calls.length).toBe(1);
 	expect(calls[0]?.[0]).toBe("[offbook] scheduler task failed:");
-	expect((calls[0]?.[1] as Error).message).toBe("task boom");
+	expect((calls[0]?.[1] as Error | undefined)?.message).toBe("task boom");
 	expect(s.pending()).toEqual({ scheduled: 0, settled: true });
 });
 

@@ -11,9 +11,9 @@ import type {
 	SpecRegistry,
 } from "#src/model/index.ts";
 import {
-	SUPPORTED_SPEC_VERSIONS,
 	isSupportedSpecVersion,
 	readSpecVersion,
+	SUPPORTED_SPEC_VERSIONS,
 } from "#src/model/spec-version.ts";
 
 const parser = new Parser();
@@ -99,6 +99,7 @@ export const MQTT_OPERATION_KEYS = new Set([
 // character-for-character from that key, so the drift test compares source
 // strings rather than approximating the intent. Reading only `properties` meant
 // a spec-legal `x-vendor-thing` was reported as an unknown key (D-019).
+// biome-ignore lint/complexity/noUselessEscapeInRegex: the `\.` is redundant to the regex engine but NOT to this constant's purpose — `.source` is compared byte-for-byte against the upstream schema key in test/upstream-drift.test.ts, so unescaping it breaks the character-for-character transcription D-019 relies on (biome 2's "safe" fix does exactly that; D-023)
 export const MQTT_EXTENSION_KEY = /^x-[\w\d\.\x2d_]+$/;
 
 // MQTT 5 only, per the "MQTT Versions" column of the binding spec. offbook is

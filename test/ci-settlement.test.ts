@@ -102,7 +102,9 @@ test("CI flow (passive/fast-virtual): reset → publish → pending?wait → val
 		state: StateEntry[];
 	};
 	const final = state.find((e) => e.topic === "state/thermostat-1");
-	expect((final?.payload as { status: string }).status).toBe("heating");
+	expect((final?.payload as { status: string } | undefined)?.status).toBe(
+		"heating",
+	);
 
 	// 4. the violation slice since the checkpoint: a clean publish produced
 	// no client violations (the offbook check gate would pass)

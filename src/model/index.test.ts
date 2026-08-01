@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test";
-import { DEFAULT_CONFIG } from "./index.ts";
 import type {
 	Channel,
 	Config,
@@ -35,6 +34,7 @@ import type {
 	ViolationKind,
 	WhenClause,
 } from "./index.ts";
+import { DEFAULT_CONFIG } from "./index.ts";
 
 // R-001 exhaustiveness guard. Every contracts.md §1–6 type must be present + exported from model/,
 // with the single documented exception of BrokerModule (homed in broker/ per build-plan §2). The

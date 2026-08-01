@@ -9,7 +9,7 @@
 // [stest->R-037]
 // [stest->R-039]
 import { expect, test } from "bun:test";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import specs from "@asyncapi/specs";
 import mqttOperationBinding from "@asyncapi/specs/bindings/mqtt/0.2.0/operation.json" with {

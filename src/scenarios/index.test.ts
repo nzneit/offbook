@@ -20,7 +20,7 @@ import type {
 	SpecRegistry,
 	Violation,
 } from "#src/model/index.ts";
-import { type ScenarioRuntime, createScenarioRuntime } from "./index.ts";
+import { createScenarioRuntime, type ScenarioRuntime } from "./index.ts";
 import { matchTopic } from "./matcher.ts";
 
 const stateSchema = {
@@ -213,9 +213,9 @@ describe("reactive dispatch (the l2 §0 running example)", () => {
 		await s.engine.idle();
 		// only the topic-only fallback fired, once
 		expect(s.emitted).toHaveLength(1);
-		expect((s.emitted[0]?.payload as Record<string, unknown>).status).toBe(
-			"accepted",
-		);
+		expect(
+			(s.emitted[0]?.payload as Record<string, unknown> | undefined)?.status,
+		).toBe("accepted");
 
 		s.emitted.length = 0;
 		s.engine.onInbound(inbound("command/t1/set", { mode: "heat", target: 21 }));
@@ -289,9 +289,9 @@ describe("trigger (POST /trigger seam)", () => {
 		expect(r).toEqual({ name: "device-offline", stepCount: 1 });
 		await s.engine.idle();
 		expect(s.emitted[0]?.topic).toBe("state/t9");
-		expect((s.emitted[0]?.payload as Record<string, unknown>).status).toBe(
-			"offline",
-		);
+		expect(
+			(s.emitted[0]?.payload as Record<string, unknown> | undefined)?.status,
+		).toBe("offline");
 	});
 
 	test("an unknown name is undefined and fires nothing", async () => {
@@ -362,7 +362,7 @@ describe("hot-reload & passive freeze (l2 §8, G24)", () => {
 		const s = await setup({ "50-counter.yaml": COUNTERIZED });
 		s.runtime.trigger("counterized");
 		await s.engine.idle();
-		expect((s.emitted[0]?.payload as { n: number }).n).toBe(1);
+		expect((s.emitted[0]?.payload as { n: number } | undefined)?.n).toBe(1);
 
 		writeFileSync(
 			join(s.dir, "05-added.yaml"),
@@ -380,7 +380,7 @@ describe("hot-reload & passive freeze (l2 §8, G24)", () => {
 		s.runtime.trigger("counterized");
 		await s.engine.idle();
 		// swap touched definitions only — the per-scenario counter continued
-		expect((s.emitted[0]?.payload as { n: number }).n).toBe(2);
+		expect((s.emitted[0]?.payload as { n: number } | undefined)?.n).toBe(2);
 	});
 
 	test("watch() hot-reloads on file change in autonomous mode", async () => {
@@ -452,9 +452,9 @@ describe("emit-time recheck provenance (G10)", () => {
 		await s.engine.idle();
 		// step 0 (templated target) dropped; step 1 (heating) still emitted
 		expect(s.emitted).toHaveLength(1);
-		expect((s.emitted[0]?.payload as Record<string, unknown>).status).toBe(
-			"heating",
-		);
+		expect(
+			(s.emitted[0]?.payload as Record<string, unknown> | undefined)?.status,
+		).toBe("heating");
 		expect(s.violations).toHaveLength(1);
 		const v = s.violations[0];
 		expect(v?.origin).toBe("mock");

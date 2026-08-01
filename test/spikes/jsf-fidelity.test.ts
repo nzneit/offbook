@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
-import { SPIKE_FIXTURES, measureFixture } from "#scripts/spike-jsf-fidelity.ts";
+import { measureFixture, SPIKE_FIXTURES } from "#scripts/spike-jsf-fidelity.ts";
 
 // [stest->R-027]
 // R-027 tripwire: pins the measured per-fixture recheck-failure counts so a

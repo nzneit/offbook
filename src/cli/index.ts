@@ -28,7 +28,7 @@ import type {
 import { DEFAULT_CONFIG } from "#src/model/index.ts";
 import { buildRegistry } from "#src/registry/index.ts";
 import type { Api } from "./client.ts";
-import { CliError, api, resolveCtrlPort } from "./client.ts";
+import { api, CliError, resolveCtrlPort } from "./client.ts";
 import type { CheckStatus, DoctorCtx } from "./doctor.ts";
 import { runDoctor } from "./doctor.ts";
 import {

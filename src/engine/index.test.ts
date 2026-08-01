@@ -7,8 +7,8 @@ import type {
 	SpecRegistry,
 	Violation,
 } from "#src/model/index.ts";
-import { createDispatchRegistry } from "./dispatch.ts";
 import type { DispatchRegistry } from "./dispatch.ts";
+import { createDispatchRegistry } from "./dispatch.ts";
 import { createEngine } from "./index.ts";
 import { hashToInt, mulberry32 } from "./prng.ts";
 
@@ -220,9 +220,11 @@ test("proactive path: subscribe with no L3 handler falls to the L1 floor and emi
 	expect(emitted.length).toBe(1);
 	expect(emitted[0]?.topic).toBe("state/d7");
 	expect(emitted[0]?.retain).toBe(true);
-	expect(["ok", "warn"]).toContain(
-		(emitted[0]?.payload as { status: string }).status,
-	);
+	const status = (emitted[0]?.payload as { status: string } | undefined)
+		?.status;
+	// String() so an absent payload fails readably as "undefined" rather than
+	// failing to typecheck against toContain's string parameter
+	expect(["ok", "warn"]).toContain(String(status));
 });
 
 test("passive mode fires no ticks (F10)", async () => {
