@@ -263,6 +263,23 @@ test("an unquoted `asyncapi: 2.6` is refused before the parser's TypeError", asy
 });
 
 // [utest->R-037]
+test("a present-but-null `asyncapi:` is refused with the branded message, not the parser's raw TypeError", async () => {
+	// `asyncapi:` with no value is a YAML null: a PRESENT field, distinct from an
+	// absent one. Before D-019's fix this collapsed to undefined, fell through
+	// the preflight, and reached @asyncapi/parser, which TypeErrors on it
+	// (`patchWithRc.split`) with a raw internal stack instead of an actionable
+	// message.
+	const err = (await buildRegistry({
+		specText: "asyncapi:\ninfo: { title: T, version: 1.0.0 }\nchannels: {}",
+		service: "nullver",
+		config: DEFAULT_CONFIG,
+	}).catch((e: unknown) => e as Error)) as Error;
+	expect(err).toBeInstanceOf(Error);
+	expect(err.message).toMatch(/unsupported AsyncAPI version "null"/);
+	expect(err.message).not.toMatch(/patchWithRc/);
+});
+
+// [utest->R-037]
 test("a version inside the old range but outside the tested set is still refused", async () => {
 	// 2.7.0 sits INSIDE "2.0.0 through 3.1.0" while being untested, which is
 	// exactly why the message names the set instead of a range (D-019).

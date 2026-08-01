@@ -29,7 +29,14 @@ export function readSpecVersion(specText: string): string | undefined {
 	try {
 		const doc = parseYaml(specText) as { asyncapi?: unknown } | null;
 		const v = doc?.asyncapi;
-		return v === undefined || v === null ? undefined : String(v);
+		// undefined ONLY for a genuinely absent field. A present-but-null value
+		// (bare `asyncapi:`) reads as the string "null" and is therefore a
+		// positive read: it falls into the preflight's branded refusal instead
+		// of past it into the parser's raw TypeError. String() stays broad
+		// (never narrowed to string/number) because the parser's internal
+		// TypeError also fires on `''`, `true`, and `{}` — every one of those
+		// must land here as a positive read too (D-019).
+		return v === undefined ? undefined : String(v);
 	} catch {
 		return undefined;
 	}

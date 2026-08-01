@@ -26,6 +26,17 @@ test("absent or unparseable spec text yields undefined, never a throw", () => {
 	expect(readSpecVersion("")).toBeUndefined();
 });
 
+// [utest->R-037]
+test('a present-but-null asyncapi field reads as the string "null", not undefined', () => {
+	// `asyncapi:` with no value is a genuinely PRESENT field (YAML null), distinct
+	// from the field being absent. Collapsing it to undefined let the preflight
+	// fall through to the parser, which TypeErrors on it (D-019); reading it as
+	// "null" instead routes it into the preflight's own branded refusal.
+	expect(readSpecVersion("asyncapi:\ninfo: { title: T, version: 1.0.0 }")).toBe(
+		"null",
+	);
+});
+
 test("the supported set is exactly the tested promise (2.0.0-2.6.0, 3.0.0, 3.1.0)", () => {
 	expect([...SUPPORTED_SPEC_VERSIONS]).toEqual([
 		"2.0.0",
