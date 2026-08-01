@@ -29,11 +29,13 @@ function walk(dir: string): string[] {
 }
 
 // `import(...)` alongside `from "…"` / `require(…)`, all with the same
-// whitespace tolerance, so a dynamic import (`await import("@asyncapi/specs/…")`,
-// a live idiom in this codebase — see src/engine/dispatch.ts) cannot slip past
-// the devDependency guard below. Indirection through a variable
-// (`import(someVar)`) still evades this by design: matching that would need
-// real static analysis, not a source-text regex.
+// whitespace tolerance, so a literal dynamic import
+// (`await import("@asyncapi/specs/…")`) cannot slip past the devDependency
+// guard below. Dynamic import is a live idiom here, which is why the branch
+// earns its place: src/engine/dispatch.ts:70 loads handler modules that way,
+// though it passes a VARIABLE. That form still evades this guard by design,
+// as does `require.resolve(…)`: matching either would need real static
+// analysis, not a source-text regex.
 const ASYNCAPI_SPECS_IMPORT =
 	/from\s+["']@asyncapi\/specs(\/[^"']*)?["']|require\(\s*["']@asyncapi\/specs(\/[^"']*)?["']\s*\)|import\(\s*["']@asyncapi\/specs(\/[^"']*)?["']\s*\)/;
 
