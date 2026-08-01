@@ -376,12 +376,14 @@ test("the multi-format wrapper is unwrapped on the client-publish path too", asy
 });
 
 // [utest->R-038]
-// Inline rather than a fixture on purpose: json-schema-faker 0.6.2 cannot draw a
-// valid draft-07 tuple (it emits objects with numeric keys, e.g.
-// [{"0":"ab","1":1.5}], failing the Ajv recheck 10/10 regardless of
-// additionalItems or minItems). A tuple channel in fixtures/asyncapi/ would
-// therefore fail the R-027 faker-floor spike and flip D-008's measured verdict,
-// which is a separate question from the dialect this test pins. See D-018.
+// Inline rather than a fixture on purpose: json-schema-faker cannot draw a valid
+// draft-07 tuple (it emits objects with numeric keys, e.g. [{"0":"ab","1":1.5}],
+// failing the Ajv recheck 10/10 regardless of additionalItems or minItems).
+// Still true on the 0.6.3 pin, byte-identically, and it reproduces at library
+// defaults, so it is upstream's items-as-array handler and not an option offbook
+// sets (D-020). A tuple channel in fixtures/asyncapi/ would therefore fail the
+// R-027 faker-floor spike and flip D-008's measured verdict, which is a separate
+// question from the dialect this test pins. See D-018.
 test("draft-07 tuple `items` validates positionally instead of crashing the build", async () => {
 	const spec = `asyncapi: 3.0.0
 info: { title: T, version: 1.0.0 }

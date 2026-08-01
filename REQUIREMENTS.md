@@ -220,7 +220,7 @@ The `{p}`→`+p` rewrite reproduces AsyncAPI single-segment capture exactly (mqt
 **COVERS**: docs/specs/build-plan.md#spikes
 **IMPL**: scripts/spike-jsf-fidelity.ts
 **TEST**: test/spikes/jsf-fidelity.test.ts
-JSF 0.6.2 runs against every `fixtures/asyncapi/*` bundled `channel.schema` and the per-fixture Ajv-recheck failure rate is recorded; a nonzero rate on a §5-bar fixture (`external-ref`, `qos-retain`, `qos-overrides`) decides that F5's keyed-fallback re-draw is needed, else drop-and-surface stands (the verdict lands in the ledger). (Measured; verdict in D-008.)
+The pinned JSF (0.6.2 at first measurement; re-measured unchanged on the 0.6.3 bump, D-020) runs against every `fixtures/asyncapi/*` bundled `channel.schema` and the per-fixture Ajv-recheck failure rate is recorded; a nonzero rate on a §5-bar fixture (`external-ref`, `qos-retain`, `qos-overrides`) decides that F5's keyed-fallback re-draw is needed, else drop-and-surface stands (the verdict lands in the ledger). (Measured; verdict in D-008.)
 
 #### gate: §5 validation correctness
 **UID**: R-028
