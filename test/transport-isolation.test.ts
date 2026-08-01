@@ -16,7 +16,7 @@ function walk(dir: string): string[] {
 }
 
 const TRANSPORT =
-	/from ["'](aedes|aedes-server-factory|mqtt|mqtt-packet|mqtt-connection|ws|websocket-stream)["']|require\(["'](aedes|aedes-server-factory|mqtt|mqtt-packet|mqtt-connection|ws|websocket-stream)["']\)/;
+	/from\s+["'](aedes|aedes-server-factory|mqtt|mqtt-packet|mqtt-connection|ws|websocket-stream)["']|require\(\s*["'](aedes|aedes-server-factory|mqtt|mqtt-packet|mqtt-connection|ws|websocket-stream)["']\s*\)/;
 
 test("only src/broker/ imports a transport package (aedes/mqtt/ws family) — repo-wide", () => {
 	const offenders = walk("src")
