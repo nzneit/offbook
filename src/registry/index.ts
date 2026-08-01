@@ -136,18 +136,23 @@ export async function buildRegistry(opts: {
 	// R-037 preflight: check the declared version BEFORE handing the document to
 	// the parser. The parser's own gate is derived from @asyncapi/specs at
 	// install time, so an unsupported-but-present version can pass it and then
-	// fail deep in the Spectral ruleset with an opaque "Error running Nimma".
-	// Offbook's supported set is a promise it tests, so it is checked here (D-018).
+	// fail deep in the Spectral ruleset with an opaque "Error running Nimma"
+	// (D-018) — or, for an unquoted `asyncapi: 2.6`, with a raw TypeError stack
+	// out of getSemver.
+	//
+	// Fires ONLY on a version this read positively resolved. An unreadable or
+	// absent `asyncapi` field is not offbook's call to make: the parser's own
+	// diagnostics distinguish a YAML syntax error from a non-AsyncAPI document,
+	// and guessing "unsupported version" mislabelled both, along with the empty
+	// file and the fetched HTML error page (D-019). The message names the tested
+	// set rather than a range, because a version can sit inside 2.0.0-3.1.0 and
+	// still be untested.
 	const specVersion = readSpecVersion(opts.specText);
-	if (!isSupportedSpecVersion(specVersion)) {
+	if (specVersion !== undefined && !isSupportedSpecVersion(specVersion)) {
 		throw new Error(
-			`unsupported AsyncAPI version ${
-				specVersion === undefined
-					? "(no `asyncapi` field found)"
-					: `"${specVersion}"`
-			} in service '${opts.service}': offbook supports ${SUPPORTED_SPEC_VERSIONS[0]} through ${
-				SUPPORTED_SPEC_VERSIONS[SUPPORTED_SPEC_VERSIONS.length - 1]
-			}. Convert the spec first: \`asyncapi convert <file> --target-version 3.1.0\``,
+			`unsupported AsyncAPI version "${specVersion}" in service '${opts.service}': offbook supports ${SUPPORTED_SPEC_VERSIONS.join(
+				", ",
+			)}. Convert the spec first: \`asyncapi convert <file> --target-version 3.1.0\``,
 		);
 	}
 	const parsed = opts.source

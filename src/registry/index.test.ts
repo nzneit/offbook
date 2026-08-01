@@ -221,20 +221,76 @@ topics:
 	await expect(attempt).rejects.toThrow(
 		/unsupported AsyncAPI version "1\.2\.0"/,
 	);
-	// names the supported range and the remedy, not just the problem
-	await expect(attempt).rejects.toThrow(/2\.0\.0/);
+	// names EVERY tested version and the remedy, not just the problem. Built from
+	// the constant, so the assertion cannot drift from what the message renders.
+	for (const v of SUPPORTED_SPEC_VERSIONS) {
+		await expect(attempt).rejects.toThrow(v);
+	}
 	await expect(attempt).rejects.toThrow(/asyncapi convert/);
 });
 
 // [utest->R-037]
-test("refuses a spec with no asyncapi field", async () => {
-	await expect(
-		buildRegistry({
-			specText: "info: { title: T, version: 1.0.0 }",
-			service: "nover",
-			config: DEFAULT_CONFIG,
-		}),
-	).rejects.toThrow(/unsupported AsyncAPI version/);
+test("a malformed spec surfaces the parser's own diagnostics, not a version error", async () => {
+	// A YAML syntax error is not a version problem, and `asyncapi convert` is not
+	// its remedy. Spec-load failure is fatal and aborts `up` (design §7 Mode 1),
+	// so this message is the whole error an adopter sees (R-036, D-019).
+	const err = (await buildRegistry({
+		specText: "asyncapi: 3.0.0\ninfo: {title: T\n  bad indent: ][",
+		service: "svc-a",
+		config: DEFAULT_CONFIG,
+	}).catch((e: unknown) => e as Error)) as Error;
+	expect(err).toBeInstanceOf(Error);
+	expect(err.message).toMatch(/failed to parse spec/);
+	expect(err.message).toMatch(/flow/); // the parser's own YAML syntax wording
+	expect(err.message).not.toMatch(/unsupported AsyncAPI version/);
+	expect(err.message).not.toMatch(/asyncapi convert/);
+});
+
+// [utest->R-037]
+test("an unquoted `asyncapi: 2.6` is refused before the parser's TypeError", async () => {
+	// `asyncapi: 2.6` is a YAML float, not a string, and the parser dies on it
+	// inside getSemver with a raw `patchWithRc.split` TypeError stack. The gate
+	// catches it first because String(2.6) is "2.6", which is not a tested
+	// version. This is why readSpecVersion normalizes with String() (D-019).
+	const err = (await buildRegistry({
+		specText: "asyncapi: 2.6\ninfo: { title: T, version: 1.0.0 }\nchannels: {}",
+		service: "floaty",
+		config: DEFAULT_CONFIG,
+	}).catch((e: unknown) => e as Error)) as Error;
+	expect(err).toBeInstanceOf(Error);
+	expect(err.message).toMatch(/unsupported AsyncAPI version "2\.6"/);
+	expect(err.message).not.toMatch(/patchWithRc/);
+});
+
+// [utest->R-037]
+test("a version inside the old range but outside the tested set is still refused", async () => {
+	// 2.7.0 sits INSIDE "2.0.0 through 3.1.0" while being untested, which is
+	// exactly why the message names the set instead of a range (D-019).
+	const err = (await buildRegistry({
+		specText:
+			"asyncapi: '2.7.0'\ninfo: { title: T, version: 1.0.0 }\nchannels: {}",
+		service: "future",
+		config: DEFAULT_CONFIG,
+	}).catch((e: unknown) => e as Error)) as Error;
+	expect(err).toBeInstanceOf(Error);
+	expect(err.message).toMatch(/unsupported AsyncAPI version "2\.7\.0"/);
+	expect(err.message).not.toMatch(/through/);
+});
+
+// [utest->R-037]
+test("a spec with no asyncapi field defers to the parser's diagnosis", async () => {
+	// Not offbook's call to make: the parser names the real problem precisely,
+	// and guessing "unsupported version" here mislabels an empty file, an HTML
+	// error page from a bad repo URL, and a wrong spec-path alike (D-019).
+	const err = (await buildRegistry({
+		specText: "info: { title: T, version: 1.0.0 }",
+		service: "nover",
+		config: DEFAULT_CONFIG,
+	}).catch((e: unknown) => e as Error)) as Error;
+	expect(err).toBeInstanceOf(Error);
+	expect(err.message).toMatch(/failed to parse spec/);
+	expect(err.message).toMatch(/This is not an AsyncAPI document/);
+	expect(err.message).not.toMatch(/unsupported AsyncAPI version/);
 });
 
 // [utest->R-037]
