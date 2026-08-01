@@ -38,6 +38,13 @@ export interface SpecRegistry {
 	): { channel: Channel; params: Record<string, string> } | undefined;
 	matchesFilter(filter: string, topic: string): boolean;
 	channels(): readonly Channel[];
+	// Registry-time spec-QUALITY findings (D-018): problems discoverable only
+	// while building the catalog, so they cannot be recomputed from Channel
+	// later (binding placement, dialect mismatch, a schema that would not
+	// compile). Collected once at build; the composition root merges them into
+	// GET /v1/diagnostics beside the computed ones. Uses the existing closed
+	// `spec-load` kind with a machine-greppable `detail` tag prefix.
+	diagnostics(): readonly Diagnostic[];
 }
 
 export interface Config {
@@ -98,6 +105,7 @@ export interface ResolvedSpec {
 	resolvedSha: string; // FULL canonical commit sha — the pin, never abbreviated
 	source: string; // human origin, e.g. "dev@org/service-b:asyncapi.yaml"
 	declaredVersion?: string; // info.version — shallow parser-free read by ingestion/ (G12); best-effort
+	specVersion?: string; // the `asyncapi` version — shallow parser-free read (G12); best-effort
 	fetchedAt: string; // ISO8601
 }
 
@@ -126,6 +134,7 @@ export interface LockEntry {
 	resolvedSha: string; // FULL canonical commit sha — never abbreviated
 	specPath: string;
 	declaredVersion?: string; // info.version
+	specVersion?: string; // the `asyncapi` version of the fetched spec
 	contentHash: string; // "sha256:…"
 	fetchedAt: string; // ISO8601
 	resolvedVersion?: string; // v2 only — semver after range policy
@@ -243,6 +252,7 @@ export interface EmitStep {
 export interface SpecInfo {
 	service: string;
 	declaredVersion?: string; // info.version — parser-free shallow read by ingestion/ (G12); NOT requested
+	specVersion?: string; // the `asyncapi` version — which spec major this service is on
 	source: string;
 	contentHash: string;
 	channelCount: number;

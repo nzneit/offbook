@@ -28,6 +28,7 @@ function makeRegistry(): SpecRegistry {
 		retain: true,
 	};
 	return {
+		diagnostics: () => [],
 		match: (topic: string) => {
 			const m = topic.match(/^state\/([^/]+)$/);
 			return m?.[1] ? { channel: ch, params: { id: m[1] } } : undefined;

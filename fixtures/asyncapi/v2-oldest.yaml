@@ -1,0 +1,62 @@
+asyncapi: '2.0.0'
+info:
+  title: Oldest Supported Major
+  version: 1.0.0
+  description: >-
+    AsyncAPI 2.0.0, the FLOOR of offbook's supported range (D-018). Pins that
+    the oldest major still parses, that `publish`/`subscribe` normalize to
+    fromClient/toClient, and that a 2.x mqtt OPERATION binding is read (2.x maps
+    `mqtt` to an empty schema in its own meta-schema, so nothing validates it
+    upstream: offbook checks the values and keys itself).
+servers:
+  mosquitto:
+    url: localhost:1883
+    protocol: mqtt
+    protocolVersion: '3.1.1'
+channels:
+  legacy/{deviceId}/telemetry:
+    parameters:
+      deviceId:
+        schema:
+          type: string
+    subscribe:                     # service publishes ⇒ client receives ⇒ toClient
+      operationId: sendTelemetry
+      bindings:
+        mqtt:
+          qos: 2                   # differs from the global default (1): a real assertion
+          retain: true
+          bindingVersion: '0.1.0'
+      message:
+        $ref: '#/components/messages/Telemetry'
+  legacy/{deviceId}/command:
+    parameters:
+      deviceId:
+        schema:
+          type: string
+    publish:                       # client publishes ⇒ service receives ⇒ fromClient
+      operationId: receiveCommand
+      message:
+        $ref: '#/components/messages/Command'
+components:
+  messages:
+    Telemetry:
+      name: Telemetry
+      payload:
+        type: object
+        required: [deviceId, celsius]
+        additionalProperties: false
+        properties:
+          deviceId:
+            type: string
+          celsius:
+            type: number
+    Command:
+      name: Command
+      payload:
+        type: object
+        required: [mode]
+        additionalProperties: false
+        properties:
+          mode:
+            type: string
+            enum: [heat, cool, off]

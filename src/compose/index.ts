@@ -182,6 +182,7 @@ export async function compose(parts: ComposeParts) {
 
 		diagnostics: () => [
 			...(runtime?.diagnostics() ?? []),
+			...registry.diagnostics(),
 			...specQualityDiagnostics(registry.channels()),
 			...uninstantiatedDiagnostics(
 				registry.channels(),

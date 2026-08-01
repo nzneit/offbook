@@ -34,7 +34,7 @@ interface Channel {     // produced by the Spec Registry
   topic: string;        // address / pattern (may contain {params})
   direction: Direction; // normalized ONCE here (design §5): v3 send→toClient · receive→fromClient; v2 subscribe→toClient · publish→fromClient
   service: string;      // owning service (services.yaml key) — feeds ?service= filters + SpecInfo/TopicInfo (§5, §6)
-  schema: object;       // FULLY BUNDLED JSON Schema — every $ref inlined or rewritten to internal $defs, no dangling/external ref, 2020-12 dialect declared so Ajv compiles it standalone; feeds the L1 faker + GET /topics
+  schema: object;       // FULLY BUNDLED JSON Schema — every $ref inlined or rewritten to internal $defs, no dangling/external ref, draft-07 dialect declared (D-018) so Ajv compiles it standalone; feeds the L1 faker + GET /topics
   validate: (payload: unknown) => SchemaError[];  // compiled from `schema`
   qos?: 0 | 1 | 2;      // RESOLVED by the registry per the §2 precedence chain (G13)
   retain?: boolean;     // RESOLVED by the registry per the §2 precedence chain (G13)
@@ -46,13 +46,15 @@ interface SpecRegistry {  // the ONE concrete-topic → Channel matcher; lives i
   match(topic: string): { channel: Channel; params: Record<string, string> } | undefined;
   matchesFilter(filter: string, topic: string): boolean;  // MQTT +/# SUBSCRIBE-side filter test (F6); shared by engine (wildcard replay, §2) + scenarios (when.topic, §3a)
   channels(): readonly Channel[];
+  diagnostics(): readonly Diagnostic[];  // registry-time spec-QUALITY findings (D-018): discoverable only while BUILDING the catalog, so they cannot be recomputed from a Channel later (binding placement, dialect mismatch, a schema that would not compile). Collected once at build; the composition root merges them into GET /v1/diagnostics (§5) beside the computed ones. Reuses the closed `spec-load` kind with a machine-greppable `detail` tag prefix; `mergeRegistries` concatenates its inputs'
 }
 ```
 
 - **One matcher, owned by `registry/`.** Every consumer that turns a concrete `NormalizedMessage.topic` into its `Channel` — `/publish` direction inference, `unknown-topic`/`schema` validation, `Violation.channel` stamping, the `onSubscribe` initial-state path, L3 `register` routing (§3) — imports this single `match`. Hand-rolling a second matcher is forbidden **for concrete-topic→`Channel` resolution** (divergent semantics make the CI gate non-deterministic). **`match` and `matchesFilter` delegate to [`mqtt-pattern`](https://www.npmjs.com/package/mqtt-pattern)**, minding the syntax gap: mqtt-pattern's named capture is `+param`/`#param`, **not** AsyncAPI's `{param}` (a `{param}` segment is matched *literally*). So `match` **rewrites each single-segment `{p}` on the channel address to mqtt-pattern's `+p`**, then calls `exec` on the rewritten pattern; because the rewrite is `{p}`→`+p`, the returned captures are already keyed by `p` (the back-map is the identity — no rename layer). `matchesFilter` calls `matches` directly on a native MQTT `+`/`#` SUBSCRIBE filter and needs **no** rewrite (R2). One tested library, no hand-rolled segment-splitting — while offbook's precedence (below) stays our sort on top, operating on the original `{param}` form. A build-time parity spike confirms the `{p}`→`+p` rewrite reproduces AsyncAPI single-segment capture exactly (it does **not** assert mqtt-pattern reads `{param}` natively — it does not) before we rely on it. *(The L2 scenario `when.topic` matcher — which fuses `{param}` capture, `+`/`#` filter, and `payloadMatch` in one walk, l2 §4 — is a separate, **permitted** matcher: a different operation `match` deliberately refuses — it never interprets `+`/`#` (see the *"Match is over the channel ADDRESS"* bullet below).)*
 - **Match is over the channel ADDRESS.** `{param}` is a **single-segment** AsyncAPI capture on the channel address (`state/{deviceId}` ↦ `{ deviceId: 'thermostat-1' }`). MQTT `+`/`#` are **SUBSCRIBE-side filters** (a different operation, tested by `matchesFilter` above per the design §7a wildcard policy) — they are **not** channel patterns and `match` never interprets them.
 - **Precedence when more than one channel matches:** most-specific first — a literal segment beats a `{param}` segment at the same position — then declaration order in the spec. Two channels matching the same concrete topic resolve to the same winner on every run.
-- **`Channel.schema` is fully bundled** so it is hand-able to Ajv and the L1 faker with no parser/registry present: the `external-ref.yaml` + `shared/common.yaml` fixture (the design §5/§12.4 bundling bar) must, taken as `channel.schema` alone, compile under Ajv standalone. The bundling comes from the **parser stack** — `@asyncapi/parser`'s resolved output (it depends on `@apidevtools/json-schema-ref-parser`, whose `$RefParser.bundle()` produces the self-contained internal-`$ref` form, dedup'd not blown-up) — **not** hand-rolled `$ref`-walking in `registry/`; we only stamp `$schema: 2020-12` (R1).
+- **`Channel.schema` is fully bundled** so it is hand-able to Ajv and the L1 faker with no parser/registry present: the `external-ref.yaml` + `shared/common.yaml` fixture (the design §5/§12.4 bundling bar) must, taken as `channel.schema` alone, compile under Ajv standalone. The bundling comes from the **parser stack** — `@asyncapi/parser`'s resolved output (it depends on `@apidevtools/json-schema-ref-parser`, whose `$RefParser.bundle()` produces the self-contained internal-`$ref` form, dedup'd not blown-up) — **not** hand-rolled `$ref`-walking in `registry/`; we only stamp the dialect (R1).
+- **`Channel.schema` is validated under JSON Schema draft-07**, the dialect both AsyncAPI majors declare for the Schema Object ("a superset of JSON Schema Draft 07") and the one `@asyncapi/parser` actually emits; `registry/` stamps `$schema: http://json-schema.org/draft-07/schema#` explicitly, so the schema `GET /topics` hands out is self-describing (D-018). Stamping 2020-12 over a draft-07 schema was the root cause of a legal tuple payload (`items` as an array) crashing `ajv.compile()` and of `additionalItems` being silently ignored. Keywords JSON Schema added after draft-07 (`prefixItems`, `unevaluatedProperties`, `dependentRequired`, and friends) therefore cannot be honored, and are surfaced as a `spec-load` diagnostic rather than ignored in silence.
 
 - **Direction is derived, not stored on messages:** flow position (`onInbound` vs `emit`) gives inbound/outbound; the topic→`Channel` lookup gives the spec-declared direction. In v1 it's a clean bijection (the client only publishes `fromClient`; the mock only emits `toClient`).
 - **`delayMs`** is resolved in the engine (seeded Mulberry32 draw — see §3 Behavior engine) and consumed by the engine scheduler; the broker ignores it.
@@ -283,7 +285,7 @@ interface Violation {
 interface TopicInfo { topic: string; direction: Direction; service: string;
   title?: string; description?: string; schema: object; example?: unknown; qos?: 0|1|2; retain?: boolean; }
 interface StateEntry { topic: string; payload: unknown; qos?: 0|1|2; retain: true; }  // retain is always true — clearing a retained topic EVICTS it (§2), so /state never returns tombstones; a decode-failure (§2) is never stored, so payload is always a successfully-decoded value
-interface SpecInfo { service: string; declaredVersion?: string; source: string; contentHash: string; channelCount: number; fetchedAt: string; }  // declaredVersion = info.version, read parser-free by ingestion/ (shallow yaml read, G12) — NOT the requested version (they differ in v1 branch mode). fetchedAt (ISO8601, propagated from the lockfile `fetched-at`) = spec provenance/age for TRUST CALIBRATION — the tool validates against the spec AS FETCHED, never the live service; surfaced NEUTRALLY (no stale threshold) by GET /specs + status (design §7, Mode 3)
+interface SpecInfo { service: string; declaredVersion?: string; specVersion?: string; source: string; contentHash: string; channelCount: number; fetchedAt: string; }  // declaredVersion = info.version, read parser-free by ingestion/ (shallow yaml read, G12) — NOT the requested version (they differ in v1 branch mode). specVersion = the AsyncAPI DOCUMENT version (the `asyncapi` field, e.g. '3.1.0'), read in the same parser-free pass — which spec major this service is on (D-018), not the service's own info.version. fetchedAt (ISO8601, propagated from the lockfile `fetched-at`) = spec provenance/age for TRUST CALIBRATION — the tool validates against the spec AS FETCHED, never the live service; surfaced NEUTRALLY (no stale threshold) by GET /specs + status (design §7, Mode 3)
 interface ScenarioInfo { name: string; when?: string; stepCount: number; source: string; }  // GET /scenarios discovery (P8): `when` = the reactive trigger topic (absent ⇒ on-demand/trigger-only); source = scenario file path
 interface Diagnostic { kind: 'scenario-load' | 'overlap' | 'spec-load' | 'uninstantiated';
   severity: 'error' | 'warning' | 'info'; detail: string; source?: string; scenarioName?: string; }
@@ -298,6 +300,12 @@ interface Diagnostic { kind: 'scenario-load' | 'overlap' | 'spec-load' | 'uninst
 //   ADDRESS goes in `source?`; teaching `detail` ("validates green but its schema constrains nothing — passing here is
 //   unverified"). Scoped tight to the unambiguous vacuous shapes — NOT a graded quality score (deferred). FATAL load
 //   failures (unreachable/unparseable spec) do NOT appear here — they abort `up` in the foreground (design §7 Mode 1).
+//   'spec-load' ALSO carries the REGISTRY-TIME findings of `SpecRegistry.diagnostics()` (§1, D-018): findings only the
+//   catalog build can see, so they cannot be recomputed from a Channel. The kind union stays closed (four values, and
+//   DiagnosticSummary.byKind keeps exactly those four keys, zero-filled); each finding is instead machine-identified by
+//   a stable tag prefix on `detail` (the tag, then `: `, then the sentence): 'binding-on-channel',
+//   'binding-invalid-value', 'binding-unknown-key', 'mqtt5-field-ignored', 'dialect-mismatch', 'schema-compile-failed'.
+//   Channel ADDRESS in `source?` as above, so filtering by tag and by address both work.
 
 interface ValidationSummary {    // the CI-facing payload of GET /v1/validation
   errors: number;                // count of severity === 'error' violations (within the retained window)
@@ -365,6 +373,7 @@ interface ResolvedSpec {
   resolvedSha: string;      // FULL canonical commit sha (40 hex sha-1 / 64 hex sha-256) — the pin, never abbreviated
   source: string;           // human origin, e.g. "dev@org/service-b:asyncapi.yaml"
   declaredVersion?: string; // info.version — shallow parser-free read by ingestion/ (G12), not the registry parse; best-effort (absent ⇒ undefined)
+  specVersion?: string;     // the `asyncapi` document version (e.g. '3.1.0') — same parser-free pass; best-effort (absent ⇒ undefined)
   fetchedAt: string;        // ISO8601
 }
 
@@ -421,6 +430,7 @@ interface LockEntry {
   resolvedSha: string;                 // FULL canonical commit sha — never abbreviated
   specPath: string;
   declaredVersion?: string;        // info.version
+  specVersion?: string;            // the `asyncapi` document version
   contentHash: string;                 // "sha256:…"
   fetchedAt: string;                   // ISO8601
   resolvedVersion?: string;            // v2 only — semver after range policy
@@ -439,6 +449,7 @@ services:
     resolved-sha: 9f2c3a1b4d5e6f70819a2b3c4d5e6f7081929a3b   # FULL commit sha
     spec-path: asyncapi.yaml
     declared-version: 2.0.0    # info.version
+    spec-version: 3.1.0             # the `asyncapi` document version (optional, best-effort)
     content-hash: sha256:c1d2…      # byte fingerprint
     fetched-at: 2026-06-23T…
     # resolved-version:  (v2 only — semver after range policy)
@@ -448,6 +459,7 @@ services:
 
 - Recording **`resolved-ref` + full `resolved-sha` + `content-hash`** in v1 lays the **data** for reproducibility; the **guarantee itself is realized in v2** by the `up --frozen` reader (§6 GitRefResolver bullet) — rebuild the exact mock even after the branch moves by re-resolving each service at its `resolved-sha`. v1 *writes* the SHA but never reads it back; the byte-identical acceptance test is a **v2** check against a **pinned SHA**, not a live tip (a mutable tip has no operationally-definable byte-identity).
 - **`declared-version` is written by `ingestion/`, parser-free (G12).** Ingestion does a **shallow `info.version` read with the `yaml` lib** (already a dependency) on the fetched bytes — **no `@asyncapi/parser` import** — so the lockfile `declared-version` and `SpecInfo.declaredVersion` are populated without serializing ingestion behind `registry/`'s full parse. It is best-effort: absent `info.version` ⇒ the field stays `undefined` (optional on both `ResolvedSpec` and `LockEntry`).
+- **`spec-version` rides the same parser-free pass (D-018).** Alongside `info.version`, ingestion reads the document's **`asyncapi`** field and records it as `spec-version` in the lockfile and `SpecInfo.specVersion`, so `GET /v1/specs` answers which spec major each service is on. It is **not** `requested-version` and **not** `declared-version`: those are the service's own release version, this is the AsyncAPI document version (`2.0.0`…`3.1.0`, the supported range). Optional and best-effort on the same terms: an unreadable or absent `asyncapi` field leaves it `undefined` and the key is omitted from the YAML. `offbook doctor` deliberately does **not** report it: doctor's spec checks are network-free, while the spec text lives in a remote repo that only `ingestion/` fetches.
 - The declared-vs-requested **drift-check is v2** (v1 always fetches a branch tip, so there's no resolved semver to check).
 - **Seam-complete:** `environments.yaml` exists in v1 so `requested-version` is real and the requested-vs-resolved gap is *honestly visible*; v2 swaps `StaticManifestSource → ReleaseToolingSource` with no restructure. *(F20: kept deliberately — the honest requested-vs-resolved provenance is judged worth the v1 carry, over deferring the unused machinery to v2.)*
 

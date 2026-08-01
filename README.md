@@ -31,6 +31,7 @@ other side of every topic and tells you when either side breaks the contract.
 
 - [Bun](https://bun.sh) >= 1.3 (the `engines.bun` floor in `package.json`)
 - git access to the host your AsyncAPI spec repos live on
+- AsyncAPI specs at **2.0.0-2.6.0, 3.0.0, or 3.1.0** (3.1.0 recommended). AsyncAPI 1.x is not supported: convert it with `asyncapi convert` first.
 
 ## Quickstart (zero config)
 

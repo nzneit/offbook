@@ -17,6 +17,7 @@ import {
 // (the real matcher behavior is R-004-tested in registry/; dispatch only
 // delegates to it, so a stub keeps this test transport- and parser-free).
 const stubRegistry: SpecRegistry = {
+	diagnostics: () => [],
 	match(topic: string) {
 		const mk = (address: string, params: Record<string, string>) => ({
 			channel: {

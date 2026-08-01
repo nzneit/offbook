@@ -1,14 +1,22 @@
 // R-028 — the §5 validation-correctness v1 gate, cross-cutting over the
-// module bars (R-004 registry, R-015 validation): the three named fixtures
+// module bars (R-004 registry, R-015 validation): the named fixtures
 // drive the COMPOSED stack end to end. A false negative (off-contract
 // payload passing green) or false positive (clean payload flagged) on any
 // of them is a tool-killer; qos-overrides also proves the tier-2/tier-3
 // config resolution reaches the wire (F14).
+//
+// multi-format and v2-oldest extend the gate across the SUPPORTED-VERSION
+// range (D-018): the newest major's explicit Multi Format Schema Object
+// payload and the oldest major's publish/subscribe form. Both shipped a
+// real false negative (a wrapper schema with no keywords accepted
+// everything; a 2.x binding validated by nothing reached a typed field),
+// so the composed-stack rejection of a known-bad payload on each is the
+// point of their entries here, not a unit-level detail.
 // [itest->R-028]
 import { afterEach, expect, test } from "bun:test";
 import { type Composed, compose } from "#src/compose/index.ts";
 import { loadConfig, loadServices } from "#src/config/index.ts";
-import type { StateEntry, Violation } from "#src/model/index.ts";
+import type { Direction, StateEntry, Violation } from "#src/model/index.ts";
 import { buildRegistry } from "#src/registry/index.ts";
 
 const FIXTURES = `${import.meta.dir}/../fixtures/asyncapi`;
@@ -48,7 +56,12 @@ async function bootFixture(
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify(body),
 			})
-		).json()) as { matched: boolean; injected: boolean; sinceSeq: number };
+		).json()) as {
+			direction: Direction | null;
+			matched: boolean;
+			injected: boolean;
+			sinceSeq: number;
+		};
 	const violationsSince = async (seq: number) =>
 		(
 			(await (await req(`/v1/validation?sinceSeq=${seq}`)).json()) as {
@@ -155,4 +168,108 @@ test("qos-overrides: tier-2 topicOverrides beats the tier-3 per-service default 
 	const flagged = await fx.violationsSince(bad.sinceSeq);
 	expect(flagged[0]?.kind).toBe("schema");
 	expect(flagged[0]?.errors?.[0]?.keyword).toBe("enum");
+});
+
+// [itest->R-038]
+test("multi-format (3.1.0): the Multi Format Schema Object payload is enforced through the stack in BOTH directions, never accepted wholesale", async () => {
+	const fx = await bootFixture(4, "multi-format.yaml");
+
+	// false-negative check, toClient: the wrapper's INNER schema is what
+	// validates. Spread verbatim it carries no validation keywords, so this
+	// payload passed green through the whole stack before D-018.
+	const bad = await fx.post("/v1/publish", {
+		topic: "reading/s-1",
+		payload: { sensorId: "s-1", celsius: "hot" },
+	});
+	expect(bad).toMatchObject({
+		direction: "toClient",
+		matched: true,
+		injected: true,
+	}); // delivered
+	const flagged = await fx.violationsSince(bad.sinceSeq);
+	expect(flagged).toHaveLength(1);
+	expect(flagged[0]?.kind).toBe("schema");
+	expect(flagged[0]?.errors?.[0]?.keyword).toBe("type");
+
+	// false-positive check: the clean payload raises nothing
+	const ok = await fx.post("/v1/publish", {
+		topic: "reading/s-1",
+		payload: { sensorId: "s-1", celsius: 21.5 },
+	});
+	expect(await fx.violationsSince(ok.sinceSeq)).toEqual([]);
+
+	// the client-publish path carries the wrapper too: a fromClient channel
+	// (action: receive) rejects an off-contract publish on the same terms
+	const badIn = await fx.post("/v1/publish", {
+		topic: "calibrate/s-1",
+		payload: { offset: "way-off" },
+	});
+	expect(badIn).toMatchObject({
+		direction: "fromClient",
+		matched: true,
+		injected: true,
+	});
+	const flaggedIn = await fx.violationsSince(badIn.sinceSeq);
+	expect(flaggedIn).toHaveLength(1);
+	expect(flaggedIn[0]?.kind).toBe("schema");
+	expect(flaggedIn[0]?.errors?.[0]?.keyword).toBe("type");
+
+	const okIn = await fx.post("/v1/publish", {
+		topic: "calibrate/s-1",
+		payload: { offset: 0.5 },
+	});
+	expect(await fx.violationsSince(okIn.sinceSeq)).toEqual([]);
+});
+
+// [itest->R-037]
+// [itest->R-039]
+test("v2-oldest (2.0.0): the floor of the range loads, its subscribe/publish inversion validates the right way round, and its mqtt binding reaches the wire", async () => {
+	const fx = await bootFixture(5, "v2-oldest.yaml");
+
+	// the 2.x `subscribe` operation binding (qos 2 + retain) reaches the wire,
+	// which nothing upstream validates: 2.x maps `mqtt` to an empty schema
+	const ok = await fx.post("/v1/publish", {
+		topic: "legacy/d-1/telemetry",
+		payload: { deviceId: "d-1", celsius: 21 },
+	});
+	expect(ok.direction).toBe("toClient"); // 2.x `subscribe` = the SERVICE publishes
+	expect(await fx.violationsSince(ok.sinceSeq)).toEqual([]);
+	const entry = (await fx.state()).find(
+		(e) => e.topic === "legacy/d-1/telemetry",
+	);
+	expect(entry?.qos).toBe(2);
+	expect(entry?.retain).toBe(true);
+
+	// false-negative check on the oldest major: an off-type payload is flagged
+	const bad = await fx.post("/v1/publish", {
+		topic: "legacy/d-1/telemetry",
+		payload: { deviceId: "d-1", celsius: "warm" },
+	});
+	expect(bad).toMatchObject({ matched: true, injected: true }); // delivered
+	const flagged = await fx.violationsSince(bad.sinceSeq);
+	expect(flagged).toHaveLength(1);
+	expect(flagged[0]?.kind).toBe("schema");
+	expect(flagged[0]?.errors?.[0]?.keyword).toBe("type");
+
+	// the `publish` operation normalized to fromClient (the inversion the 2.x
+	// spec mandates), and its message schema is enforced on that path too
+	const badIn = await fx.post("/v1/publish", {
+		topic: "legacy/d-1/command",
+		payload: { mode: "broil" },
+	});
+	expect(badIn).toMatchObject({
+		direction: "fromClient",
+		matched: true,
+		injected: true,
+	});
+	const flaggedIn = await fx.violationsSince(badIn.sinceSeq);
+	expect(flaggedIn).toHaveLength(1);
+	expect(flaggedIn[0]?.kind).toBe("schema");
+	expect(flaggedIn[0]?.errors?.[0]?.keyword).toBe("enum");
+
+	const okIn = await fx.post("/v1/publish", {
+		topic: "legacy/d-1/command",
+		payload: { mode: "heat" },
+	});
+	expect(await fx.violationsSince(okIn.sinceSeq)).toEqual([]);
 });

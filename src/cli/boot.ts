@@ -73,6 +73,7 @@ export async function bootProject(opts: ProjectBootOptions): Promise<Composed> {
 			infos.push({
 				service: name,
 				declaredVersion: spec.declaredVersion,
+				specVersion: spec.specVersion,
 				source: spec.source,
 				contentHash: spec.contentHash,
 				channelCount: registry.channels().length,

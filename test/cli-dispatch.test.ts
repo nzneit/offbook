@@ -720,6 +720,7 @@ test("mergeRegistries: one registry over all services — most-specific wins acr
 			validate: () => [],
 		}) as unknown as Channel;
 	const regOf = (...channels: Channel[]): SpecRegistry => ({
+		diagnostics: () => [],
 		channels: () => channels,
 		match: () => undefined,
 		matchesFilter: () => false,

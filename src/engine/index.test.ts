@@ -41,6 +41,7 @@ function makeChannel(
 function makeRegistry(): SpecRegistry {
 	const state = makeChannel("state/{deviceId}", stateSchema, 2, true);
 	return {
+		diagnostics: () => [],
 		match(topic: string) {
 			const m = topic.match(/^state\/([^/]+)$/);
 			if (m?.[1]) return { channel: state, params: { deviceId: m[1] } };
@@ -399,6 +400,7 @@ test("tick() dispatches every handler in precedence order; the tick index advanc
 function permissiveRegistry(): SpecRegistry {
 	const ch = makeChannel("thing/{id}", { type: "object" }, 1, false);
 	return {
+		diagnostics: () => [],
 		match(topic: string) {
 			const m = topic.match(/^thing\/([^/]+)$/);
 			if (m?.[1]) return { channel: ch, params: { id: m[1] } };
@@ -412,6 +414,7 @@ function permissiveRegistry(): SpecRegistry {
 function brokenRegistry(): SpecRegistry {
 	const ch = makeChannel("broken/{id}", { not: {} }, 1, true);
 	return {
+		diagnostics: () => [],
 		match(topic: string) {
 			const m = topic.match(/^broken\/([^/]+)$/);
 			if (m?.[1]) return { channel: ch, params: { id: m[1] } };
@@ -568,6 +571,7 @@ test("a '+' inside a topic level is not a wildcard: the subscribe materializes (
 function literalRegistry(): SpecRegistry {
 	const ch = makeChannel("plain/topic", { type: "object" }, 1, false);
 	return {
+		diagnostics: () => [],
 		match: (topic: string) =>
 			topic === "plain/topic" ? { channel: ch, params: {} } : undefined,
 		matchesFilter: () => false,
@@ -735,6 +739,7 @@ function fromClientRegistry(): SpecRegistry {
 		retain: false,
 	};
 	return {
+		diagnostics: () => [],
 		match(topic: string) {
 			const m = topic.match(/^cmd\/([^/]+)$/);
 			if (m?.[1]) return { channel: ch, params: { id: m[1] } };

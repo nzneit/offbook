@@ -8,9 +8,11 @@ import { buildRegistry } from "#src/registry/index.ts";
 export const SPIKE_FIXTURES = [
 	"composition.yaml",
 	"external-ref.yaml",
+	"multi-format.yaml",
 	"qos-overrides.yaml",
 	"qos-retain.yaml",
 	"thermostat.yaml",
+	"v2-oldest.yaml",
 	"v2-pubsub.yaml",
 ];
 

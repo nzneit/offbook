@@ -18,7 +18,7 @@
 | Lint / format | **Biome** | single fast tool |
 | Control-plane HTTP | **Hono** | tiny, typed routing, Bun-native |
 | Broker | **Aedes** | ws + tcp, MQTT 3.1.1 (§3) |
-| AsyncAPI | **`@asyncapi/parser`** (3.x) | parse + validate; dereferences `$ref` before validating (§5) |
+| AsyncAPI | **`@asyncapi/parser`** (`^3.6.0`) | parse + validate; dereferences `$ref` before validating (§5). Its `@asyncapi/specs` transitive is **also a devDependency**, used only by `test/upstream-drift.test.ts` to pin offbook's hand-authored version set and mqtt binding key set against the installed schemas; `src/` never imports it (D-019) |
 | Schema validation | **Ajv** 8 + `ajv-formats` | runtime payload validation |
 | Fake data | **`json-schema-faker@0.6.2`** | pinned exact; seeded via its **native `seed`** option (Mulberry32-based; no second PRNG wraps it — R4); Ajv-recheck before emit (§4) |
 | YAML | **`yaml`** | config + scenario + spec parsing |
