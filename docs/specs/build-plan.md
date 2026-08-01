@@ -20,12 +20,12 @@
 | Broker | **Aedes** | ws + tcp, MQTT 3.1.1 (§3) |
 | AsyncAPI | **`@asyncapi/parser`** (`^3.6.0`) | parse + validate; dereferences `$ref` before validating (§5). Its `@asyncapi/specs` transitive is **also a devDependency**, used only by `test/upstream-drift.test.ts` to pin offbook's hand-authored version set and mqtt binding key set against the installed schemas; `src/` never imports it (D-019) |
 | Schema validation | **Ajv** 8 + `ajv-formats` | runtime payload validation |
-| Fake data | **`json-schema-faker@0.6.2`** | pinned exact; seeded via its **native `seed`** option (Mulberry32-based; no second PRNG wraps it — R4); Ajv-recheck before emit (§4) |
+| Fake data | **`json-schema-faker@0.6.3`** | pinned exact; seeded via its **native `seed`** option (Mulberry32-based; no second PRNG wraps it — R4); Ajv-recheck before emit (§4). Bumped from 0.6.2 on measured neutrality (D-020): 0/350 recheck failures and **byte-identical draws** across the two versions over the R-027 corpus |
 | YAML | **`yaml`** | config + scenario + spec parsing |
 | Topic matching | **`mqtt-pattern`** | `exec` on the `{p}`→`+p`-rewritten channel address for capture (mqtt-pattern uses `+name`, **not** `{param}`) + `matches` for the native `+`/`#` filter; pure-string, no transport dep; powers `registry/`'s `match` + `matchesFilter` (F6/R2). Parity-spiked: the `{p}`→`+p` rewrite reproduces AsyncAPI single-segment capture (§5) |
 | Git fetch | **shell out to `git`** | host-agnostic; reuses existing creds. **v1 — branch-tip mode:** shallow-fetch the branch ref + read the file, recording the **post-fetch SHA**. **v2 — by-SHA (frozen) mode:** `git ls-remote → SHA`, then `git fetch <repoUrl> <sha>` into a temp repo (server `uploadpack.allowAnySHA1InWant`; **not** `git archive --remote`, which hosts refuse for an unadvertised SHA) + the **F17** history-walk fallback. |
 
-> Pin exact versions at scaffold time; `json-schema-faker` is pinned to **0.6.2** per §4 (the rewrite is recent — lean on the Ajv recheck). `json-schema-faker`'s `faker`/`chance` are optional extensions and **not** needed (the Mulberry32 seed covers determinism).
+> Pin exact versions at scaffold time; `json-schema-faker` is pinned to **0.6.3** per §4 (the rewrite is recent — lean on the Ajv recheck). A bump is taken only when it is **measured** not to move the R-027 corpus, byte-for-byte, since a faker that draws valid-but-different data would break every pinned expectation (D-020). `json-schema-faker`'s `faker`/`chance` are optional extensions and **not** needed (the Mulberry32 seed covers determinism).
 
 ## 2. Repo scaffold
 
@@ -116,7 +116,7 @@ These gate/scope the build and are **not** on the module critical path — run t
 2. **Capture the browser application's `connect()`** — auth fields, ws URL/path, subprotocol, protocol level; note any **QoS 2** use. *Artifact:* a config fixture + the broker ws port default.
 3. **Adopt-vs-build** — already resolved (build justified, §12.6); the residual is an ergonomic fit check against the real specs, not a blocker.
 4. **`mqtt-pattern` parity spike (F6/R2)** — confirm the **`{p}`→`+p` rewrite** reproduces AsyncAPI single-segment capture exactly (mqtt-pattern matches `{param}` *literally* — it does **not** read braces natively) and that `matches` implements MQTT `+`/`#` exactly (incl. `#` matching zero trailing levels) on the fixture channel addresses; it is pure-string with no transport deps. *Artifact:* go/no-go for R2 = rewrite round-trip fidelity; on failure `registry/` falls back to a hand-rolled matcher. Gates `registry/`'s matcher only.
-5. **json-schema-faker fidelity spike (F8)** — run JSF 0.6.2 against every `fixtures/asyncapi/*` bundled `channel.schema` and count Ajv-recheck failures per fixture (esp. `external-ref`'s `oneOf`/external-`$ref`, and `qos-overrides`). *Artifact:* a per-fixture recheck-failure rate; if a §5 bar fixture fails, it decides whether F5's keyed-fallback re-draw is needed (else drop-and-surface stands). Gates L1's CI reliance.
+5. **json-schema-faker fidelity spike (F8)** — run JSF (pinned version; 0.6.2 at first measurement, re-measured on the 0.6.3 bump, D-020) against every `fixtures/asyncapi/*` bundled `channel.schema` and count Ajv-recheck failures per fixture (esp. `external-ref`'s `oneOf`/external-`$ref`, and `qos-overrides`). *Artifact:* a per-fixture recheck-failure rate; if a §5 bar fixture fails, it decides whether F5's keyed-fallback re-draw is needed (else drop-and-surface stands). Gates L1's CI reliance.
 
 ---
 

@@ -11,7 +11,7 @@
         "ajv": "^8.17.1",
         "ajv-formats": "^3.0.1",
         "hono": "^4.6.0",
-        "json-schema-faker": "0.6.2",
+        "json-schema-faker": "0.6.3",
         "mqtt-pattern": "^1.2.0",
         "yaml": "^2.5.0",
       },
@@ -517,7 +517,7 @@
 
     "json-rpc-2.0": ["json-rpc-2.0@1.7.1", "", {}, "sha512-JqZjhjAanbpkXIzFE7u8mE/iFblawwlXtONaCvRqI+pyABVz7B4M1EUNpyVW+dZjqgQ2L5HFmZCmOCgUKm00hg=="],
 
-    "json-schema-faker": ["json-schema-faker@0.6.2", "", { "bin": { "jsf": "dist/bin/cli.js" } }, "sha512-jhOV/bIUxTPM3DiKaa9YDI9UIhO6md1wBnopuIleXATBCwBxnpEfUG0KZqWJS0nTc7nGeWu6ve4vL7Sk7l2BKA=="],
+    "json-schema-faker": ["json-schema-faker@0.6.3", "", { "bin": { "jsf": "dist/bin/cli.js" } }, "sha512-rsH48E/b5KFpgvKlcFjplB+zwOZk2FhYCQwcM6y09ApZkVl3D7PhcRIrDhpfR+w1AhNOrv0bumJElBz4X++KBA=="],
 
     "json-schema-traverse": ["json-schema-traverse@1.0.0", "", {}, "sha512-NM8/P9n3XjXhIZn1lLhkFaACTOURQXjWhV4BA/RnOv8xvgqtqpAX9IO4mRQxSx1Rlo4tqzeqb0sOlruaOy3dug=="],
 

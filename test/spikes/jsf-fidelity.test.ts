@@ -6,6 +6,9 @@ import { SPIKE_FIXTURES, measureFixture } from "#scripts/spike-jsf-fidelity.ts";
 // R-027 tripwire: pins the measured per-fixture recheck-failure counts so a
 // JSF/schema regression is loud, not silent. Update EXPECTED only with a
 // re-measurement + a D-### note (the D-008 verdict rests on these).
+// Re-measured 2026-08-01 on the json-schema-faker 0.6.2 -> 0.6.3 bump (D-020):
+// every count below unchanged, and the draws are byte-identical across the two
+// versions, so the bump is invisible to this tripwire by measurement, not luck.
 // Pins { draws, failures } per fixture (not failures alone) so a fixture that
 // silently parsed to zero channels cannot vacuously pass as 0/0.
 const SEEDS = Array.from({ length: 10 }, (_, i) => i + 1);

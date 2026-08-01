@@ -17,11 +17,13 @@ export function canonicalize(params?: Record<string, string>): string {
 }
 
 export function createFaker(config: Config): Faker {
-	// Static JSF options, set once at construction. json-schema-faker 0.6.2 has
+	// Static JSF options, set once at construction. json-schema-faker 0.6.3 has
 	// no `JSONSchemaFaker` singleton / `.option()` mutator (it exports plain
 	// functions instead); the per-call seed is passed straight into `generate`'s
 	// options on each call below, so there is no global/module state to race on
 	// (D-003 consequence #3 doesn't apply to this API shape).
+	// 0.6.3 does add `generateSync`, which retires D-003's async-only premise but
+	// not the decision: `Faker` stays async by contract (D-020).
 	const staticOptions = {
 		alwaysFakeOptionals: true,
 		failOnInvalidTypes: false,
