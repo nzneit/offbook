@@ -11,6 +11,7 @@ import type {
 	ServiceConfig,
 	VersionSource,
 } from "#src/model/index.ts";
+import { readSpecVersion } from "#src/model/spec-version.ts";
 
 // ingestion/ imports NO @asyncapi/parser (G12). It shells out to `git` for fetch, and uses `yaml`
 // only for (a) a shallow info.version read of the fetched spec and (b) serializing the lockfile.
@@ -155,6 +156,7 @@ export class GitRefResolver implements Resolver {
 				resolvedSha,
 				source: `${ref}@${repo}:${specPath}`, // keeps the authored repo form (slug or URL)
 				declaredVersion: readDeclaredVersion(content),
+				specVersion: readSpecVersion(content),
 				fetchedAt: new Date().toISOString(),
 			};
 		} finally {
@@ -190,6 +192,7 @@ export function buildLockEntry(
 		resolvedSha: resolved.resolvedSha,
 		specPath: resolved.specPath,
 		declaredVersion: resolved.declaredVersion,
+		specVersion: resolved.specVersion,
 		contentHash: resolved.contentHash,
 		fetchedAt: resolved.fetchedAt,
 	};
@@ -214,6 +217,9 @@ export function serializeLockfile(lock: Lockfile): string {
 					"spec-path": e.specPath,
 					...(e.declaredVersion !== undefined
 						? { "declared-version": e.declaredVersion }
+						: {}),
+					...(e.specVersion !== undefined
+						? { "spec-version": e.specVersion }
 						: {}),
 					"content-hash": e.contentHash,
 					"fetched-at": e.fetchedAt,

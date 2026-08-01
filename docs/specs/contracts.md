@@ -285,7 +285,7 @@ interface Violation {
 interface TopicInfo { topic: string; direction: Direction; service: string;
   title?: string; description?: string; schema: object; example?: unknown; qos?: 0|1|2; retain?: boolean; }
 interface StateEntry { topic: string; payload: unknown; qos?: 0|1|2; retain: true; }  // retain is always true — clearing a retained topic EVICTS it (§2), so /state never returns tombstones; a decode-failure (§2) is never stored, so payload is always a successfully-decoded value
-interface SpecInfo { service: string; declaredVersion?: string; source: string; contentHash: string; channelCount: number; fetchedAt: string; }  // declaredVersion = info.version, read parser-free by ingestion/ (shallow yaml read, G12) — NOT the requested version (they differ in v1 branch mode). fetchedAt (ISO8601, propagated from the lockfile `fetched-at`) = spec provenance/age for TRUST CALIBRATION — the tool validates against the spec AS FETCHED, never the live service; surfaced NEUTRALLY (no stale threshold) by GET /specs + status (design §7, Mode 3)
+interface SpecInfo { service: string; declaredVersion?: string; specVersion?: string; source: string; contentHash: string; channelCount: number; fetchedAt: string; }  // declaredVersion = info.version, read parser-free by ingestion/ (shallow yaml read, G12) — NOT the requested version (they differ in v1 branch mode). specVersion = the AsyncAPI DOCUMENT version (the `asyncapi` field, e.g. '3.1.0'), read in the same parser-free pass — which spec major this service is on (D-018), not the service's own info.version. fetchedAt (ISO8601, propagated from the lockfile `fetched-at`) = spec provenance/age for TRUST CALIBRATION — the tool validates against the spec AS FETCHED, never the live service; surfaced NEUTRALLY (no stale threshold) by GET /specs + status (design §7, Mode 3)
 interface ScenarioInfo { name: string; when?: string; stepCount: number; source: string; }  // GET /scenarios discovery (P8): `when` = the reactive trigger topic (absent ⇒ on-demand/trigger-only); source = scenario file path
 interface Diagnostic { kind: 'scenario-load' | 'overlap' | 'spec-load' | 'uninstantiated';
   severity: 'error' | 'warning' | 'info'; detail: string; source?: string; scenarioName?: string; }
@@ -373,6 +373,7 @@ interface ResolvedSpec {
   resolvedSha: string;      // FULL canonical commit sha (40 hex sha-1 / 64 hex sha-256) — the pin, never abbreviated
   source: string;           // human origin, e.g. "dev@org/service-b:asyncapi.yaml"
   declaredVersion?: string; // info.version — shallow parser-free read by ingestion/ (G12), not the registry parse; best-effort (absent ⇒ undefined)
+  specVersion?: string;     // the `asyncapi` document version (e.g. '3.1.0') — same parser-free pass; best-effort (absent ⇒ undefined)
   fetchedAt: string;        // ISO8601
 }
 
@@ -429,6 +430,7 @@ interface LockEntry {
   resolvedSha: string;                 // FULL canonical commit sha — never abbreviated
   specPath: string;
   declaredVersion?: string;        // info.version
+  specVersion?: string;            // the `asyncapi` document version
   contentHash: string;                 // "sha256:…"
   fetchedAt: string;                   // ISO8601
   resolvedVersion?: string;            // v2 only — semver after range policy
@@ -447,6 +449,7 @@ services:
     resolved-sha: 9f2c3a1b4d5e6f70819a2b3c4d5e6f7081929a3b   # FULL commit sha
     spec-path: asyncapi.yaml
     declared-version: 2.0.0    # info.version
+    spec-version: 3.1.0             # the `asyncapi` document version (optional, best-effort)
     content-hash: sha256:c1d2…      # byte fingerprint
     fetched-at: 2026-06-23T…
     # resolved-version:  (v2 only — semver after range policy)
@@ -456,6 +459,7 @@ services:
 
 - Recording **`resolved-ref` + full `resolved-sha` + `content-hash`** in v1 lays the **data** for reproducibility; the **guarantee itself is realized in v2** by the `up --frozen` reader (§6 GitRefResolver bullet) — rebuild the exact mock even after the branch moves by re-resolving each service at its `resolved-sha`. v1 *writes* the SHA but never reads it back; the byte-identical acceptance test is a **v2** check against a **pinned SHA**, not a live tip (a mutable tip has no operationally-definable byte-identity).
 - **`declared-version` is written by `ingestion/`, parser-free (G12).** Ingestion does a **shallow `info.version` read with the `yaml` lib** (already a dependency) on the fetched bytes — **no `@asyncapi/parser` import** — so the lockfile `declared-version` and `SpecInfo.declaredVersion` are populated without serializing ingestion behind `registry/`'s full parse. It is best-effort: absent `info.version` ⇒ the field stays `undefined` (optional on both `ResolvedSpec` and `LockEntry`).
+- **`spec-version` rides the same parser-free pass (D-018).** Alongside `info.version`, ingestion reads the document's **`asyncapi`** field and records it as `spec-version` in the lockfile and `SpecInfo.specVersion`, so `GET /v1/specs` answers which spec major each service is on. It is **not** `requested-version` and **not** `declared-version`: those are the service's own release version, this is the AsyncAPI document version (`2.0.0`…`3.1.0`, the supported range). Optional and best-effort on the same terms: an unreadable or absent `asyncapi` field leaves it `undefined` and the key is omitted from the YAML. `offbook doctor` deliberately does **not** report it: doctor's spec checks are network-free, while the spec text lives in a remote repo that only `ingestion/` fetches.
 - The declared-vs-requested **drift-check is v2** (v1 always fetches a branch tip, so there's no resolved semver to check).
 - **Seam-complete:** `environments.yaml` exists in v1 so `requested-version` is real and the requested-vs-resolved gap is *honestly visible*; v2 swaps `StaticManifestSource → ReleaseToolingSource` with no restructure. *(F20: kept deliberately — the honest requested-vs-resolved provenance is judged worth the v1 carry, over deferring the unused machinery to v2.)*
 

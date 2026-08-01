@@ -151,6 +151,8 @@ test("resolveServices resolves all services (bounded), warns per branch, builds 
 	expect(lockfile.resolutionMode).toBe("branch");
 	expect(lockfile.services.svc.requestedVersion).toBe("9.9.9"); // recorded, unhonored (v1)
 	expect(lockfile.services.svc.declaredVersion).toBe("4.2.0");
+	// [utest->R-037] the `asyncapi` field rides the same parser-free read
+	expect(lockfile.services.svc.specVersion).toBe("3.0.0");
 	expect(warnings).toHaveLength(1);
 	expect(warnings[0]).toContain("branch tip 'main'"); // honesty warning names the branch
 
@@ -159,6 +161,53 @@ test("resolveServices resolves all services (bounded), warns per branch, builds 
 	expect(yaml).toContain("resolved-sha: ");
 	expect(yaml).toContain("requested-version: ");
 	expect(yaml).not.toContain("resolvedSha"); // not camelCase
+});
+
+// [utest->R-037]
+test("the lockfile records the AsyncAPI spec version beside the declared version", () => {
+	const lock = serializeLockfile({
+		lockfileVersion: 1,
+		environment: "default",
+		resolutionMode: "branch",
+		generatedAt: "2026-07-30T00:00:00.000Z",
+		services: {
+			svc: {
+				requestedVersion: "1.0.0",
+				resolutionStrategy: "branch",
+				resolvedRef: "main",
+				resolvedSha: "0".repeat(40),
+				specPath: "asyncapi.yaml",
+				declaredVersion: "4.2.0",
+				specVersion: "3.1.0",
+				contentHash: "sha256:abc",
+				fetchedAt: "2026-07-30T00:00:00.000Z",
+			},
+		},
+	});
+	expect(lock).toContain("spec-version: 3.1.0");
+	expect(lock).toContain("declared-version: 4.2.0");
+});
+
+// [utest->R-037]
+test("spec-version is omitted when the asyncapi field is unreadable", () => {
+	const lock = serializeLockfile({
+		lockfileVersion: 1,
+		environment: "default",
+		resolutionMode: "branch",
+		generatedAt: "2026-07-30T00:00:00.000Z",
+		services: {
+			svc: {
+				requestedVersion: "1.0.0",
+				resolutionStrategy: "branch",
+				resolvedRef: "main",
+				resolvedSha: "0".repeat(40),
+				specPath: "asyncapi.yaml",
+				contentHash: "sha256:abc",
+				fetchedAt: "2026-07-30T00:00:00.000Z",
+			},
+		},
+	});
+	expect(lock).not.toContain("spec-version");
 });
 
 test("ingestion/ imports no @asyncapi/parser (G12 — parser-free)", async () => {
