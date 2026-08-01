@@ -234,6 +234,10 @@ test("a malformed spec surfaces the parser's own diagnostics, not a version erro
 	// A YAML syntax error is not a version problem, and `asyncapi convert` is not
 	// its remedy. Spec-load failure is fatal and aborts `up` (design §7 Mode 1),
 	// so this message is the whole error an adopter sees (R-036, D-019).
+	// `Promise.catch` unions its handler's return with the promise's own resolve
+	// type (here `SpecRegistry`), so `as Error` is a compile-time-only cast: it
+	// tells the type-checker what the rejection actually is without touching the
+	// runtime value.
 	const err = (await buildRegistry({
 		specText: "asyncapi: 3.0.0\ninfo: {title: T\n  bad indent: ][",
 		service: "svc-a",
