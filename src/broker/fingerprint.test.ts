@@ -4,6 +4,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { MqttClient, connectAsync as mqttConnectAsync } from "mqtt";
 import tcpStreamBuilder from "mqtt/lib/connect/tcp";
 import { loadConfig } from "#src/config/index.ts";
+import type { InboundEvent } from "#src/model/index.ts";
 import type { BrokerModule, FingerprintEvent } from "./index.ts";
 import { createBroker, fingerprintLine } from "./index.ts";
 
@@ -115,6 +116,33 @@ test("a tcp CONNECT emits a fingerprint with no ws block", async () => {
 	expect(connect).toBeDefined();
 	expect(connect?.ws).toBeUndefined();
 	expect(connect?.passwordPresent).toBe(false);
+	await client.endAsync();
+});
+
+// The tcp listener is bare node:net (D-024, replacing `aedes-server-factory`);
+// the CONNECT test above only proves the handshake, so this one proves data
+// flows through it in both directions.
+test("the tcp listener round-trips data: a tcp publish reaches onInbound, an emit reaches a tcp subscriber", async () => {
+	const inbound: InboundEvent[] = [];
+	broker.onInbound((e) => inbound.push(e));
+	const client = await connectAsync(`mqtt://localhost:${TCP}`, {
+		reconnectPeriod: 0,
+		clientId: "fp-tcp-rt",
+	});
+	const got = new Promise<string>((resolve) =>
+		client.on("message", (topic, payload) =>
+			resolve(`${topic} ${payload.toString()}`),
+		),
+	);
+	await client.subscribeAsync("state/tcp-rt", { qos: 1 });
+	await client.publishAsync("command/tcp-rt", JSON.stringify({ n: 7 }), {
+		qos: 1,
+	});
+	await broker.emit({ topic: "state/tcp-rt", payload: { ok: true }, qos: 1 });
+	expect(await got).toBe('state/tcp-rt {"ok":true}');
+	const seen = inbound.find((e) => e.message.topic === "command/tcp-rt");
+	expect(seen?.message.payload).toEqual({ n: 7 });
+	expect(seen?.message.qos).toBe(1);
 	await client.endAsync();
 });
 

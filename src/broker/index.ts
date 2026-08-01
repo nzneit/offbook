@@ -1,6 +1,6 @@
+import net from "node:net";
 import { Duplex } from "node:stream";
 import Aedes from "aedes";
-import { createServer } from "aedes-server-factory";
 import type { ServerWebSocket } from "bun";
 import type {
 	Config,
@@ -280,7 +280,13 @@ export function createBroker(config: Config): BrokerModule {
 		},
 	}) as AedesWithPersistence;
 	const wsServer = createWsListener(aedes, wsFacts);
-	const tcpServer = createServer(aedes);
+	// Bare node:net on purpose — `aedes-server-factory`'s no-options path
+	// reduced to exactly this plus a `req.connDetails` nothing here reads, and
+	// the package is unmaintained with a hard ws@7 dependency (the same package
+	// whose Bun stand-in is why the ws listener above is hand-built). D-024.
+	const tcpServer = net.createServer((socket) => {
+		aedes.handle(socket);
+	});
 	let seq = 0;
 	const inbound: Array<(e: InboundEvent) => void> = [];
 	const subs: Array<(s: { topic: string; clientId: string }) => void> = [];
