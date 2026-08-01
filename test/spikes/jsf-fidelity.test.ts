@@ -19,6 +19,10 @@ const EXPECTED: Record<string, { draws: number; failures: number }> = {
 	"qos-overrides.yaml": { draws: 20, failures: 0 },
 	"qos-retain.yaml": { draws: 10, failures: 0 },
 	"thermostat.yaml": { draws: 20, failures: 0 },
+	// re-measured 2026-07-30 when v2-oldest.yaml joined the fixture set (D-018):
+	// 2 channels x 10 seeds, zero recheck failures, so the D-008 verdict holds on
+	// the oldest-supported-major fixture too.
+	"v2-oldest.yaml": { draws: 20, failures: 0 },
 	"v2-pubsub.yaml": { draws: 20, failures: 0 },
 };
 

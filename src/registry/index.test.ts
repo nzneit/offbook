@@ -502,3 +502,105 @@ test("a single-message operation keeps its schema unwrapped by anyOf", async () 
 	expect(schema.anyOf).toBeUndefined();
 	expect(schema.type).toBe("object");
 });
+
+// [utest->R-039]
+test("the oldest supported major parses, inverts direction, and its binding is read", async () => {
+	const reg = await registryFor("v2-oldest.yaml");
+	const telemetry = reg.match("legacy/d1/telemetry")?.channel;
+	const command = reg.match("legacy/d1/command")?.channel;
+	// v2 subscribe = messages PRODUCED by the application (the service) ⇒ toClient
+	expect(telemetry?.direction).toBe("toClient");
+	// v2 publish = messages CONSUMED by the application ⇒ the client sends them
+	expect(command?.direction).toBe("fromClient");
+	expect(telemetry?.qos).toBe(2);
+	expect(telemetry?.retain).toBe(true);
+	expect(reg.diagnostics()).toEqual([]);
+});
+
+// [utest->R-039]
+test("an out-of-range binding qos is rejected and falls through the precedence chain", async () => {
+	// 2.x maps `mqtt` to an empty schema, so qos 9 parses clean upstream and
+	// would otherwise reach a Channel typed 0 | 1 | 2
+	const spec = `asyncapi: 2.6.0
+info: { title: T, version: 1.0.0 }
+channels:
+  t/bad:
+    subscribe:
+      operationId: s
+      bindings:
+        mqtt: { qos: 9, retain: "yes" }
+      message:
+        payload: { type: object, properties: { a: { type: string } } }
+`;
+	const reg = await buildRegistry({
+		specText: spec,
+		service: "s",
+		config: DEFAULT_CONFIG,
+		serviceConfig: {
+			name: "s",
+			repo: "x",
+			specPath: "y",
+			qosDefault: 0,
+			retainDefault: true,
+		},
+	});
+	const ch = reg.match("t/bad")?.channel;
+	// falls through to the per-service default (tier 3), NOT clamped and NOT propagated
+	expect(ch?.qos).toBe(0);
+	expect(ch?.retain).toBe(true);
+	const bad = reg
+		.diagnostics()
+		.filter((d) => d.detail.startsWith("binding-invalid-value:"));
+	expect(bad.length).toBe(2);
+	expect(bad.every((d) => d.severity === "warning")).toBe(true);
+});
+
+// [utest->R-039]
+test("a misspelled binding key is reported against the official key set", async () => {
+	const spec = `asyncapi: 2.6.0
+info: { title: T, version: 1.0.0 }
+channels:
+  t/typo:
+    subscribe:
+      operationId: s
+      bindings:
+        mqtt: { qos: 1, retian: true }
+      message:
+        payload: { type: object, properties: { a: { type: string } } }
+`;
+	const reg = await buildRegistry({
+		specText: spec,
+		service: "s",
+		config: DEFAULT_CONFIG,
+	});
+	const unknown = reg
+		.diagnostics()
+		.filter((d) => d.detail.startsWith("binding-unknown-key:"));
+	expect(unknown.length).toBe(1);
+	expect(unknown[0].detail).toContain("retian");
+});
+
+// [utest->R-039]
+test("MQTT-5-only binding fields are reported as unhonored", async () => {
+	const spec = `asyncapi: 3.0.0
+info: { title: T, version: 1.0.0 }
+channels:
+  c: { address: t/five, messages: { M: { payload: { type: object, properties: { a: { type: string } } } } } }
+operations:
+  o:
+    action: send
+    channel: { $ref: '#/channels/c' }
+    bindings: { mqtt: { qos: 1, messageExpiryInterval: 60 } }
+`;
+	const reg = await buildRegistry({
+		specText: spec,
+		service: "s",
+		config: DEFAULT_CONFIG,
+	});
+	const five = reg
+		.diagnostics()
+		.filter((d) => d.detail.startsWith("mqtt5-field-ignored:"));
+	expect(five.length).toBe(1);
+	expect(five[0].detail).toContain("messageExpiryInterval");
+	expect(five[0].severity).toBe("info");
+});

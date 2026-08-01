@@ -12,6 +12,7 @@ export const SPIKE_FIXTURES = [
 	"qos-overrides.yaml",
 	"qos-retain.yaml",
 	"thermostat.yaml",
+	"v2-oldest.yaml",
 	"v2-pubsub.yaml",
 ];
 

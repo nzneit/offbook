@@ -1,4 +1,7 @@
 import { Parser } from "@asyncapi/parser";
+import mqttOperationBinding from "@asyncapi/specs/bindings/mqtt/0.2.0/operation.json" with {
+	type: "json",
+};
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import { exec, matches } from "mqtt-pattern";
@@ -77,6 +80,32 @@ const POST_DRAFT07_KEYWORDS = new Set([
 	"$dynamicAnchor",
 	"$recursiveRef",
 	"$recursiveAnchor",
+]);
+
+// The legal key set comes from the OFFICIAL binding schema rather than a
+// hardcoded list, so it tracks upstream. Only `properties` is read: the schema
+// cannot be compiled standalone (it $refs
+// http://asyncapi.com/definitions/3.0.0/schema.json, resolvable only inside the
+// bundled spec schema), and offbook consumes just qos and retain anyway.
+// Validating against 0.2.0 is permissive-correct: its property set is a
+// superset of 0.1.0's.
+const MQTT_OPERATION_KEYS = new Set(
+	Object.keys(
+		(mqttOperationBinding as { properties: Record<string, unknown> })
+			.properties,
+	),
+);
+
+// MQTT 5 only, per the "MQTT Versions" column of the binding spec. offbook is
+// MQTT 3.1.1 only, so these can never be honored and saying so beats silence.
+const MQTT5_ONLY_KEYS = new Set([
+	"messageExpiryInterval",
+	"payloadFormatIndicator",
+	"correlationData",
+	"contentType",
+	"responseTopic",
+	"sessionExpiryInterval",
+	"maximumPacketSize",
 ]);
 
 function postDraft07Keywords(
@@ -207,18 +236,69 @@ export async function buildRegistry(opts: {
 			};
 			validate = () => [compileError];
 		}
-		const mqtt = op.bindings().get("mqtt")?.value<{
-			qos?: 0 | 1 | 2;
-			retain?: boolean;
-		}>();
+		// Read untyped: 2.x maps `mqtt` to an EMPTY schema in its own
+		// meta-schema, so nothing upstream validated these values and a declared
+		// type here would be a lie (D-018).
+		const mqtt = op.bindings().get("mqtt")?.value<Record<string, unknown>>();
+		if (mqtt) {
+			const unknownKeys = Object.keys(mqtt).filter(
+				(k) => !MQTT_OPERATION_KEYS.has(k),
+			);
+			if (unknownKeys.length > 0) {
+				const bad = unknownKeys.sort().join(", ");
+				const legal = [...MQTT_OPERATION_KEYS].sort().join(", ");
+				diagnostics.push({
+					kind: "spec-load",
+					severity: "warning",
+					detail: `binding-unknown-key: '${address}' mqtt operation binding has unknown key(s) ${bad}; the mqtt binding defines ${legal}`,
+					source: address,
+				});
+			}
+			const five = Object.keys(mqtt).filter((k) => MQTT5_ONLY_KEYS.has(k));
+			if (five.length > 0) {
+				const names = five.sort().join(", ");
+				diagnostics.push({
+					kind: "spec-load",
+					severity: "info",
+					detail: `mqtt5-field-ignored: '${address}' declares MQTT 5 binding field(s) ${names}; offbook speaks MQTT 3.1.1 only, so these are not honored`,
+					source: address,
+				});
+			}
+		}
+		const rawQos = mqtt?.qos;
+		const bindingQos =
+			rawQos === 0 || rawQos === 1 || rawQos === 2 ? rawQos : undefined;
+		if (rawQos !== undefined && bindingQos === undefined) {
+			diagnostics.push({
+				kind: "spec-load",
+				severity: "warning",
+				detail: `binding-invalid-value: '${address}' mqtt binding qos is ${JSON.stringify(
+					rawQos,
+				)}; qos MUST be 0, 1 or 2, so this binding is ignored and the configured default applies`,
+				source: address,
+			});
+		}
+		const rawRetain = mqtt?.retain;
+		const bindingRetain =
+			typeof rawRetain === "boolean" ? rawRetain : undefined;
+		if (rawRetain !== undefined && bindingRetain === undefined) {
+			diagnostics.push({
+				kind: "spec-load",
+				severity: "warning",
+				detail: `binding-invalid-value: '${address}' mqtt binding retain is ${JSON.stringify(
+					rawRetain,
+				)}; retain MUST be a boolean, so this binding is ignored and the configured default applies`,
+				source: address,
+			});
+		}
 		// §2 precedence, resolved per-field: spec MQTT binding → topicOverrides (tier 2,
 		// string-equality on the {param} address, F14) → per-service default (tier 3) → global.
 		// `??` (not `||`) so a legitimate qos 0 / retain false is not treated as "unset".
 		const override = opts.serviceConfig?.topicOverrides?.[address];
 		const qos =
-			mqtt?.qos ?? override?.qos ?? opts.serviceConfig?.qosDefault ?? 1;
+			bindingQos ?? override?.qos ?? opts.serviceConfig?.qosDefault ?? 1;
 		const retain =
-			mqtt?.retain ??
+			bindingRetain ??
 			override?.retain ??
 			opts.serviceConfig?.retainDefault ??
 			false;
