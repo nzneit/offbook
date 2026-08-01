@@ -40,7 +40,7 @@ A browser-style `mqtt.js` client connects to the Aedes ws listener over MQTT 3.1
 **COVERS**: docs/specs/build-plan.md#tier-1
 **IMPL**: src/registry/
 **TEST**: src/registry/index.test.ts
-`registry/` parses every `fixtures/asyncapi/*` (including external-ref, qos-retain, qos-overrides), resolves channel direction (v2 + v3) and the qos/retain precedence chain, and its `match`/`matchesFilter` behave per the §5 correctness bar (the 2020-12 `$ref`-sibling edge is carved out to D-005, pinned by a tripwire test).
+`registry/` parses every `fixtures/asyncapi/*` (including external-ref, qos-retain, qos-overrides), resolves channel direction (v2 + v3) and the qos/retain precedence chain, and its `match`/`matchesFilter` behave per the §5 correctness bar (payloads validate under the draft-07 dialect both majors declare, so a `$ref`-sibling keyword is dialect-correctly not enforced, pinned by a tripwire test — D-018 supersedes D-005).
 
 #### ingestion/ branch-tip fetch and lockfile writer
 **UID**: R-005
@@ -296,20 +296,26 @@ Every error reachable on the clone→demo→init→wire→up→first-publish pat
 
 #### AsyncAPI supported-version contract and preflight
 **UID**: R-037
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/superpowers/specs/2026-07-30-asyncapi-version-support-design.md
+**IMPL**: src/model/spec-version.ts, src/registry/index.ts, src/ingestion/index.ts, src/cli/boot.ts
+**TEST**: src/model/spec-version.test.ts, src/registry/index.test.ts, src/ingestion/index.test.ts, test/gate-validation.test.ts
 `registry/` refuses any spec outside the tested support set (2.0.0-2.6.0, 3.0.0, 3.1.0) with a branded, actionable error naming the version, the range, and the convert remedy, checked parser-free before `parse()`; the declared version is recorded as `spec-version` in `specs.lock` and on `SpecInfo`.
 
 #### AsyncAPI payload schema boundary
 **UID**: R-038
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/superpowers/specs/2026-07-30-asyncapi-version-support-design.md
+**IMPL**: src/registry/index.ts
+**TEST**: src/registry/index.test.ts, test/gate-validation.test.ts
 `registry/` extracts the payload schema from the Multi Format Schema Object wrapper, validates under draft-07 with an explicit stamp, diagnoses post-draft-07 keywords it cannot honor, contains a compile failure as a violation rather than a crash or a green pass, and validates an operation's multiple messages as `anyOf`.
 
 #### MQTT binding integrity across spec majors
 **UID**: R-039
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/superpowers/specs/2026-07-30-asyncapi-version-support-design.md
+**IMPL**: src/registry/index.ts, src/model/index.ts, src/compose/index.ts
+**TEST**: src/registry/index.test.ts, test/gate-validation.test.ts
 `registry/` guards binding-supplied `qos`/`retain` values (falling through the §2 precedence chain on a bad value), reports unknown keys against the official mqtt operation-binding key set, reports an mqtt CHANNEL binding as ignored, and reports MQTT-5-only binding fields as unhonored under the MQTT 3.1.1-only constraint.
 
 <!--
