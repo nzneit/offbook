@@ -5,7 +5,7 @@
 // exact-name alternation below deliberately does not match it.
 // [stest->R-030]
 import { expect, test } from "bun:test";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 function walk(dir: string): string[] {

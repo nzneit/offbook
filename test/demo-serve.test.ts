@@ -55,8 +55,10 @@ test("bootDemo composes the bundled spec + chain scenarios; a heat command chain
 			state: StateEntry[];
 		};
 		const final = state.state.find((e) => e.topic === "state/thermostat-1");
-		expect((final?.payload as { status: string }).status).toBe("heating");
-		expect((final?.payload as { target: number }).target).toBe(23);
+		expect((final?.payload as { status: string } | undefined)?.status).toBe(
+			"heating",
+		);
+		expect((final?.payload as { target: number } | undefined)?.target).toBe(23);
 	} finally {
 		await composed.stop();
 	}

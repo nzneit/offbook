@@ -1,9 +1,9 @@
 // [utest->R-037]
 import { expect, test } from "bun:test";
 import {
-	SUPPORTED_SPEC_VERSIONS,
 	isSupportedSpecVersion,
 	readSpecVersion,
+	SUPPORTED_SPEC_VERSIONS,
 } from "./spec-version.ts";
 
 test("reads the asyncapi version from spec text without a parser", () => {

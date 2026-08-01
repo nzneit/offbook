@@ -6,11 +6,11 @@ import { describe, expect, test } from "bun:test";
 import { hashToInt, mulberry32 } from "#src/engine/prng.ts";
 import {
 	OMIT,
-	type TemplateRef,
 	parseRef,
 	scanValue,
 	seededUuid,
 	substitute,
+	type TemplateRef,
 } from "./template.ts";
 
 describe("parseRef", () => {

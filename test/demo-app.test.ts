@@ -38,7 +38,7 @@ const SAMPLE_LOG = [
 test("parseFingerprintLines: filters by clientId, groups by kind, survives junk", () => {
 	const bundle = parseFingerprintLines(SAMPLE_LOG, "demo-app-x1");
 	expect(bundle?.connect?.protocolLevel).toBe(4);
-	expect((bundle?.connect?.ws as { path: string }).path).toBe("/");
+	expect((bundle?.connect?.ws as { path: string } | undefined)?.path).toBe("/");
 	expect(bundle?.subscribes).toEqual([
 		{ clientId: "demo-app-x1", topic: "state/#", qos: 1 },
 	]);

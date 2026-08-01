@@ -1,5 +1,5 @@
-import { generate as jsfGenerate } from "json-schema-faker";
 import type { JsonSchema } from "json-schema-faker";
+import { generate as jsfGenerate } from "json-schema-faker";
 import type { Channel, Config, Faker, Violation } from "#src/model/index.ts";
 import { hashToInt } from "./prng.ts";
 

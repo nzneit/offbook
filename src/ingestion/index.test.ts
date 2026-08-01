@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	GitRefResolver,
-	StaticManifestSource,
 	resolveRepoUrl,
 	resolveServices,
+	StaticManifestSource,
 	serializeLockfile,
 } from "./index.ts";
 

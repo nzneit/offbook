@@ -187,7 +187,7 @@ export function createEngine(deps: EngineDeps): Engine {
 			const m = reg.match(topic);
 			// initial state is a toClient concept — a subscribe on a fromClient
 			// channel gets nothing from the mock
-			if (!m || m.channel.direction !== "toClient") return;
+			if (m?.channel.direction !== "toClient") return;
 			if (Object.keys(m.params).length > 0)
 				instances.materialize(m.channel.topic, m.params);
 			const sel = dispatch.select(topic, reg);
@@ -243,7 +243,7 @@ export function createEngine(deps: EngineDeps): Engine {
 				for (const params of paramList) {
 					const topic = bindAddress(address, params);
 					const m = isWildcardFilter(topic) ? undefined : reg.match(topic);
-					if (!m || m.channel.direction !== "toClient") {
+					if (m?.channel.direction !== "toClient") {
 						stampViolation(
 							{
 								origin: "mock",

@@ -154,7 +154,7 @@ test("R-014: reset re-instantiates factories — handler instance state does not
 	await engine.idle();
 	const last = emitted.at(-1);
 	// a surviving instance would emit n ≈ 3.x; a fresh one emits n ≈ 1.x
-	expect((last?.[1] as { n: number }).n).toBeLessThan(2);
+	expect((last?.[1] as { n: number } | undefined)?.n).toBeLessThan(2);
 });
 
 // [utest->R-014] [utest->R-032]

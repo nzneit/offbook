@@ -138,7 +138,11 @@ export function diagnosticSummary(diags: Diagnostic[]): DiagnosticSummary {
 	return summary;
 }
 
-export function createServer(config: Config, caps: ControlPlaneCaps) {
+// `_config` is unused today. Kept (underscored) rather than dropped because
+// removing it changes an exported function's arity, which is a refactor and not
+// part of a dependency bump — biome 2's noUnusedFunctionParameters is what
+// surfaced it (D-023).
+export function createServer(_config: Config, caps: ControlPlaneCaps) {
 	const app = new Hono();
 
 	// --- reads ---

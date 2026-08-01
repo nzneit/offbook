@@ -12,8 +12,8 @@ import { compose } from "#src/compose/index.ts";
 import { loadServices } from "#src/config/index.ts";
 import {
 	GitRefResolver,
-	StaticManifestSource,
 	resolveServices,
+	StaticManifestSource,
 	writeLockfile,
 } from "#src/ingestion/index.ts";
 import type { Config, SpecInfo, SpecRegistry } from "#src/model/index.ts";
