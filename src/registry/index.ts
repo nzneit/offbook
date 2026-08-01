@@ -1,7 +1,4 @@
 import { Parser } from "@asyncapi/parser";
-import mqttOperationBinding from "@asyncapi/specs/bindings/mqtt/0.2.0/operation.json" with {
-	type: "json",
-};
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import { exec, matches } from "mqtt-pattern";
@@ -82,19 +79,27 @@ const POST_DRAFT07_KEYWORDS = new Set([
 	"$recursiveAnchor",
 ]);
 
-// The legal key set comes from the OFFICIAL binding schema rather than a
-// hardcoded list, so it tracks upstream. Only `properties` is read: the schema
-// cannot be compiled standalone (it $refs
-// http://asyncapi.com/definitions/3.0.0/schema.json, resolvable only inside the
-// bundled spec schema), and offbook consumes just qos and retain anyway.
-// Validating against 0.2.0 is permissive-correct: its property set is a
-// superset of 0.1.0's.
-const MQTT_OPERATION_KEYS = new Set(
-	Object.keys(
-		(mqttOperationBinding as { properties: Record<string, unknown> })
-			.properties,
-	),
-);
+// The mqtt OPERATION binding's legal keys, transcribed from @asyncapi/specs'
+// bindings/mqtt/0.2.0/operation.json. Hand-authored and drift-tested rather than
+// derived at runtime, for the reason D-018 gave for SUPPORTED_SPEC_VERSIONS: a
+// value being present upstream is not the same as offbook having tested it.
+// Keeping it a constant is also what lets @asyncapi/specs be a devDependency
+// (D-019) instead of an undeclared transitive of @asyncapi/parser, resolved only
+// by flat hoisting. Validating against 0.2.0 is permissive-correct: its property
+// set is a superset of 0.1.0's. Exported for test/upstream-drift.test.ts, which
+// pins both halves against the installed schema.
+export const MQTT_OPERATION_KEYS = new Set([
+	"bindingVersion",
+	"messageExpiryInterval",
+	"qos",
+	"retain",
+]);
+
+// The same schema permits vendor extensions via `patternProperties`. Transcribed
+// character-for-character from that key, so the drift test compares source
+// strings rather than approximating the intent. Reading only `properties` meant
+// a spec-legal `x-vendor-thing` was reported as an unknown key (D-019).
+export const MQTT_EXTENSION_KEY = /^x-[\w\d\.\x2d_]+$/;
 
 // MQTT 5 only, per the "MQTT Versions" column of the binding spec. offbook is
 // MQTT 3.1.1 only, so these can never be honored and saying so beats silence.
@@ -247,7 +252,7 @@ export async function buildRegistry(opts: {
 		const mqtt = op.bindings().get("mqtt")?.value<Record<string, unknown>>();
 		if (mqtt) {
 			const unknownKeys = Object.keys(mqtt).filter(
-				(k) => !MQTT_OPERATION_KEYS.has(k),
+				(k) => !MQTT_OPERATION_KEYS.has(k) && !MQTT_EXTENSION_KEY.test(k),
 			);
 			if (unknownKeys.length > 0) {
 				const bad = unknownKeys.sort().join(", ");

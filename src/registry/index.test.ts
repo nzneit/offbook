@@ -660,3 +660,32 @@ operations:
 	expect(five[0].detail).toContain("messageExpiryInterval");
 	expect(five[0].severity).toBe("info");
 });
+
+// [utest->R-039]
+test("a vendor extension key on an mqtt binding is legal, not an unknown key", async () => {
+	const spec = `asyncapi: 3.0.0
+info: { title: T, version: 1.0.0 }
+channels:
+  c: { address: t/ext, messages: { M: { payload: { type: object, properties: { a: { type: string } } } } } }
+operations:
+  o:
+    action: send
+    channel: { $ref: '#/channels/c' }
+    bindings: { mqtt: { qos: 2, x-vendor-thing: true } }
+`;
+	const reg = await buildRegistry({
+		specText: spec,
+		service: "s",
+		config: DEFAULT_CONFIG,
+	});
+	// the official binding schema permits ^x-[\w\d\.\x2d_]+$ via patternProperties,
+	// which the derived key set ignored because it read only `properties` (D-019)
+	expect(
+		reg
+			.diagnostics()
+			.filter((d) => d.detail.startsWith("binding-unknown-key:")),
+	).toEqual([]);
+	// and the legal fields on the same binding still take effect: qos 2 differs
+	// from the global default of 1, so this assertion is not vacuous
+	expect(reg.match("t/ext")?.channel.qos).toBe(2);
+});
