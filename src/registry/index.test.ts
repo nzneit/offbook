@@ -905,7 +905,7 @@ test("mergeRegistries warns on an exact-address initialState disagreement, namin
 	expect(warns.length).toBe(1);
 	expect(warns[0]?.severity).toBe("warning");
 	expect(warns[0]?.source).toBe("errors/all");
-	expect(warns[0]?.detail).toContain("'first'"); // the winner (earlier services.yaml key)
+	expect(warns[0]?.detail).toContain("'first' wins the match");
 });
 
 // [utest->R-040]
@@ -923,6 +923,11 @@ test("mergeRegistries: agreement, single-service duplicates, and child diagnosti
 			[],
 			mergeChan("dup/one", "c"),
 			mergeChan("dup/one", "c"), // same service twice: not cross-service
+		),
+		mergeReg(
+			[],
+			mergeChan("dup/two", "c"),
+			mergeChan("dup/two", "c", false), // same service, DISAGREEING — must still not warn
 		),
 	]);
 	const cross = merged
