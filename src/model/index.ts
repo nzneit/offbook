@@ -28,6 +28,9 @@ export interface Channel {
 	validate: (payload: unknown) => SchemaError[];
 	qos?: 0 | 1 | 2;
 	retain?: boolean;
+	// R-040: registry-resolved from topicOverrides.initialState ONLY (no spec-binding
+	// tier); absent ⇒ the §2 initial-state floor applies; false ⇒ reactive-only channel
+	initialState?: boolean;
 	title?: string;
 	description?: string;
 }
@@ -90,7 +93,10 @@ export interface ServiceConfig {
 	qosDefault?: 0 | 1 | 2; // per-service default qos — tier 3 of the §2 precedence chain
 	retainDefault?: boolean; // per-service default retain — tier 3
 	// per-topic override — tier 2; key = channel address (the {param} form), string-equality matched (F14)
-	topicOverrides?: Record<string, { qos?: 0 | 1 | 2; retain?: boolean }>;
+	topicOverrides?: Record<
+		string,
+		{ qos?: 0 | 1 | 2; retain?: boolean; initialState?: boolean }
+	>;
 	// channel address → list of param-maps; pre-materializes a deterministic demo set (F1, §2)
 	seedInstances?: Record<string, Record<string, string>[]>;
 }
