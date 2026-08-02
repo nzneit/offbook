@@ -48,6 +48,9 @@ export interface L2Dispatch {
 
 export interface Engine {
 	loadHandlers(dir: string): Promise<string[]>;
+	// R-040: read-only view over the dispatch registry for the compose root's
+	// flag-vs-handler contradiction warn-log (precedence-sorted, instantiate()-gated)
+	handlers(): { pattern: string; modulePath: string; hasInitialState: boolean }[];
 	start(): void;
 	onInbound(event: InboundEvent): void;
 	onSubscribe(topic: string): void;
@@ -235,6 +238,16 @@ export function createEngine(deps: EngineDeps): Engine {
 			dispatch.instantiate();
 			return paths;
 		},
+
+		// R-040: read-only view for the compose root's contradiction warn-log —
+		// which handlers exist, on which channel pattern, and whether they define
+		// initialState (dispatch.all() is instantiate()-gated and precedence-sorted)
+		handlers: () =>
+			dispatch.all().map(({ handler, registration }) => ({
+				pattern: registration.pattern,
+				modulePath: registration.modulePath,
+				hasInitialState: typeof handler.initialState === "function",
+			})),
 
 		start() {
 			// seedInstances pre-materializes the deterministic demo set (§2/F1);

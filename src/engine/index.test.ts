@@ -849,6 +849,18 @@ test("start() + reset(): seeded instances on an initialState:false channel land 
 });
 
 // [utest->R-040]
+test("engine.handlers() reports pattern, modulePath and initialState presence in precedence order", () => {
+	const { engine, dispatch } = buildEngine();
+	dispatch.register("state/{deviceId}", () => ({ initialState() {} }), "a.ts");
+	dispatch.register("state/{deviceId}", () => ({ onInbound() {} }), "b.ts");
+	dispatch.instantiate();
+	expect(engine.handlers()).toEqual([
+		{ pattern: "state/{deviceId}", modulePath: "a.ts", hasInitialState: true },
+		{ pattern: "state/{deviceId}", modulePath: "b.ts", hasInitialState: false },
+	]);
+});
+
+// [utest->R-040]
 test("an L3 initialState handler still runs on an initialState:false channel (handler wins)", async () => {
 	const flagged = {
 		...makeChannel("thing/{id}", { type: "object" }, 1, false),

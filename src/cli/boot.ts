@@ -39,7 +39,11 @@ export async function bootProject(opts: ProjectBootOptions): Promise<Composed> {
 		: {};
 	const resolver = new GitRefResolver({ gitHost });
 
-	// per-service compiled registries keyed by content-hash (the F21 skip)
+	// per-service compiled registries keyed by content-hash (the F21 skip).
+	// R-040 invariant: the key deliberately omits ServiceConfig — safe because
+	// `services` is read once at boot and immutable in-process; if services.yaml
+	// ever becomes re-readable mid-process, this key must grow a config
+	// fingerprint or a stale Channel.initialState is served for an unchanged spec.
 	const compiled = new Map<string, { hash: string; registry: SpecRegistry }>();
 
 	async function resolveAll(): Promise<{

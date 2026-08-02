@@ -69,6 +69,28 @@ export async function compose(parts: ComposeParts) {
 			log,
 		});
 
+	// R-040: config says "no initial state", the handler says otherwise — the
+	// handler wins (L3 stays most-specific on every path); surface the
+	// contradiction, never silently prefer either side. Pure over
+	// (loaded handlers × current registry): re-run after every registry swap.
+	const warnInitialStateContradictions = () => {
+		for (const h of engine.handlers()) {
+			if (!h.hasInitialState) continue;
+			const flagged = registry
+				.channels()
+				.some(
+					(c) =>
+						c.topic === h.pattern &&
+						c.direction === "toClient" &&
+						c.initialState === false,
+				);
+			if (flagged)
+				log(
+					`channel '${h.pattern}' has initialState: false but handler '${h.modulePath}' defines initialState — the handler wins`,
+				);
+		}
+	};
+
 	// the ONE inbound pipeline (G9): classification (validation, never
 	// blocking) + reactive dispatch — shared verbatim by real broker clients
 	// and HTTP-injected publishes
@@ -206,6 +228,7 @@ export async function compose(parts: ComposeParts) {
 			const next = await parts.resolveSpecs();
 			registry = next.registry; // hot-swap; F19 lazy dispatch survives it
 			specs = next.specs;
+			warnInitialStateContradictions(); // R-040: the flag set may have changed
 			return specs;
 		},
 
@@ -258,6 +281,7 @@ export async function compose(parts: ComposeParts) {
 			await broker.start();
 			if (parts.handlersDir !== undefined)
 				await engine.loadHandlers(parts.handlersDir);
+			warnInitialStateContradictions();
 			// strict mode: a scenario-load error aborts startup in the
 			// foreground (l2 §7) — the throw propagates to the caller
 			await runtime?.load();
