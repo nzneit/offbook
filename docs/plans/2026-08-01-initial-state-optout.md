@@ -792,7 +792,9 @@ git add src/engine/index.ts src/engine/index.test.ts
 git commit -m "feat(engine): initialState:false gates the L1 floor at the one emission site (R-040)"
 ```
 
----### Task 6: `engine.handlers()` + the compose contradiction warn-log + refresh re-check
+---
+
+### Task 6: `engine.handlers()` + the compose contradiction warn-log + refresh re-check
 
 The compose root never holds the dispatch registry (the engine falls back to the `defaultDispatch` singleton), so the engine grows a read-only `handlers()` view over `dispatch.all()`. Compose warn-logs a contradiction (flag says "no initial state", a loaded handler defines one — the handler wins) after handler load in `start()` and again after every `refreshSpecs` registry hot-swap. The warning goes through the injected `log` (offbook.log via serve.ts's sink), matching the house idiom: bare sentence, single-quoted identifiers.
 
