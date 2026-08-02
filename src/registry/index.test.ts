@@ -596,6 +596,157 @@ test("the oldest supported major parses, inverts direction, and its binding is r
 	expect(reg.diagnostics()).toEqual([]);
 });
 
+// [utest->R-040]
+test("topicOverrides.initialState resolves onto the Channel; absent stays undefined", async () => {
+	const spec = `asyncapi: 2.6.0
+info: { title: T, version: 1.0.0 }
+channels:
+  errors/{sessionId}:
+    parameters:
+      sessionId: { schema: { type: string } }
+    subscribe:
+      operationId: err
+      message:
+        payload: { type: object, properties: { msg: { type: string } } }
+  state/{sessionId}:
+    parameters:
+      sessionId: { schema: { type: string } }
+    subscribe:
+      operationId: st
+      message:
+        payload: { type: object, properties: { v: { type: string } } }
+`;
+	const reg = await buildRegistry({
+		specText: spec,
+		service: "s",
+		config: DEFAULT_CONFIG,
+		serviceConfig: {
+			name: "s",
+			repo: "x",
+			specPath: "y",
+			topicOverrides: { "errors/{sessionId}": { initialState: false } },
+		},
+	});
+	expect(reg.match("errors/abc")?.channel.initialState).toBe(false);
+	expect(reg.match("state/abc")?.channel.initialState).toBeUndefined();
+	expect(reg.diagnostics()).toEqual([]);
+});
+
+// [utest->R-040]
+test("a dangling topicOverrides key warns once and is otherwise ignored", async () => {
+	const spec = `asyncapi: 2.6.0
+info: { title: T, version: 1.0.0 }
+channels:
+  t/real:
+    subscribe:
+      operationId: s
+      message:
+        payload: { type: object, properties: { a: { type: string } } }
+`;
+	const reg = await buildRegistry({
+		specText: spec,
+		service: "s",
+		config: DEFAULT_CONFIG,
+		serviceConfig: {
+			name: "s",
+			repo: "x",
+			specPath: "y",
+			topicOverrides: { "t/nope": { qos: 0, initialState: false } },
+		},
+	});
+	const warns = reg
+		.diagnostics()
+		.filter((d) => d.detail.startsWith("override-dangling-key:"));
+	expect(warns.length).toBe(1);
+	expect(warns[0]?.severity).toBe("warning");
+	expect(warns[0]?.source).toBe("t/nope");
+	// dangling ⇒ ONLY the dangling warning, not the direction/type warnings too
+	expect(reg.diagnostics().length).toBe(1);
+});
+
+// [utest->R-040]
+test("a non-boolean initialState warns and is ignored (the floor applies)", async () => {
+	const spec = `asyncapi: 2.6.0
+info: { title: T, version: 1.0.0 }
+channels:
+  t/one:
+    subscribe:
+      operationId: s
+      message:
+        payload: { type: object, properties: { a: { type: string } } }
+`;
+	const reg = await buildRegistry({
+		specText: spec,
+		service: "s",
+		config: DEFAULT_CONFIG,
+		serviceConfig: {
+			name: "s",
+			repo: "x",
+			specPath: "y",
+			topicOverrides: { "t/one": { initialState: "false" } },
+		} as unknown as ServiceConfig,
+	});
+	const warns = reg
+		.diagnostics()
+		.filter((d) => d.detail.startsWith("initial-state-non-boolean:"));
+	expect(warns.length).toBe(1);
+	expect(warns[0]?.source).toBe("t/one");
+	expect(reg.match("t/one")?.channel.initialState).toBeUndefined();
+});
+
+// [utest->R-040]
+test("initialState:false on an address with no toClient operation warns; a dual-direction address does not", async () => {
+	// v2: one channel with BOTH subscribe (toClient) and publish (fromClient)
+	// operations = two Channel records sharing the address; plus a publish-only
+	// (fromClient-only) channel
+	const spec = `asyncapi: 2.6.0
+info: { title: T, version: 1.0.0 }
+channels:
+  duplex/{id}:
+    parameters:
+      id: { schema: { type: string } }
+    subscribe:
+      operationId: out
+      message:
+        payload: { type: object, properties: { a: { type: string } } }
+    publish:
+      operationId: inbound
+      message:
+        payload: { type: object, properties: { a: { type: string } } }
+  cmd/{id}:
+    parameters:
+      id: { schema: { type: string } }
+    publish:
+      operationId: cmd
+      message:
+        payload: { type: object, properties: { a: { type: string } } }
+`;
+	const reg = await buildRegistry({
+		specText: spec,
+		service: "s",
+		config: DEFAULT_CONFIG,
+		serviceConfig: {
+			name: "s",
+			repo: "x",
+			specPath: "y",
+			topicOverrides: {
+				"duplex/{id}": { initialState: false },
+				"cmd/{id}": { initialState: false },
+			},
+		},
+	});
+	const warns = reg
+		.diagnostics()
+		.filter((d) => d.detail.startsWith("initial-state-on-from-client:"));
+	expect(warns.length).toBe(1);
+	expect(warns[0]?.source).toBe("cmd/{id}");
+	// the toClient record of the dual-direction address carries the flag
+	const duplex = reg
+		.channels()
+		.filter((c) => c.topic === "duplex/{id}");
+	expect(duplex.some((c) => c.direction === "toClient" && c.initialState === false)).toBe(true);
+});
+
 // [utest->R-039]
 test("an out-of-range binding qos is rejected and falls through the precedence chain", async () => {
 	// 2.x maps `mqtt` to an empty schema, so qos 9 parses clean upstream and

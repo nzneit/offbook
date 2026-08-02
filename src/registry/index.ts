@@ -313,6 +313,13 @@ export async function buildRegistry(opts: {
 			override?.retain ??
 			opts.serviceConfig?.retainDefault ??
 			false;
+		// R-040: initialState rides topicOverrides alone — no binding tier above
+		// it, no service default below it; non-boolean values are warned by the
+		// post-loop key sweep, so only a real boolean lands on the Channel
+		const initialState =
+			typeof override?.initialState === "boolean"
+				? override.initialState
+				: undefined;
 		channels.push({
 			topic: address,
 			direction: directionOf(op.action()),
@@ -321,9 +328,45 @@ export async function buildRegistry(opts: {
 			validate,
 			qos,
 			retain,
+			initialState,
 			title: msg?.title() ?? undefined,
 			description: ch.description() ?? msg?.description() ?? undefined,
 		});
+	}
+
+	// R-040: topicOverrides is a pure lookup above, so a mistyped key or value
+	// is silent there — this sweep is the loud counterpart (one warning per key,
+	// never per operation, so a dual-direction address cannot double-fire)
+	for (const [key, value] of Object.entries(
+		opts.serviceConfig?.topicOverrides ?? {},
+	)) {
+		const matching = channels.filter((c) => c.topic === key);
+		if (matching.length === 0) {
+			diagnostics.push({
+				kind: "spec-load",
+				severity: "warning",
+				detail: `override-dangling-key: '${key}' matches no channel address in service '${opts.service}', so this topicOverrides entry is ignored`,
+				source: key,
+			});
+			continue;
+		}
+		const raw = value.initialState;
+		if (raw !== undefined && typeof raw !== "boolean") {
+			diagnostics.push({
+				kind: "spec-load",
+				severity: "warning",
+				detail: `initial-state-non-boolean: '${key}' topicOverrides initialState is ${JSON.stringify(raw)}; initialState MUST be a boolean, so it is ignored and the floor applies`,
+				source: key,
+			});
+		}
+		if (raw === false && !matching.some((c) => c.direction === "toClient")) {
+			diagnostics.push({
+				kind: "spec-load",
+				severity: "warning",
+				detail: `initial-state-on-from-client: '${key}' has initialState: false but no toClient operation, and the initial-state floor only runs toClient, so the flag is ignored`,
+				source: key,
+			});
+		}
 	}
 
 	// most-specific first (fewer params = more literal segments), then declaration order
