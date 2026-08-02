@@ -313,16 +313,17 @@ export async function buildRegistry(opts: {
 			override?.retain ??
 			opts.serviceConfig?.retainDefault ??
 			false;
-		// R-040: initialState rides topicOverrides alone — no binding tier above
-		// it, no service default below it; non-boolean values are warned by the
-		// post-loop key sweep, so only a real boolean lands on the Channel
+		const direction = directionOf(op.action());
+		// R-040: resolved onto toClient records only — the §2 floor is a toClient
+		// concept, and surfacing the flag on a fromClient row would contradict the
+		// initial-state-on-from-client warning
 		const initialState =
-			typeof override?.initialState === "boolean"
+			direction === "toClient" && typeof override?.initialState === "boolean"
 				? override.initialState
 				: undefined;
 		channels.push({
 			topic: address,
-			direction: directionOf(op.action()),
+			direction,
 			service: opts.service,
 			schema,
 			validate,
@@ -407,6 +408,8 @@ export function mergeRegistries(registries: SpecRegistry[]): SpecRegistry {
 	const crossService: Diagnostic[] = [];
 	const byTopic = new Map<string, Channel[]>();
 	for (const c of channels) {
+		// R-040: only toClient records carry the flag
+		if (c.direction !== "toClient") continue;
 		const group = byTopic.get(c.topic);
 		if (group) group.push(c);
 		else byTopic.set(c.topic, [c]);

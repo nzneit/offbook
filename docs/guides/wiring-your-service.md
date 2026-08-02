@@ -102,5 +102,9 @@ services:
   contradiction is warn-logged, not silent.
 - Prefer `retain: false` on flagged channels: a retained payload
   published there survives `offbook reset` (nothing overwrites it).
+- On a flagged parametrized channel, the "no instances yet" diagnostic
+  clears when an instance materializes even though nothing renders —
+  the `initialState: false` field on `offbook topics` is the breadcrumb
+  for "why is this channel quiet".
 - The flag is read at `offbook up`; `offbook specs update` does not
   re-read services.yaml, so change it with a restart.

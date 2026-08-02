@@ -38,7 +38,7 @@ interface Channel {     // produced by the Spec Registry
   validate: (payload: unknown) => SchemaError[];  // compiled from `schema`
   qos?: 0 | 1 | 2;      // RESOLVED by the registry per the §2 precedence chain (G13)
   retain?: boolean;     // RESOLVED by the registry per the §2 precedence chain (G13)
-  initialState?: boolean; // RESOLVED by the registry from topicOverrides.initialState ONLY (no spec-binding tier; R-040/D-025) — absent ⇒ true (the §2 initial-state floor applies); false ⇒ reactive-only channel: the floor is OFF, everything else (§2 ledger, L2/L3, explicit surfaces) untouched
+  initialState?: boolean; // RESOLVED by the registry from topicOverrides.initialState ONLY (no spec-binding tier; toClient records only; R-040/D-025) — absent ⇒ true (the §2 initial-state floor applies); false ⇒ reactive-only channel: the floor is OFF, everything else (§2 ledger, L2/L3, explicit surfaces) untouched
   title?: string;       // from the AsyncAPI message/channel, when present
   description?: string; //   "        "         "
 }

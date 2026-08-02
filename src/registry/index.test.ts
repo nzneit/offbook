@@ -752,6 +752,56 @@ channels:
 	).toBe(true);
 });
 
+// [utest->R-040]
+test("initialState never resolves onto a fromClient record, even on a dual-direction address", async () => {
+	// v2: one channel with BOTH subscribe (toClient) and publish (fromClient)
+	// operations = two Channel records sharing the address; plus a publish-only
+	// (fromClient-only) channel
+	const spec = `asyncapi: 2.6.0
+info: { title: T, version: 1.0.0 }
+channels:
+  duplex/{id}:
+    parameters:
+      id: { schema: { type: string } }
+    subscribe:
+      operationId: out
+      message:
+        payload: { type: object, properties: { a: { type: string } } }
+    publish:
+      operationId: inbound
+      message:
+        payload: { type: object, properties: { a: { type: string } } }
+  cmd/{id}:
+    parameters:
+      id: { schema: { type: string } }
+    publish:
+      operationId: cmd
+      message:
+        payload: { type: object, properties: { a: { type: string } } }
+`;
+	const reg = await buildRegistry({
+		specText: spec,
+		service: "s",
+		config: DEFAULT_CONFIG,
+		serviceConfig: {
+			name: "s",
+			repo: "x",
+			specPath: "y",
+			topicOverrides: {
+				"duplex/{id}": { initialState: false },
+				"cmd/{id}": { initialState: false },
+			},
+		},
+	});
+	const fromClient = reg.channels().filter((c) => c.direction === "fromClient");
+	expect(fromClient.length).toBeGreaterThan(0);
+	expect(fromClient.every((c) => c.initialState === undefined)).toBe(true);
+	const duplex = reg.channels().filter((c) => c.topic === "duplex/{id}");
+	expect(
+		duplex.some((c) => c.direction === "toClient" && c.initialState === false),
+	).toBe(true);
+});
+
 // [utest->R-039]
 test("an out-of-range binding qos is rejected and falls through the precedence chain", async () => {
 	// 2.x maps `mqtt` to an empty schema, so qos 9 parses clean upstream and
