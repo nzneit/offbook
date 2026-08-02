@@ -52,6 +52,24 @@ function makeRegistry(): SpecRegistry {
 	};
 }
 
+// makeRegistry()'s state/{deviceId} channel, but declared reactive-only (R-040)
+function flaggedRegistry(): SpecRegistry {
+	const state = {
+		...makeChannel("state/{deviceId}", stateSchema, 2, true),
+		initialState: false,
+	};
+	return {
+		diagnostics: () => [],
+		match(topic: string) {
+			const m = topic.match(/^state\/([^/]+)$/);
+			if (m?.[1]) return { channel: state, params: { deviceId: m[1] } };
+			return undefined;
+		},
+		matchesFilter: () => false,
+		channels: () => [state],
+	};
+}
+
 function buildEngine(
 	overrides: Parameters<typeof loadConfig>[0] = {},
 	registry: SpecRegistry = makeRegistry(),
@@ -777,4 +795,88 @@ test("start(): a seed entry resolving to a fromClient channel surfaces loudly an
 	expect(violations[0]?.detail).toContain(
 		"does not resolve to a toClient channel instance",
 	);
+});
+
+// [utest->R-040]
+test("subscribe on an initialState:false channel records the instance and emits nothing", async () => {
+	const { engine, emitted, violations } = buildEngine({}, flaggedRegistry());
+	engine.onSubscribe("state/d7");
+	await engine.idle();
+	expect(emitted).toEqual([]);
+	expect(violations).toEqual([]);
+	expect(engine.instances.snapshot()).toEqual({
+		instances: [
+			{ channelAddress: "state/{deviceId}", params: { deviceId: "d7" } },
+		],
+	});
+});
+
+// [utest->R-040]
+test("start(): an initialState:false literal channel is skipped by the eager sweep", async () => {
+	const flagged = {
+		...makeChannel("plain/topic", stateSchema, 1, true),
+		initialState: false,
+	};
+	const reg: SpecRegistry = {
+		diagnostics: () => [],
+		match: (topic) =>
+			topic === "plain/topic" ? { channel: flagged, params: {} } : undefined,
+		matchesFilter: () => false,
+		channels: () => [flagged],
+	};
+	const { engine, emitted } = buildEngine({}, reg);
+	engine.start();
+	await engine.idle();
+	expect(emitted).toEqual([]);
+});
+
+// [utest->R-040]
+test("start() + reset(): seeded instances on an initialState:false channel land in the ledger but never republish", async () => {
+	const { engine, emitted } = buildEngine({}, flaggedRegistry(), {
+		"state/{deviceId}": [{ deviceId: "d9" }],
+	});
+	engine.start();
+	await engine.idle();
+	expect(engine.instances.snapshot()).toEqual({
+		instances: [
+			{ channelAddress: "state/{deviceId}", params: { deviceId: "d9" } },
+		],
+	});
+	expect(emitted).toEqual([]);
+	engine.reset(undefined);
+	await engine.idle();
+	expect(emitted).toEqual([]);
+});
+
+// [utest->R-040]
+test("an L3 initialState handler still runs on an initialState:false channel (handler wins)", async () => {
+	const flagged = {
+		...makeChannel("thing/{id}", { type: "object" }, 1, false),
+		initialState: false,
+	};
+	const reg: SpecRegistry = {
+		diagnostics: () => [],
+		match(topic: string) {
+			const m = topic.match(/^thing\/([^/]+)$/);
+			if (m?.[1]) return { channel: flagged, params: { id: m[1] } };
+			return undefined;
+		},
+		matchesFilter: () => false,
+		channels: () => [flagged],
+	};
+	const { engine, emitted, dispatch } = buildEngine({}, reg);
+	dispatch.register(
+		"thing/{id}",
+		() => ({
+			initialState(topic, ctx) {
+				ctx.publish({ topic, payload: { marker: "authored" } });
+			},
+		}),
+		"h.ts",
+	);
+	dispatch.instantiate();
+	engine.onSubscribe("thing/t1");
+	await engine.idle();
+	expect(emitted.length).toBe(1);
+	expect(emitted[0]?.payload).toEqual({ marker: "authored" });
 });

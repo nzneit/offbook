@@ -200,6 +200,11 @@ export function createEngine(deps: EngineDeps): Engine {
 				);
 				return;
 			}
+			// R-040: a reactive-only channel declares it has no initial state
+			// (topicOverrides initialState: false) — the floor is off on every leg
+			// through this function; the ledger record above, L3 initialState
+			// handlers, and all L2/L3 emissions stay untouched
+			if (m.channel.initialState === false) return;
 			// L1 is the proactive floor: keyed per instance params (F7)
 			const out = await l1Floor(m.channel, (ch) => faker(ch, m.params));
 			if ("violation" in out) {
