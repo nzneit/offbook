@@ -74,3 +74,33 @@ offbook specs update   # re-resolve branch tips + hot-swap the running mock
 An ingested spec gives you topics, retained state, and validation. To make
 the mock *react* (ack commands, chain state changes), add L2 scenarios:
 [scenario cookbook](scenario-cookbook.md).
+
+## 7. Reactive-only channels
+
+Some `toClient` channels carry events, not state: error topics,
+notifications. Offbook's default floor publishes a schema-valid example
+when such a channel is subscribed (so UIs render populated), but a
+synthetic error can drive a stateful client into a bad state. Declare
+those channels reactive-only and the floor stays off:
+
+```yaml
+services:
+  my-service:
+    repo: org/my-service
+    specPath: asyncapi.yaml
+    topicOverrides:
+      "errors/{sessionId}": { initialState: false }
+```
+
+- The channel stays silent until a scenario, a handler, or `offbook
+  publish` emits to it; validation is unaffected, and `offbook topics`
+  marks it (`GET /v1/topics` carries `initialState: false`).
+- Typos are loud: a key matching no channel address, a non-boolean
+  value, or a flag on a channel with no `toClient` operation each
+  surface in `offbook diagnostics`.
+- A handler that defines `initialState` on a flagged channel wins — the
+  contradiction is warn-logged, not silent.
+- Prefer `retain: false` on flagged channels: a retained payload
+  published there survives `offbook reset` (nothing overwrites it).
+- The flag is read at `offbook up`; `offbook specs update` does not
+  re-read services.yaml, so change it with a restart.
