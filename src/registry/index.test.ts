@@ -1,9 +1,14 @@
 import { expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
 import { loadConfig, loadServices } from "#src/config/index.ts";
-import { DEFAULT_CONFIG, type ServiceConfig } from "#src/model/index.ts";
+import {
+	DEFAULT_CONFIG,
+	type Channel,
+	type Diagnostic,
+	type ServiceConfig,
+} from "#src/model/index.ts";
 import { SUPPORTED_SPEC_VERSIONS } from "#src/model/spec-version.ts";
-import { buildRegistry } from "./index.ts";
+import { buildRegistry, mergeRegistries } from "./index.ts";
 
 // [utest->R-004]
 // [utest->R-026]
@@ -862,4 +867,67 @@ operations:
 	// and the legal fields on the same binding still take effect: qos 2 differs
 	// from the global default of 1, so this assertion is not vacuous
 	expect(reg.match("t/ext")?.channel.qos).toBe(2);
+});
+
+function mergeChan(
+	topic: string,
+	service: string,
+	initialState?: boolean,
+): Channel {
+	return {
+		topic,
+		direction: "toClient",
+		service,
+		schema: {},
+		validate: () => [],
+		initialState,
+	} as unknown as Channel;
+}
+
+function mergeReg(diags: Diagnostic[], ...channels: Channel[]) {
+	return {
+		diagnostics: () => diags,
+		channels: () => channels,
+		match: () => undefined,
+		matchesFilter: () => false,
+	};
+}
+
+// [utest->R-040]
+test("mergeRegistries warns on an exact-address initialState disagreement, naming the winning service", () => {
+	const merged = mergeRegistries([
+		mergeReg([], mergeChan("errors/all", "first")),
+		mergeReg([], mergeChan("errors/all", "second", false)),
+	]);
+	const warns = merged
+		.diagnostics()
+		.filter((d) => d.detail.startsWith("initial-state-cross-service:"));
+	expect(warns.length).toBe(1);
+	expect(warns[0]?.severity).toBe("warning");
+	expect(warns[0]?.source).toBe("errors/all");
+	expect(warns[0]?.detail).toContain("'first'"); // the winner (earlier services.yaml key)
+});
+
+// [utest->R-040]
+test("mergeRegistries: agreement, single-service duplicates, and child diagnostics pass through unwarned", () => {
+	const childDiag: Diagnostic = {
+		kind: "spec-load",
+		severity: "warning",
+		detail: "override-dangling-key: 'x' matches no channel address in service 'a', so this topicOverrides entry is ignored",
+		source: "x",
+	};
+	const merged = mergeRegistries([
+		mergeReg([childDiag], mergeChan("errors/all", "a", false)),
+		mergeReg([], mergeChan("errors/all", "b", false)), // agreement: both false
+		mergeReg(
+			[],
+			mergeChan("dup/one", "c"),
+			mergeChan("dup/one", "c"), // same service twice: not cross-service
+		),
+	]);
+	const cross = merged
+		.diagnostics()
+		.filter((d) => d.detail.startsWith("initial-state-cross-service:"));
+	expect(cross).toEqual([]);
+	expect(merged.diagnostics()).toContainEqual(childDiag);
 });

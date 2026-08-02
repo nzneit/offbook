@@ -398,6 +398,33 @@ export async function buildRegistry(opts: {
 // order, which across services is services.yaml key order.
 export function mergeRegistries(registries: SpecRegistry[]): SpecRegistry {
 	const channels = registries.flatMap((r) => [...r.channels()]);
+	// R-040: an exact-address duplicate across services resolves by match order
+	// (for identical addresses: services.yaml key order), so a disagreeing
+	// initialState on the losing record is silently dead — surface it at the
+	// only cross-service seam. Parametrized shadowing (a literal address in one
+	// service shadowing a flagged {param} address in another) stays a known
+	// residual, recorded in D-025.
+	const crossService: Diagnostic[] = [];
+	const byTopic = new Map<string, Channel[]>();
+	for (const c of channels) {
+		const group = byTopic.get(c.topic);
+		if (group) group.push(c);
+		else byTopic.set(c.topic, [c]);
+	}
+	for (const [topic, group] of byTopic) {
+		const services = [...new Set(group.map((c) => c.service))];
+		if (services.length < 2) continue;
+		const stances = new Set(group.map((c) => c.initialState === false));
+		if (stances.size < 2) continue;
+		crossService.push({
+			kind: "spec-load",
+			severity: "warning",
+			detail: `initial-state-cross-service: '${topic}' is declared by ${services
+				.map((s) => `'${s}'`)
+				.join(" and ")} with disagreeing initialState; '${group[0]?.service}' wins the match, so the other declaration is dead`,
+			source: topic,
+		});
+	}
 	const ordered = channels
 		.map((c, i) => ({ c, i }))
 		.sort((a, b) => {
@@ -407,7 +434,10 @@ export function mergeRegistries(registries: SpecRegistry[]): SpecRegistry {
 		});
 	return {
 		channels: () => channels,
-		diagnostics: () => registries.flatMap((r) => [...r.diagnostics()]),
+		diagnostics: () => [
+			...registries.flatMap((r) => [...r.diagnostics()]),
+			...crossService,
+		],
 		matchesFilter: (filter, topic) => matches(filter, topic),
 		match: (topic) => {
 			for (const { c } of ordered) {
