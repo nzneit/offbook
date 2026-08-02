@@ -320,8 +320,10 @@ Every error reachable on the clone→demo→init→wire→up→first-publish pat
 
 #### Per-channel initial-state opt-out (reactive-only channels)
 **UID**: R-040
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/contracts.md#R-040
+**IMPL**: src/model/index.ts, src/registry/index.ts, src/engine/index.ts, src/compose/index.ts, src/control-plane/index.ts, src/cli/index.ts
+**TEST**: src/config/index.test.ts, src/registry/index.test.ts, src/engine/index.test.ts, src/compose/initial-state.test.ts, src/control-plane/index.test.ts, src/cli/doctor.test.ts, test/cli-dispatch.test.ts
 `topicOverrides.<address>.initialState: false` (services.yaml) declares a reactive-only channel: the registry resolves the flag onto `Channel.initialState` (no spec-binding tier; only `false` is meaningful), the engine's L1 proactive floor skips the channel on every materialization leg (concrete subscribe, eager startup, `seedInstances`, `reset` republish) while the instance ledger, L2/L3 emissions, wildcard retained replay, and the explicit example surfaces stay untouched; an L3 `initialState` handler still wins, with a compose-root warn-log naming channel and handler re-run after a specs refresh; four `spec-load` warnings (`override-dangling-key`, `initial-state-on-from-client`, `initial-state-non-boolean`, `initial-state-cross-service`) make misconfiguration loud; `GET /v1/topics` exposes `initialState: false` on suppressed channels only.
 
 <!--
