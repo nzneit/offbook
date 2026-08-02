@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
 import { loadConfig, loadServices } from "#src/config/index.ts";
 import {
-	DEFAULT_CONFIG,
 	type Channel,
+	DEFAULT_CONFIG,
 	type Diagnostic,
 	type ServiceConfig,
 } from "#src/model/index.ts";
@@ -746,10 +746,10 @@ channels:
 	expect(warns.length).toBe(1);
 	expect(warns[0]?.source).toBe("cmd/{id}");
 	// the toClient record of the dual-direction address carries the flag
-	const duplex = reg
-		.channels()
-		.filter((c) => c.topic === "duplex/{id}");
-	expect(duplex.some((c) => c.direction === "toClient" && c.initialState === false)).toBe(true);
+	const duplex = reg.channels().filter((c) => c.topic === "duplex/{id}");
+	expect(
+		duplex.some((c) => c.direction === "toClient" && c.initialState === false),
+	).toBe(true);
 });
 
 // [utest->R-039]
@@ -913,7 +913,8 @@ test("mergeRegistries: agreement, single-service duplicates, and child diagnosti
 	const childDiag: Diagnostic = {
 		kind: "spec-load",
 		severity: "warning",
-		detail: "override-dangling-key: 'x' matches no channel address in service 'a', so this topicOverrides entry is ignored",
+		detail:
+			"override-dangling-key: 'x' matches no channel address in service 'a', so this topicOverrides entry is ignored",
 		source: "x",
 	};
 	const merged = mergeRegistries([

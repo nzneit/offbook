@@ -421,7 +421,9 @@ export function mergeRegistries(registries: SpecRegistry[]): SpecRegistry {
 			severity: "warning",
 			detail: `initial-state-cross-service: '${topic}' is declared by ${services
 				.map((s) => `'${s}'`)
-				.join(" and ")} with disagreeing initialState; '${group[0]?.service}' wins the match, so the other declaration is dead`,
+				.join(
+					" and ",
+				)} with disagreeing initialState; '${group[0]?.service}' wins the match, so the other declaration is dead`,
 			source: topic,
 		});
 	}

@@ -50,7 +50,11 @@ export interface Engine {
 	loadHandlers(dir: string): Promise<string[]>;
 	// R-040: read-only view over the dispatch registry for the compose root's
 	// flag-vs-handler contradiction warn-log (precedence-sorted, instantiate()-gated)
-	handlers(): { pattern: string; modulePath: string; hasInitialState: boolean }[];
+	handlers(): {
+		pattern: string;
+		modulePath: string;
+		hasInitialState: boolean;
+	}[];
 	start(): void;
 	onInbound(event: InboundEvent): void;
 	onSubscribe(topic: string): void;
