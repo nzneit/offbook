@@ -136,3 +136,11 @@ test("loadEnvironments reads an environments.yaml file into typed objects", asyn
 		serviceB: "2.0.1",
 	});
 });
+
+// [utest->R-040]
+test("loadServices carries topicOverrides.initialState through as a typed boolean (serviceE)", async () => {
+	const cfg = await loadServices(`${import.meta.dir}/fixtures/services.yaml`);
+	expect(cfg.services.serviceE?.topicOverrides).toEqual({
+		"alerts/{deviceId}": { initialState: false },
+	});
+});

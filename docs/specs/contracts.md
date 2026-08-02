@@ -38,6 +38,7 @@ interface Channel {     // produced by the Spec Registry
   validate: (payload: unknown) => SchemaError[];  // compiled from `schema`
   qos?: 0 | 1 | 2;      // RESOLVED by the registry per the §2 precedence chain (G13)
   retain?: boolean;     // RESOLVED by the registry per the §2 precedence chain (G13)
+  initialState?: boolean; // RESOLVED by the registry from topicOverrides.initialState ONLY (no spec-binding tier; toClient records only; R-040/D-025) — absent ⇒ true (the §2 initial-state floor applies); false ⇒ reactive-only channel: the floor is OFF, everything else (§2 ledger, L2/L3, explicit surfaces) untouched
   title?: string;       // from the AsyncAPI message/channel, when present
   description?: string; //   "        "         "
 }
@@ -124,12 +125,14 @@ interface BrokerModule {
 - **`emit` is `Promise<void>` for deterministic ordered delivery:** the engine awaits sequential emits so enqueue order = intent. The engine *owns* this guarantee rather than assuming Aedes internals.
 - **One outbound primitive.** `retain` is a PUBLISH flag; **clear retained = a zero-byte retained publish** (`emit` with `payload: undefined`, `retain: true`), which **evicts** the key from the retained store — the broker does **not** keep a tombstone, so `getState()` never returns an entry with an empty/`undefined` payload and `StateEntry.retain` is therefore always `true` (§5). There is no `setRetained` (un-MQTT). `getState` is an out-of-band, **async** control-plane read — it **drains Aedes' own retained store** (`persistence.createRetainedStream`, a stream) into a `ReadonlyMap`, never a parallel store (R3): Aedes already implements the MQTT clear-on-empty rule, so a second store can't diverge from what a late subscriber actually receives. (The subscribe/replay hot-path never calls it — wildcard replay rides Aedes' native retained delivery, see the materialization policy below.)
 - **Payload-agnostic:** a malformed payload is **never dropped or blocked** — the broker delivers raw bytes and surfaces the event with `payload: undefined` + `meta.decodeError`; the validation engine logs a `decode` violation (observe-and-surface, §5). A decode failure is surfaced **only** via `meta.decodeError` (+ the violation) and is **never written to the retained store**, so a non-decodable retained publish creates no `StateEntry` — this is the other `payload: undefined` case, kept distinct from the clear-retained eviction above.
+<!-- anchor: R-040 -->
 - **`onSubscribe` & the initial-state materialization policy (G3).** Retained initial state for `toClient` channels is published by the **engine**, which owns materialization end-to-end: it consumes `broker.onSubscribe` and, on a **concrete** subscribe, calls `InstanceRegistry.materialize` then republishes — the broker only *reports* the subscribe, it never materializes (F6). **When** the publish happens depends on whether the channel address is parametrized — these are the **normative rules** (`design.md` §7a elaborates them with examples + rationale):
   - **Non-parametrized** `toClient` channels → published **eagerly at startup** (one concrete topic, nothing to de-wildcard).
-  - **Parametrized** `toClient` channels → an instance is **materialized lazily** when a concrete subscribe binds its params **or** a `fromClient` command first references a concrete param; the engine keeps a **materialized-instance set** — the engine-owned `InstanceRegistry` (F1), the single owner of all five rules in this policy.
+  - **Parametrized** `toClient` channels → an instance is **materialized lazily** when a concrete subscribe binds its params **or** a `fromClient` command first references a concrete param; the engine keeps a **materialized-instance set** — the engine-owned `InstanceRegistry` (F1), the single owner of all six rules in this policy.
   - A **wildcard subscribe** (`+`/`#`) replays the **existing retained state for every topic matching the filter** — sourced from **Aedes' own retained store** (R3, the single source of truth) via the broker's **native retained delivery** to the subscribing client (filter tested by `matchesFilter`, F6), **not** a parallel materialized-instance set. It **never invents** params: a topic is replayed iff it currently holds retained state, so a cleared (zero-byte-evicted) topic is excluded and an off-ledger L3/L2 retained publish is included — strictly more correct than a ledger could be.
   - Optional **`seedInstances`** (typed on `ServiceConfig`, §6 — channel address → list of param-maps) pre-materializes a deterministic demo set at startup (so onboarding isn't a blank UI).
-  - **`reset`** re-materializes via `InstanceRegistry.restore(snapshot())` — **exactly the recorded set** (seed instances + those materialized since the last reset), re-seeded — so post-`reset` `/state` is deterministic **by construction**, not empty.
+  - **`initialState: false`** — a `topicOverrides` declaration (§6) marking a **reactive-only** channel (error/notification topics: nothing to materialize): the engine still records instances per the rules above but **never publishes the L1 floor** on any leg of this policy (eager startup, concrete subscribe, `seedInstances`, `reset` republish). An L3 `initialState` handler still runs (most-specific wins), with the contradiction warn-logged. The flag gates **engine emissions only** — it neither blocks Aedes' native retained delivery nor scrubs retained residue (R-040/D-025).
+  - **`reset`** re-materializes via `InstanceRegistry.restore(snapshot())` — **exactly the recorded set** (seed instances + those materialized since the last reset), re-seeded — so post-`reset` `/state` is deterministic **by construction**, not empty. (On a channel with `initialState: false` the republish is skipped, so retained residue there — an L2/L3/`/publish` retained payload — persists as-is across `reset`; R-040.)
 
 ```ts
 // Engine-owned instance lifecycle (F1) — the ONE owner of the materialization policy above; declared in model/, driven by the engine.
@@ -273,7 +276,7 @@ interface Violation {
 | Endpoint | Returns | Notes |
 |---|---|---|
 | `GET /v1/topics` | `{ topics: TopicInfo[] }` — or `{ topics: Omit<TopicInfo, 'schema'>[] }` under `?schema=false` | dereferenced **schema + seeded example inline** (via the injected `Faker`, F11); `?direction=` / `?service=` filters; **`?schema=false`** is the slim discovery view — drops the bulky `schema` field **only** (keeps `example` + all else), so `schema` stays **required** on the full `TopicInfo` |
-| `GET /v1/state` | `{ state: StateEntry[] }` | lean, **concrete** topics; `?topic=` prefix filter |
+| `GET /v1/state` | `{ state: StateEntry[] }` | lean, **concrete** topics; `?topic=` prefix filter; reports Aedes' store as-is — on an `initialState: false` channel (§2) retained residue can persist across `reset` (R-040) |
 | `GET /v1/validation` | `{ violations: Violation[]; summary: ValidationSummary }` | `?sinceSeq=` (strictly-greater) `?origin=` `?severity=` `?kind=`; ordered by `seq` alone (now a total order — G6); violations-only. **Bounded ring buffer** — see note below |
 | `GET /v1/specs` | `{ specs: SpecInfo[]; resolutionMode; warnings? }` | `resolutionMode: 'branch' \| 'pinned'` honesty flag (design §7); in **branch** mode `warnings?` carries the version-not-honored notice — "requested versions in `environments.yaml` are recorded but NOT honored; fetching branch tips (serviceA→main, serviceB→dev)", naming each service's actual branch; suppressed under `pinned`/`--frozen` (EQ2) — **both v2; v1's `resolutionMode` is always `'branch'`, so the notice always shows**. Each `SpecInfo` also carries `source` + `fetchedAt` — the **content-axis** trust surface (design §7, Mode 3): validation is against the spec **as fetched**, so age shows **neutrally** (no stale threshold) for the dev to weigh; `offbook status` composes this |
 | `GET /v1/diagnostics` | `{ diagnostics: Diagnostic[]; summary: DiagnosticSummary }` | load/hot-reload-populated; dev-time surface |
@@ -283,7 +286,8 @@ interface Violation {
 
 ```ts
 interface TopicInfo { topic: string; direction: Direction; service: string;
-  title?: string; description?: string; schema: object; example?: unknown; qos?: 0|1|2; retain?: boolean; }
+  title?: string; description?: string; schema: object; example?: unknown; qos?: 0|1|2; retain?: boolean;
+  initialState?: false; }  // present ONLY when the channel declares initialState: false (§2/§6, R-040) — absent otherwise; survives ?schema=false (that view drops `schema` alone)
 interface StateEntry { topic: string; payload: unknown; qos?: 0|1|2; retain: true; }  // retain is always true — clearing a retained topic EVICTS it (§2), so /state never returns tombstones; a decode-failure (§2) is never stored, so payload is always a successfully-decoded value
 interface SpecInfo { service: string; declaredVersion?: string; specVersion?: string; source: string; contentHash: string; channelCount: number; fetchedAt: string; }  // declaredVersion = info.version, read parser-free by ingestion/ (shallow yaml read, G12) — NOT the requested version (they differ in v1 branch mode). specVersion = the AsyncAPI DOCUMENT version (the `asyncapi` field, e.g. '3.1.0'), read in the same parser-free pass — which spec major this service is on (D-018), not the service's own info.version. fetchedAt (ISO8601, propagated from the lockfile `fetched-at`) = spec provenance/age for TRUST CALIBRATION — the tool validates against the spec AS FETCHED, never the live service; surfaced NEUTRALLY (no stale threshold) by GET /specs + status (design §7, Mode 3)
 interface ScenarioInfo { name: string; when?: string; stepCount: number; source: string; }  // GET /scenarios discovery (P8): `when` = the reactive trigger topic (absent ⇒ on-demand/trigger-only); source = scenario file path
@@ -304,7 +308,9 @@ interface Diagnostic { kind: 'scenario-load' | 'overlap' | 'spec-load' | 'uninst
 //   catalog build can see, so they cannot be recomputed from a Channel. The kind union stays closed (four values, and
 //   DiagnosticSummary.byKind keeps exactly those four keys, zero-filled); each finding is instead machine-identified by
 //   a stable tag prefix on `detail` (the tag, then `: `, then the sentence): 'binding-on-channel',
-//   'binding-invalid-value', 'binding-unknown-key', 'mqtt5-field-ignored', 'dialect-mismatch', 'schema-compile-failed'.
+//   'binding-invalid-value', 'binding-unknown-key', 'mqtt5-field-ignored', 'dialect-mismatch', 'schema-compile-failed',
+//   'override-dangling-key', 'initial-state-on-from-client', 'initial-state-non-boolean',
+//   'initial-state-cross-service' (the last four: the R-040 topicOverrides sweep + the cross-service merge check).
 //   Channel ADDRESS in `source?` as above, so filtering by tag and by address both work.
 
 interface ValidationSummary {    // the CI-facing payload of GET /v1/validation
@@ -360,7 +366,7 @@ interface ServiceConfig {
   branch?: string;         // v1 ref selection; default 'main'
   qosDefault?: 0 | 1 | 2;  // per-service default qos — tier 3 of the §2 precedence chain (above the global qos 1 fallback; the last config tier, consulted just before global) (G13)
   retainDefault?: boolean; // per-service default retain — tier 3
-  topicOverrides?: Record<string, { qos?: 0 | 1 | 2; retain?: boolean }>;  // per-topic override — tier 2 (above the per-service default, below the spec binding); key = channel address, matched by STRING-EQUALITY against channel.topic (the {param} form) — not routed through SpecRegistry.match, not concrete topics (F14)
+  topicOverrides?: Record<string, { qos?: 0 | 1 | 2; retain?: boolean; initialState?: boolean }>;  // per-topic override — qos/retain are tier 2 (above the per-service default, below the spec binding); initialState rides the SAME map but has NO other tier (no binding above, no service default below; only `false` is meaningful — §2, R-040/D-025); key = channel address, matched by STRING-EQUALITY against channel.topic (the {param} form) — not routed through SpecRegistry.match, not concrete topics (F14)
   seedInstances?: Record<string, Record<string, string>[]>;  // channel address → list of param-maps; pre-materializes a deterministic demo set at startup (F1; §2 InstanceRegistry). Each map binds ALL of a channel's {params}, so multi-param channels work
   // v2: versionToSha strategy, specPath glob strategy, range policy, manual override
 }

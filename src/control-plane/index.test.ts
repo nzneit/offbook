@@ -583,3 +583,54 @@ test("POST /v1/specs/refresh: hot-swaps the running registry through the thunk (
 	};
 	expect(specs.specs).toEqual(newSpecs);
 });
+
+// [itest->R-040]
+test("GET /v1/topics: initialState:false is exposed only on suppressed channels and survives ?schema=false", async () => {
+	const flagged = {
+		...makeChannel("quiet/errors", "toClient", { type: "object" }),
+		initialState: false,
+	};
+	const normal = makeChannel("loud/state", "toClient", { type: "object" });
+	const { req } = await boot(20, {
+		registry: fakeRegistry([flagged, normal]),
+		scenarios: false,
+	});
+	const full = (await (await req("/v1/topics")).json()) as {
+		topics: Array<Record<string, unknown>>;
+	};
+	const quiet = full.topics.find((t) => t.topic === "quiet/errors");
+	const loud = full.topics.find((t) => t.topic === "loud/state");
+	expect(quiet?.initialState).toBe(false);
+	expect(loud !== undefined && "initialState" in loud).toBe(false);
+	const slim = (await (await req("/v1/topics?schema=false")).json()) as {
+		topics: Array<Record<string, unknown>>;
+	};
+	expect(
+		slim.topics.find((t) => t.topic === "quiet/errors")?.initialState,
+	).toBe(false);
+});
+
+// [itest->R-040]
+test("retained residue on an initialState:false channel survives reset and stays in /state", async () => {
+	const flagged = {
+		...makeChannel("quiet/errors", "toClient", { type: "object" }),
+		initialState: false,
+	};
+	const { server, req, post } = await boot(21, {
+		registry: fakeRegistry([flagged]),
+		scenarios: false,
+	});
+	await post("/v1/publish", {
+		topic: "quiet/errors",
+		payload: { level: "warn" },
+		retain: true,
+	});
+	await server.engine.idle();
+	await post("/v1/reset", {});
+	await server.engine.idle();
+	const state = (await (await req("/v1/state")).json()) as {
+		state: Array<{ topic: string; payload: unknown }>;
+	};
+	const entry = state.state.find((e) => e.topic === "quiet/errors");
+	expect(entry?.payload).toEqual({ level: "warn" }); // NOT overwritten by a floor republish
+});

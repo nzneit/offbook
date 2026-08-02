@@ -224,13 +224,22 @@ export function renderTopicList(
 	topics: TopicInfo[],
 	opts: TopicRenderOpts = {},
 ): string {
+	// R-040: the human views carry the reactive-only marker; --json shows the
+	// TopicInfo field itself
+	const quietMark = (t: TopicInfo) =>
+		t.initialState === false ? "  [no initial state]" : "";
 	if (opts.compact)
 		return topics
-			.map((t) => `${t.topic}  [${phraseDirection(t.direction)}]  ${t.service}`)
+			.map(
+				(t) =>
+					`${t.topic}  [${phraseDirection(t.direction)}]  ${t.service}${quietMark(t)}`,
+			)
 			.join("\n");
 	return topics
 		.map((t) => {
-			const lines = [`${t.topic}  [${phraseDirection(t.direction)}]`];
+			const lines = [
+				`${t.topic}  [${phraseDirection(t.direction)}]${quietMark(t)}`,
+			];
 			lines.push(...fieldLines(t.schema));
 			if (opts.examples !== false && t.example !== undefined)
 				lines.push(`    example: ${JSON.stringify(t.example)}`);

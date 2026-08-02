@@ -313,17 +313,61 @@ export async function buildRegistry(opts: {
 			override?.retain ??
 			opts.serviceConfig?.retainDefault ??
 			false;
+		const direction = directionOf(op.action());
+		// R-040: resolved onto toClient records only — the §2 floor is a toClient
+		// concept, and surfacing the flag on a fromClient row would contradict the
+		// initial-state-on-from-client warning
+		const initialState =
+			direction === "toClient" && typeof override?.initialState === "boolean"
+				? override.initialState
+				: undefined;
 		channels.push({
 			topic: address,
-			direction: directionOf(op.action()),
+			direction,
 			service: opts.service,
 			schema,
 			validate,
 			qos,
 			retain,
+			initialState,
 			title: msg?.title() ?? undefined,
 			description: ch.description() ?? msg?.description() ?? undefined,
 		});
+	}
+
+	// R-040: topicOverrides is a pure lookup above, so a mistyped key or value
+	// is silent there — this sweep is the loud counterpart (one warning per key,
+	// never per operation, so a dual-direction address cannot double-fire)
+	for (const [key, value] of Object.entries(
+		opts.serviceConfig?.topicOverrides ?? {},
+	)) {
+		const matching = channels.filter((c) => c.topic === key);
+		if (matching.length === 0) {
+			diagnostics.push({
+				kind: "spec-load",
+				severity: "warning",
+				detail: `override-dangling-key: '${key}' matches no channel address in service '${opts.service}', so this topicOverrides entry is ignored`,
+				source: key,
+			});
+			continue;
+		}
+		const raw = value.initialState;
+		if (raw !== undefined && typeof raw !== "boolean") {
+			diagnostics.push({
+				kind: "spec-load",
+				severity: "warning",
+				detail: `initial-state-non-boolean: '${key}' topicOverrides initialState is ${JSON.stringify(raw)}; initialState MUST be a boolean, so it is ignored and the floor applies`,
+				source: key,
+			});
+		}
+		if (raw === false && !matching.some((c) => c.direction === "toClient")) {
+			diagnostics.push({
+				kind: "spec-load",
+				severity: "warning",
+				detail: `initial-state-on-from-client: '${key}' has initialState: false but no toClient operation, and the initial-state floor only runs toClient, so the flag is ignored`,
+				source: key,
+			});
+		}
 	}
 
 	// most-specific first (fewer params = more literal segments), then declaration order
@@ -355,6 +399,44 @@ export async function buildRegistry(opts: {
 // order, which across services is services.yaml key order.
 export function mergeRegistries(registries: SpecRegistry[]): SpecRegistry {
 	const channels = registries.flatMap((r) => [...r.channels()]);
+	// R-040: an exact-address duplicate across services resolves by match order
+	// (for identical addresses: services.yaml key order), so a disagreeing
+	// initialState on the losing record is silently dead — surface it at the
+	// only cross-service seam. Parametrized shadowing (a literal address in one
+	// service shadowing a flagged {param} address in another) stays a known
+	// residual, recorded in D-025.
+	const crossService: Diagnostic[] = [];
+	const byTopic = new Map<string, Channel[]>();
+	for (const c of channels) {
+		// R-040: only toClient records carry the flag
+		if (c.direction !== "toClient") continue;
+		const group = byTopic.get(c.topic);
+		if (group) group.push(c);
+		else byTopic.set(c.topic, [c]);
+	}
+	for (const [topic, group] of byTopic) {
+		const services = [...new Set(group.map((c) => c.service))];
+		if (services.length < 2) continue;
+		const stances = new Set(group.map((c) => c.initialState === false));
+		if (stances.size < 2) continue;
+		// The match winner for an exact address is the first same-topic record in
+		// flatMap order, ANY direction — `group` holds only toClient records, so a
+		// same-address fromClient record declared earlier wins instead, and then
+		// the engine's floor never runs there (it returns for non-toClient matches).
+		const winner = channels.find((c) => c.topic === topic);
+		const verdict =
+			winner?.direction === "toClient"
+				? `'${winner.service}' wins the match, so the other declaration is dead`
+				: `a fromClient record from '${winner?.service}' wins the match, so the floor never runs there and every initialState declaration is dead`;
+		crossService.push({
+			kind: "spec-load",
+			severity: "warning",
+			detail: `initial-state-cross-service: '${topic}' is declared by ${services
+				.map((s) => `'${s}'`)
+				.join(" and ")} with disagreeing initialState; ${verdict}`,
+			source: topic,
+		});
+	}
 	const ordered = channels
 		.map((c, i) => ({ c, i }))
 		.sort((a, b) => {
@@ -364,7 +446,10 @@ export function mergeRegistries(registries: SpecRegistry[]): SpecRegistry {
 		});
 	return {
 		channels: () => channels,
-		diagnostics: () => registries.flatMap((r) => [...r.diagnostics()]),
+		diagnostics: () => [
+			...registries.flatMap((r) => [...r.diagnostics()]),
+			...crossService,
+		],
 		matchesFilter: (filter, topic) => matches(filter, topic),
 		match: (topic) => {
 			for (const { c } of ordered) {

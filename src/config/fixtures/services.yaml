@@ -12,3 +12,8 @@ services:
     topicOverrides:                                # tier 2: a per-topic override beats the per-service default
       telemetry/{deviceId}: { qos: 0, retain: false }
   serviceD: { repo: https://other.example.com/org/service-d.git, specPath: asyncapi.yaml }  # full URL used as-is (ignores gitHost)
+  serviceE:                                        # reactive-only declaration (R-040)
+    repo: org/service-e
+    specPath: asyncapi.yaml
+    topicOverrides:
+      alerts/{deviceId}: { initialState: false }   # the initial-state floor is off on this channel

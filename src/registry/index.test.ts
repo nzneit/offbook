@@ -1,9 +1,14 @@
 import { expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
 import { loadConfig, loadServices } from "#src/config/index.ts";
-import { DEFAULT_CONFIG, type ServiceConfig } from "#src/model/index.ts";
+import {
+	type Channel,
+	DEFAULT_CONFIG,
+	type Diagnostic,
+	type ServiceConfig,
+} from "#src/model/index.ts";
 import { SUPPORTED_SPEC_VERSIONS } from "#src/model/spec-version.ts";
-import { buildRegistry } from "./index.ts";
+import { buildRegistry, mergeRegistries } from "./index.ts";
 
 // [utest->R-004]
 // [utest->R-026]
@@ -596,6 +601,207 @@ test("the oldest supported major parses, inverts direction, and its binding is r
 	expect(reg.diagnostics()).toEqual([]);
 });
 
+// [utest->R-040]
+test("topicOverrides.initialState resolves onto the Channel; absent stays undefined", async () => {
+	const spec = `asyncapi: 2.6.0
+info: { title: T, version: 1.0.0 }
+channels:
+  errors/{sessionId}:
+    parameters:
+      sessionId: { schema: { type: string } }
+    subscribe:
+      operationId: err
+      message:
+        payload: { type: object, properties: { msg: { type: string } } }
+  state/{sessionId}:
+    parameters:
+      sessionId: { schema: { type: string } }
+    subscribe:
+      operationId: st
+      message:
+        payload: { type: object, properties: { v: { type: string } } }
+`;
+	const reg = await buildRegistry({
+		specText: spec,
+		service: "s",
+		config: DEFAULT_CONFIG,
+		serviceConfig: {
+			name: "s",
+			repo: "x",
+			specPath: "y",
+			topicOverrides: { "errors/{sessionId}": { initialState: false } },
+		},
+	});
+	expect(reg.match("errors/abc")?.channel.initialState).toBe(false);
+	expect(reg.match("state/abc")?.channel.initialState).toBeUndefined();
+	expect(reg.diagnostics()).toEqual([]);
+});
+
+// [utest->R-040]
+test("a dangling topicOverrides key warns once and is otherwise ignored", async () => {
+	const spec = `asyncapi: 2.6.0
+info: { title: T, version: 1.0.0 }
+channels:
+  t/real:
+    subscribe:
+      operationId: s
+      message:
+        payload: { type: object, properties: { a: { type: string } } }
+`;
+	const reg = await buildRegistry({
+		specText: spec,
+		service: "s",
+		config: DEFAULT_CONFIG,
+		serviceConfig: {
+			name: "s",
+			repo: "x",
+			specPath: "y",
+			topicOverrides: { "t/nope": { qos: 0, initialState: false } },
+		},
+	});
+	const warns = reg
+		.diagnostics()
+		.filter((d) => d.detail.startsWith("override-dangling-key:"));
+	expect(warns.length).toBe(1);
+	expect(warns[0]?.severity).toBe("warning");
+	expect(warns[0]?.source).toBe("t/nope");
+	// dangling ⇒ ONLY the dangling warning, not the direction/type warnings too
+	expect(reg.diagnostics().length).toBe(1);
+});
+
+// [utest->R-040]
+test("a non-boolean initialState warns and is ignored (the floor applies)", async () => {
+	const spec = `asyncapi: 2.6.0
+info: { title: T, version: 1.0.0 }
+channels:
+  t/one:
+    subscribe:
+      operationId: s
+      message:
+        payload: { type: object, properties: { a: { type: string } } }
+`;
+	const reg = await buildRegistry({
+		specText: spec,
+		service: "s",
+		config: DEFAULT_CONFIG,
+		serviceConfig: {
+			name: "s",
+			repo: "x",
+			specPath: "y",
+			topicOverrides: { "t/one": { initialState: "false" } },
+		} as unknown as ServiceConfig,
+	});
+	const warns = reg
+		.diagnostics()
+		.filter((d) => d.detail.startsWith("initial-state-non-boolean:"));
+	expect(warns.length).toBe(1);
+	expect(warns[0]?.source).toBe("t/one");
+	expect(reg.match("t/one")?.channel.initialState).toBeUndefined();
+});
+
+// [utest->R-040]
+test("initialState:false on an address with no toClient operation warns; a dual-direction address does not", async () => {
+	// v2: one channel with BOTH subscribe (toClient) and publish (fromClient)
+	// operations = two Channel records sharing the address; plus a publish-only
+	// (fromClient-only) channel
+	const spec = `asyncapi: 2.6.0
+info: { title: T, version: 1.0.0 }
+channels:
+  duplex/{id}:
+    parameters:
+      id: { schema: { type: string } }
+    subscribe:
+      operationId: out
+      message:
+        payload: { type: object, properties: { a: { type: string } } }
+    publish:
+      operationId: inbound
+      message:
+        payload: { type: object, properties: { a: { type: string } } }
+  cmd/{id}:
+    parameters:
+      id: { schema: { type: string } }
+    publish:
+      operationId: cmd
+      message:
+        payload: { type: object, properties: { a: { type: string } } }
+`;
+	const reg = await buildRegistry({
+		specText: spec,
+		service: "s",
+		config: DEFAULT_CONFIG,
+		serviceConfig: {
+			name: "s",
+			repo: "x",
+			specPath: "y",
+			topicOverrides: {
+				"duplex/{id}": { initialState: false },
+				"cmd/{id}": { initialState: false },
+			},
+		},
+	});
+	const warns = reg
+		.diagnostics()
+		.filter((d) => d.detail.startsWith("initial-state-on-from-client:"));
+	expect(warns.length).toBe(1);
+	expect(warns[0]?.source).toBe("cmd/{id}");
+	// the toClient record of the dual-direction address carries the flag
+	const duplex = reg.channels().filter((c) => c.topic === "duplex/{id}");
+	expect(
+		duplex.some((c) => c.direction === "toClient" && c.initialState === false),
+	).toBe(true);
+});
+
+// [utest->R-040]
+test("initialState never resolves onto a fromClient record, even on a dual-direction address", async () => {
+	// v2: one channel with BOTH subscribe (toClient) and publish (fromClient)
+	// operations = two Channel records sharing the address; plus a publish-only
+	// (fromClient-only) channel
+	const spec = `asyncapi: 2.6.0
+info: { title: T, version: 1.0.0 }
+channels:
+  duplex/{id}:
+    parameters:
+      id: { schema: { type: string } }
+    subscribe:
+      operationId: out
+      message:
+        payload: { type: object, properties: { a: { type: string } } }
+    publish:
+      operationId: inbound
+      message:
+        payload: { type: object, properties: { a: { type: string } } }
+  cmd/{id}:
+    parameters:
+      id: { schema: { type: string } }
+    publish:
+      operationId: cmd
+      message:
+        payload: { type: object, properties: { a: { type: string } } }
+`;
+	const reg = await buildRegistry({
+		specText: spec,
+		service: "s",
+		config: DEFAULT_CONFIG,
+		serviceConfig: {
+			name: "s",
+			repo: "x",
+			specPath: "y",
+			topicOverrides: {
+				"duplex/{id}": { initialState: false },
+				"cmd/{id}": { initialState: false },
+			},
+		},
+	});
+	const fromClient = reg.channels().filter((c) => c.direction === "fromClient");
+	expect(fromClient.length).toBeGreaterThan(0);
+	expect(fromClient.every((c) => c.initialState === undefined)).toBe(true);
+	const duplex = reg.channels().filter((c) => c.topic === "duplex/{id}");
+	expect(
+		duplex.some((c) => c.direction === "toClient" && c.initialState === false),
+	).toBe(true);
+});
+
 // [utest->R-039]
 test("an out-of-range binding qos is rejected and falls through the precedence chain", async () => {
 	// 2.x maps `mqtt` to an empty schema, so qos 9 parses clean upstream and
@@ -711,4 +917,99 @@ operations:
 	// and the legal fields on the same binding still take effect: qos 2 differs
 	// from the global default of 1, so this assertion is not vacuous
 	expect(reg.match("t/ext")?.channel.qos).toBe(2);
+});
+
+function mergeChan(
+	topic: string,
+	service: string,
+	initialState?: boolean,
+	direction: "toClient" | "fromClient" = "toClient",
+): Channel {
+	return {
+		topic,
+		direction,
+		service,
+		schema: {},
+		validate: () => [],
+		initialState,
+	} as unknown as Channel;
+}
+
+function mergeReg(diags: Diagnostic[], ...channels: Channel[]) {
+	return {
+		diagnostics: () => diags,
+		channels: () => channels,
+		match: () => undefined,
+		matchesFilter: () => false,
+	};
+}
+
+// [utest->R-040]
+test("mergeRegistries warns on an exact-address initialState disagreement, naming the winning service", () => {
+	const merged = mergeRegistries([
+		mergeReg([], mergeChan("errors/all", "first")),
+		mergeReg([], mergeChan("errors/all", "second", false)),
+	]);
+	const warns = merged
+		.diagnostics()
+		.filter((d) => d.detail.startsWith("initial-state-cross-service:"));
+	expect(warns.length).toBe(1);
+	expect(warns[0]?.severity).toBe("warning");
+	expect(warns[0]?.source).toBe("errors/all");
+	expect(warns[0]?.detail).toContain("'first' wins the match");
+});
+
+// [utest->R-040]
+test("mergeRegistries names the fromClient record winning the match, not the first toClient service", () => {
+	// 'gate' declares the same address fromClient FIRST: it wins the match (same
+	// param count, earlier flatMap order), so the floor never runs on this
+	// address and BOTH toClient declarations are dead — the warning must not
+	// name 'first' as the winner.
+	const merged = mergeRegistries([
+		mergeReg([], mergeChan("errors/all", "gate", undefined, "fromClient")),
+		mergeReg([], mergeChan("errors/all", "first")),
+		mergeReg([], mergeChan("errors/all", "second", false)),
+	]);
+	// pin the premise: the match winner IS the fromClient record
+	expect(merged.match("errors/all")?.channel.service).toBe("gate");
+	expect(merged.match("errors/all")?.channel.direction).toBe("fromClient");
+	const warns = merged
+		.diagnostics()
+		.filter((d) => d.detail.startsWith("initial-state-cross-service:"));
+	expect(warns.length).toBe(1);
+	expect(warns[0]?.detail).toContain(
+		"a fromClient record from 'gate' wins the match",
+	);
+	expect(warns[0]?.detail).toContain("every initialState declaration is dead");
+	expect(warns[0]?.detail).not.toContain("'first' wins");
+});
+
+// [utest->R-040]
+test("mergeRegistries: agreement, single-service duplicates, and child diagnostics pass through unwarned", () => {
+	const childDiag: Diagnostic = {
+		kind: "spec-load",
+		severity: "warning",
+		detail:
+			"override-dangling-key: 'x' matches no channel address in service 'a', so this topicOverrides entry is ignored",
+		source: "x",
+	};
+	const merged = mergeRegistries([
+		mergeReg([childDiag], mergeChan("errors/all", "a", false)),
+		mergeReg([], mergeChan("errors/all", "b", false)), // agreement: both false
+		mergeReg(
+			[],
+			mergeChan("dup/one", "c"),
+			mergeChan("dup/one", "c"), // same service twice: not cross-service
+		),
+		mergeReg(
+			[],
+			mergeChan("dup/two", "c"),
+			mergeChan("dup/two", "c", false), // same service, DISAGREEING — must still not warn
+		),
+	]);
+	const cross = merged
+		.diagnostics()
+		.filter((d) => d.detail.startsWith("initial-state-cross-service:"));
+	expect(cross).toEqual([]);
+	expect(merged.diagnostics()).toContainEqual(childDiag);
 });

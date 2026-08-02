@@ -469,6 +469,28 @@ test("renderTopicList flattens allOf into one field list and marks oneOf variant
 	expect(marked).toContain("- level: enum(low|high)");
 });
 
+// [utest->R-040]
+test("renderTopicList marks initialState:false channels in both views", () => {
+	const t: TopicInfo = {
+		topic: "alerts/x",
+		direction: "toClient",
+		service: "s",
+		schema: {},
+		initialState: false,
+	};
+	expect(renderTopicList([t])).toContain("[no initial state]");
+	expect(renderTopicList([t], { compact: true })).toContain(
+		"[no initial state]",
+	);
+	const plain: TopicInfo = {
+		topic: "state/x",
+		direction: "toClient",
+		service: "s",
+		schema: {},
+	};
+	expect(renderTopicList([plain])).not.toContain("[no initial state]");
+});
+
 test("validation collapses repeats to ×N with the EQ6 composed headline; -v expands; --json round-trips (ER2)", async () => {
 	const r = io();
 	await run(["reset", ...CTRL_FLAG], r.io);
