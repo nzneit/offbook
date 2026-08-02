@@ -111,6 +111,8 @@ export async function buildTopicInfo(
 			example: "payload" in floor ? floor.payload : undefined,
 			qos: c.qos,
 			retain: c.retain,
+			// R-040: only-when-suppressed — undefined serializes as absent
+			initialState: c.initialState === false ? (false as const) : undefined,
 		});
 	}
 	return infos;

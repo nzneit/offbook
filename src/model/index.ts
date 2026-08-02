@@ -161,6 +161,9 @@ export interface TopicInfo {
 	example?: unknown;
 	qos?: 0 | 1 | 2;
 	retain?: boolean;
+	// R-040: present ONLY when the channel declares initialState: false; absent
+	// otherwise. Survives ?schema=false (that view drops `schema` alone).
+	initialState?: false;
 }
 
 export type ViolationKind = "schema" | "direction" | "unknown-topic" | "decode";

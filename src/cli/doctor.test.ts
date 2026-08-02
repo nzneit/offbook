@@ -141,6 +141,18 @@ test("project: valid services.yaml + environments.yaml passes", async () => {
 	expect(byName(report, "project").status).toBe("pass");
 });
 
+// [utest->R-040]
+test("project: a services.yaml carrying topicOverrides.initialState parses clean", async () => {
+	const dir = projectWith({
+		"services.yaml":
+			"services:\n  svc:\n    repo: org/svc\n    specPath: asyncapi.yaml\n    topicOverrides:\n      'errors/{id}': { initialState: false }\n",
+	});
+	const report = await runDoctor(
+		ctxWith({ repoRoot: GOOD_REPO_ROOT, projectDir: dir }),
+	);
+	expect(byName(report, "project").status).toBe("pass");
+});
+
 test("specs-reachable: --offline and empty services both warn, never fetch", async () => {
 	const dir = projectWith({ "services.yaml": "services: {}\n" });
 	const offline = await runDoctor(
