@@ -923,10 +923,11 @@ function mergeChan(
 	topic: string,
 	service: string,
 	initialState?: boolean,
+	direction: "toClient" | "fromClient" = "toClient",
 ): Channel {
 	return {
 		topic,
-		direction: "toClient",
+		direction,
 		service,
 		schema: {},
 		validate: () => [],
@@ -956,6 +957,31 @@ test("mergeRegistries warns on an exact-address initialState disagreement, namin
 	expect(warns[0]?.severity).toBe("warning");
 	expect(warns[0]?.source).toBe("errors/all");
 	expect(warns[0]?.detail).toContain("'first' wins the match");
+});
+
+// [utest->R-040]
+test("mergeRegistries names the fromClient record winning the match, not the first toClient service", () => {
+	// 'gate' declares the same address fromClient FIRST: it wins the match (same
+	// param count, earlier flatMap order), so the floor never runs on this
+	// address and BOTH toClient declarations are dead — the warning must not
+	// name 'first' as the winner.
+	const merged = mergeRegistries([
+		mergeReg([], mergeChan("errors/all", "gate", undefined, "fromClient")),
+		mergeReg([], mergeChan("errors/all", "first")),
+		mergeReg([], mergeChan("errors/all", "second", false)),
+	]);
+	// pin the premise: the match winner IS the fromClient record
+	expect(merged.match("errors/all")?.channel.service).toBe("gate");
+	expect(merged.match("errors/all")?.channel.direction).toBe("fromClient");
+	const warns = merged
+		.diagnostics()
+		.filter((d) => d.detail.startsWith("initial-state-cross-service:"));
+	expect(warns.length).toBe(1);
+	expect(warns[0]?.detail).toContain(
+		"a fromClient record from 'gate' wins the match",
+	);
+	expect(warns[0]?.detail).toContain("every initialState declaration is dead");
+	expect(warns[0]?.detail).not.toContain("'first' wins");
 });
 
 // [utest->R-040]

@@ -419,14 +419,21 @@ export function mergeRegistries(registries: SpecRegistry[]): SpecRegistry {
 		if (services.length < 2) continue;
 		const stances = new Set(group.map((c) => c.initialState === false));
 		if (stances.size < 2) continue;
+		// The match winner for an exact address is the first same-topic record in
+		// flatMap order, ANY direction — `group` holds only toClient records, so a
+		// same-address fromClient record declared earlier wins instead, and then
+		// the engine's floor never runs there (it returns for non-toClient matches).
+		const winner = channels.find((c) => c.topic === topic);
+		const verdict =
+			winner?.direction === "toClient"
+				? `'${winner.service}' wins the match, so the other declaration is dead`
+				: `a fromClient record from '${winner?.service}' wins the match, so the floor never runs there and every initialState declaration is dead`;
 		crossService.push({
 			kind: "spec-load",
 			severity: "warning",
 			detail: `initial-state-cross-service: '${topic}' is declared by ${services
 				.map((s) => `'${s}'`)
-				.join(
-					" and ",
-				)} with disagreeing initialState; '${group[0]?.service}' wins the match, so the other declaration is dead`,
+				.join(" and ")} with disagreeing initialState; ${verdict}`,
 			source: topic,
 		});
 	}

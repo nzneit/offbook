@@ -29,7 +29,8 @@ export interface Channel {
 	qos?: 0 | 1 | 2;
 	retain?: boolean;
 	// R-040: registry-resolved from topicOverrides.initialState ONLY (no spec-binding
-	// tier); absent ⇒ the §2 initial-state floor applies; false ⇒ reactive-only channel
+	// tier), onto toClient records only (the floor never runs elsewhere); absent ⇒ the
+	// §2 initial-state floor applies; false ⇒ reactive-only channel
 	initialState?: boolean;
 	title?: string;
 	description?: string;
