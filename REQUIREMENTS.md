@@ -52,15 +52,19 @@ A browser-style `mqtt.js` client connects to the Aedes ws listener over MQTT 3.1
 
 #### WS-fidelity spike is the authoritative connect gate
 **UID**: R-006
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#spikes
-The real browser application's `mqtt.js` connects+subscribes+receives-retained against a bare Aedes ws listener, finalizing the broker's listener config (subprotocol/path/auth).
+**IMPL**: src/broker/, fixtures/connect/real-client.json
+**TEST**: src/broker/connect-profile.test.ts
+The real browser application's `mqtt.js` connects+subscribes+receives-retained against a bare Aedes ws listener, finalizing the broker's listener config (subprotocol/path/auth). Closed by the authoritative real-application runs (D-026): **go on the defaults, unchanged** — MQTT 3.1.1 (level 4), no auth, the first-offered subprotocol echo sufficed, and the deployment's private ws path needed no accommodation (the listener never routes on path). The D-006 DUP clause stays a known limitation: no redelivering persistence was in the loop.
 
 #### Capture the browser application's connect()
 **UID**: R-007
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/build-plan.md#spikes
-The client's `connect()` auth fields, ws URL/path, subprotocol, protocol level, and any QoS-2 use are captured into a config fixture + broker ws port default.
+**IMPL**: fixtures/connect/real-client.json
+**TEST**: src/broker/connect-profile.test.ts
+The client's `connect()` auth fields, ws URL/path, subprotocol, protocol level, and any QoS-2 use are captured into a config fixture + broker ws port default. Closed per D-026 with the artifact sanitized: the capture (level 4, no auth, QoS 0/1 only — no QoS 2) is `fixtures/connect/real-client.json`, deployment-specific fields null-and-listed under `redacted`; the public ws port default stays 9001, the real target being a local `brokerWsPort` override.
 
 #### M0 walking-skeleton prototype: retained receipt + topic discovery
 **UID**: R-008
@@ -268,7 +272,7 @@ The engine owns the instance-materialization ledger (contracts §2, F1): `Instan
 **COVERS**: docs/specs/demo-app.md#demo-app
 **IMPL**: demo-app/, src/broker/index.ts, src/compose/index.ts, src/cli/boot.ts, src/cli/serve.ts, src/cli/index.ts, src/demo/scenarios/50-thermostat-chain.yaml, src/demo/thermostat.yaml
 **TEST**: src/broker/fingerprint.test.ts, test/demo-serve.test.ts, test/demo-app.test.ts
-A React demo webapp (`demo-app/`, real `mqtt.js` over ws from a real browser) doubles as the showcase and the R-006/R-007 rehearsal harness: thermostat dashboard + `/v1/validation` feed (via a same-origin proxy, no CORS change) + a first-class spike panel (live R-006 checklist, sent-vs-seen comparison, R-007 capture download). `src/broker/` captures a normalized connect fingerprint (ws upgrade + CONNECT facts, password as presence only; deduped subscribe/publish QoS observations) surfaced as structured `offbook.log` lines — the R-007 capture surface (D-015) that also works against the real, unmodifiable browser application at work. `offbook demo --serve` boots the bundled spec + bundled chain scenarios long-running over the G14 machinery. R-006/R-007 remain open: the real browser application run stays the authoritative gate.
+A React demo webapp (`demo-app/`, real `mqtt.js` over ws from a real browser) doubles as the showcase and the R-006/R-007 rehearsal harness: thermostat dashboard + `/v1/validation` feed (via a same-origin proxy, no CORS change) + a first-class spike panel (live R-006 checklist, sent-vs-seen comparison, R-007 capture download). `src/broker/` captures a normalized connect fingerprint (ws upgrade + CONNECT facts, password as presence only; deduped subscribe/publish QoS observations) surfaced as structured `offbook.log` lines — the R-007 capture surface (D-015) that also works against the real, unmodifiable browser application. `offbook demo --serve` boots the bundled spec + bundled chain scenarios long-running over the G14 machinery. The authoritative real-application runs have since closed R-006/R-007 (D-026); the harness stays the rehearsal surface for future re-runs (the aedes 1.x bump's R-033 re-run, for one).
 
 #### Adopter document set — README front door + guides
 **UID**: R-034
@@ -327,7 +331,7 @@ Every error reachable on the clone→demo→init→wire→up→first-publish pat
 `topicOverrides.<address>.initialState: false` (services.yaml) declares a reactive-only channel: the registry resolves the flag onto `Channel.initialState` (toClient records only; no spec-binding tier; only `false` is meaningful), the engine's L1 proactive floor skips the channel on every materialization leg (concrete subscribe, eager startup, `seedInstances`, `reset` republish) while the instance ledger, L2/L3 emissions, wildcard retained replay, and the explicit example surfaces stay untouched; an L3 `initialState` handler still wins, with a compose-root warn-log naming channel and handler re-run after a specs refresh; four `spec-load` warnings (`override-dangling-key`, `initial-state-on-from-client`, `initial-state-non-boolean`, `initial-state-cross-service`) make misconfiguration loud; `GET /v1/topics` exposes `initialState: false` on suppressed channels only.
 
 <!--
-Seeding is staged (doc-system.md §7). Batch 1 (R-001..R-007) + R-008 (M0) + R-009 (broker tier-1 residual): seeded; reconciled where traces exist (the R-006/R-007 spikes remain open). Batch 2+ (R-010..R-031): the full module/spike/gate carve per D-007 and docs/archive/intake/2026-07-21-batch-2-seeding-carve.md.
+Seeding is staged (doc-system.md §7). Batch 1 (R-001..R-007) + R-008 (M0) + R-009 (broker tier-1 residual): seeded; reconciled where traces exist (the R-006/R-007 spikes closed 2026-08-03 via the real-application runs, D-026). Batch 2+ (R-010..R-031): the full module/spike/gate carve per D-007 and docs/archive/intake/2026-07-21-batch-2-seeding-carve.md.
 What remains unseeded resolves case by case (not bulk):
   - Contract obligations and hard constraints (contracts.md, AGENTS.md): additive `anchor: NAME` markers only when an entry needs one; no change to frozen interface content.
   - design.md §1-12 rationale: mostly D-###, not R-###.
