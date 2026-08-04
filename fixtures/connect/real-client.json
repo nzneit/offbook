@@ -1,0 +1,17 @@
+{
+	"capturedAt": "2026-08-03",
+	"source": "real-client",
+	"wsUrl": null,
+	"path": null,
+	"subprotocol": null,
+	"protocolLevel": 4,
+	"clientIdPattern": null,
+	"auth": { "username": null, "passwordPresent": false },
+	"keepalive": 30,
+	"clean": false,
+	"qosUsed": [0, 1],
+	"retainUsed": null,
+	"redacted": ["wsUrl", "path", "clientIdPattern"],
+	"notCaptured": ["subprotocol", "retainUsed"],
+	"provenance": "The authoritative R-006/R-007 spike runs: the real browser application against offbook's Aedes defaults (D-026). capturedAt is the date the runs were reported. Fields listed in `redacted` have real values that are private to the deployment and not published; fields listed in `notCaptured` were not recorded. Both kinds are null here, and src/broker/connect-profile.test.ts enforces that they stay null. The listener's first-offered subprotocol echo sufficed for the real browser, no auth was used, no QoS 2 use was observed, and the client runs a persistent session (clean: false) at keepalive 30."
+}
