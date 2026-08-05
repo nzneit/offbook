@@ -38,3 +38,7 @@ export function createInstanceRegistry(): InstanceRegistry {
 		},
 	};
 }
+
+export function rehearsalProbe(n: number): string {
+	return n > 10 ? "big" : "small";
+}
