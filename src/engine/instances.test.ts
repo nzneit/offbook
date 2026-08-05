@@ -297,3 +297,11 @@ test("R-032: reset republishes initial state through the ledger — eager floor 
 	const original = [...before.values()].join("|");
 	expect(rekeyed).not.toBe(original);
 });
+
+// rehearsal probe kill (never merged)
+import { rehearsalProbe } from "./instances.ts";
+
+test("rehearsalProbe boundary and literals", () => {
+	expect(rehearsalProbe(11)).toBe("big");
+	expect(rehearsalProbe(10)).toBe("small");
+});
