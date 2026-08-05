@@ -19,6 +19,10 @@
 //   MUTATION_GATE_REPORT           reports/mutation/mutation.json
 // Exit codes: 0 pass/skip, 1 gate failure (undetected mutants), 2 infra failure.
 
+import { spawnSync } from "node:child_process";
+import { appendFileSync, existsSync, readFileSync, realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 export function parseNameStatusZ(raw) {
   const tokens = raw.split("\0").filter((t) => t.length > 0);
   const changed = [];
@@ -252,3 +256,114 @@ export function formatGithubOutputs(outputs) {
   }
   return `${lines.join("\n")}\n`;
 }
+
+export const EXIT = Object.freeze({ ok: 0, gateFail: 1, infra: 2 });
+
+export function resolveDefaultBase(deps) {
+  const head = deps.exec(["git", "symbolic-ref", "-q", "refs/remotes/origin/HEAD"]);
+  if (head.code === 0 && head.stdout.trim() !== "") {
+    return head.stdout.trim().replace(/^refs\/remotes\//, "");
+  }
+  return "main";
+}
+
+export function readMutateGlobs(deps, configPath) {
+  const conf = JSON.parse(deps.readFile(configPath));
+  if (!Array.isArray(conf.mutate) || conf.mutate.length === 0) {
+    throw new Error(`mutation-gate: no "mutate" array in ${configPath}; set MUTATION_GATE_GLOBS`);
+  }
+  return conf.mutate;
+}
+
+function finish(deps, decision, summaryMd, exitCode) {
+  deps.log(summaryMd);
+  deps.writeSummary(summaryMd);
+  deps.writeOutputs({ decision, summary: summaryMd });
+  return exitCode;
+}
+
+export function main(deps) {
+  const d = deps ?? realDeps();
+  try {
+    const cfg = readConfig(d.env);
+    if (cfg.mode !== "changed" && cfg.mode !== "incremental") {
+      throw new Error(`mutation-gate: unknown MUTATION_GATE_MODE "${cfg.mode}"`);
+    }
+    const base = cfg.base ?? resolveDefaultBase(d);
+    const mb = d.exec(["git", "merge-base", base, "HEAD"]);
+    if (mb.code !== 0) {
+      return finish(d, "infra", renderInfra(
+        `no merge-base between "${base}" and HEAD. In CI, check out with fetch-depth: 0 so the base branch history is present.`,
+      ), EXIT.infra);
+    }
+    const diff = d.exec(["git", "diff", "--name-status", "-z", "-M", mb.stdout.trim(), "HEAD"]);
+    if (diff.code !== 0) {
+      return finish(d, "infra", renderInfra("git diff --name-status failed"), EXIT.infra);
+    }
+    const { changed, deleted } = parseNameStatusZ(diff.stdout);
+    const globs = cfg.globsOverride ?? readMutateGlobs(d, cfg.configPath);
+    const files = selectMutateSet({ changed, deleted, globs, testSiblings: cfg.testSiblings, exists: d.exists });
+    const totalLines = files.reduce((n, f) => n + countLines(d.readFile(f)), 0);
+    const decision = decide({ files, totalLines, thresholdLines: cfg.thresholdLines, force: cfg.force, skip: cfg.skip });
+    if (decision !== "run") {
+      return finish(d, decision, renderSkip({ decision, files, totalLines, thresholdLines: cfg.thresholdLines }), EXIT.ok);
+    }
+    let strykerArgs;
+    if (cfg.mode === "incremental") {
+      if (cfg.requireBaseline && !d.exists(cfg.incrementalFile)) {
+        return finish(d, "skip-no-baseline",
+          renderSkip({ decision: "skip-no-baseline", files, totalLines, thresholdLines: cfg.thresholdLines }), EXIT.ok);
+      }
+      strykerArgs = [...cfg.strykerCmd, "--incremental", "--incrementalFile", cfg.incrementalFile,
+        "--reporters", "clear-text,progress,json,html", ...cfg.extraArgs];
+    } else {
+      strykerArgs = [...cfg.strykerCmd, "--mutate", files.join(","),
+        "--reporters", "clear-text,progress,json,html", ...cfg.extraArgs];
+    }
+    const run = d.exec(strykerArgs, { inherit: true });
+    if (!d.exists(cfg.reportPath)) {
+      return finish(d, "infra", renderInfra(
+        `stryker exited ${run.code} without writing ${cfg.reportPath}. Read the run log above; this may be a crash, not a test-strength verdict.`,
+      ), EXIT.infra);
+    }
+    const result = interpretReport(JSON.parse(d.readFile(cfg.reportPath)), cfg.breakScore);
+    const summaryMd = renderResult({ files, result, breakScore: cfg.breakScore });
+    return finish(d, result.verdict, summaryMd, result.verdict === "pass" ? EXIT.ok : EXIT.gateFail);
+  } catch (err) {
+    return finish(d, "infra", renderInfra(err.message), EXIT.infra);
+  }
+}
+
+export function realDeps() {
+  return {
+    env: process.env,
+    exec(argv, opts = {}) {
+      const r = spawnSync(argv[0], argv.slice(1), {
+        encoding: "utf8",
+        stdio: opts.inherit ? ["ignore", "inherit", "inherit"] : ["ignore", "pipe", "pipe"],
+        maxBuffer: 64 * 1024 * 1024,
+      });
+      if (r.error) throw r.error;
+      return { code: r.status ?? 1, stdout: r.stdout ?? "" };
+    },
+    readFile: (p) => readFileSync(p, "utf8"),
+    exists: existsSync,
+    writeSummary(md) {
+      if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${md}\n`);
+    },
+    writeOutputs(outputs) {
+      if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, formatGithubOutputs(outputs));
+    },
+    log: (msg) => console.error(msg),
+  };
+}
+
+const isCliEntry = (() => {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+  } catch {
+    return false;
+  }
+})();
+if (isCliEntry) process.exit(main());

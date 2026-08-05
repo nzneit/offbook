@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { parseNameStatusZ, countLines, globToRegExp, matchesMutateGlobs, UnsupportedGlobError, siblingOf, selectMutateSet, DEFAULTS, readConfig, decide, interpretReport, renderSkip, renderResult, renderInfra, formatGithubOutputs } from "./mutation-gate.mjs";
+import { parseNameStatusZ, countLines, globToRegExp, matchesMutateGlobs, UnsupportedGlobError, siblingOf, selectMutateSet, DEFAULTS, readConfig, decide, interpretReport, renderSkip, renderResult, renderInfra, formatGithubOutputs, EXIT, resolveDefaultBase, readMutateGlobs, main, realDeps } from "./mutation-gate.mjs";
 
 test("parseNameStatusZ splits adds/modifies from deletes", () => {
   const raw = "A\0src/engine/new.ts\0M\0src/engine/dispatch.ts\0D\0src/engine/old.test.ts\0";
@@ -347,4 +347,169 @@ test("formatGithubOutputs emits the heredoc form for each key", () => {
     "decision<<__MUTATION_GATE_EOF__\nfail\n__MUTATION_GATE_EOF__\n" +
       "summary<<__MUTATION_GATE_EOF__\nline1\nline2\n__MUTATION_GATE_EOF__\n",
   );
+});
+
+const CONF = JSON.stringify({ mutate: ["src/engine/**/*.ts", "!src/engine/**/*.test.ts"] });
+
+function fakeDeps({
+  files = {} as Record<string, string>,
+  execs = [] as Array<{ code: number; stdout: string }>,
+  env = {} as Record<string, string>,
+} = {}) {
+  const calls: string[][] = [];
+  const outputs: Array<Record<string, string>> = [];
+  const summaries: string[] = [];
+  const deps = {
+    env,
+    exec(argv: string[], _opts?: { inherit?: boolean }) {
+      calls.push(argv);
+      const next = execs.shift();
+      if (!next) throw new Error(`unexpected exec: ${argv.join(" ")}`);
+      return next;
+    },
+    readFile(p: string) {
+      if (p in files) return files[p];
+      throw new Error(`ENOENT: ${p}`);
+    },
+    exists: (p: string) => p in files,
+    writeSummary: (md: string) => summaries.push(md),
+    writeOutputs: (o: Record<string, string>) => outputs.push(o),
+    log: (_msg: string) => {},
+  };
+  return { deps, calls, outputs, summaries };
+}
+
+const MB_OK = { code: 0, stdout: "abc123\n" };
+const diffOf = (raw: string) => ({ code: 0, stdout: raw });
+
+test("main: missing merge-base is an infra failure naming fetch-depth", () => {
+  const { deps, outputs } = fakeDeps({ execs: [{ code: 128, stdout: "" }], env: { MUTATION_GATE_BASE: "origin/main" } });
+  expect(main(deps)).toBe(EXIT.infra);
+  expect(outputs[0].decision).toBe("infra");
+  expect(outputs[0].summary).toContain("fetch-depth: 0");
+});
+
+test("main: no mutable changes passes empty without spawning stryker", () => {
+  const { deps, calls, outputs } = fakeDeps({
+    files: { "stryker.conf.json": CONF },
+    execs: [MB_OK, diffOf("M\0README.md\0")],
+    env: { MUTATION_GATE_BASE: "origin/main" },
+  });
+  expect(main(deps)).toBe(EXIT.ok);
+  expect(outputs[0].decision).toBe("pass-empty");
+  expect(calls.length).toBe(2);
+});
+
+test("main: over-threshold loud-skips green without spawning stryker; force runs it", () => {
+  const bigFile = "x\n".repeat(900);
+  const base = {
+    files: { "stryker.conf.json": CONF, "src/engine/index.ts": bigFile },
+    execs: [MB_OK, diffOf("M\0src/engine/index.ts\0")],
+  };
+  const skip = fakeDeps({ ...base, env: { MUTATION_GATE_BASE: "origin/main" } });
+  expect(main(skip.deps)).toBe(EXIT.ok);
+  expect(skip.outputs[0].decision).toBe("skip-size");
+  expect(skip.calls.length).toBe(2);
+
+  const forced = fakeDeps({
+    files: {
+      "stryker.conf.json": CONF,
+      "src/engine/index.ts": bigFile,
+      "reports/mutation/mutation.json": JSON.stringify(makeReport({ "src/engine/index.ts": [{ mutator: "X", status: "Killed" }] })),
+    },
+    execs: [MB_OK, diffOf("M\0src/engine/index.ts\0"), { code: 0, stdout: "" }],
+    env: { MUTATION_GATE_BASE: "origin/main", MUTATION_GATE_FORCE: "1" },
+  });
+  expect(main(forced.deps)).toBe(EXIT.ok);
+  expect(forced.outputs[0].decision).toBe("pass");
+});
+
+test("main: a clean run passes and the stryker argv carries --mutate and --reporters", () => {
+  const { deps, calls, outputs } = fakeDeps({
+    files: {
+      "stryker.conf.json": CONF,
+      "src/engine/dispatch.ts": "a\nb\n",
+      "reports/mutation/mutation.json": JSON.stringify(
+        makeReport({ "src/engine/dispatch.ts": [{ mutator: "X", status: "Killed" }] }),
+      ),
+    },
+    execs: [MB_OK, diffOf("M\0src/engine/dispatch.ts\0"), { code: 0, stdout: "" }],
+    env: { MUTATION_GATE_BASE: "origin/main" },
+  });
+  expect(main(deps)).toBe(EXIT.ok);
+  expect(outputs[0].decision).toBe("pass");
+  const stryker = calls[2];
+  expect(stryker.slice(0, 2)).toEqual(["node_modules/.bin/stryker", "run"]);
+  expect(stryker).toContain("--mutate");
+  expect(stryker[stryker.indexOf("--mutate") + 1]).toBe("src/engine/dispatch.ts");
+  expect(stryker[stryker.indexOf("--reporters") + 1]).toBe("clear-text,progress,json,html");
+});
+
+test("main: survivors fail the gate with exit 1 and the mutant named", () => {
+  const { deps, outputs } = fakeDeps({
+    files: {
+      "stryker.conf.json": CONF,
+      "src/engine/dispatch.ts": "a\n",
+      "reports/mutation/mutation.json": JSON.stringify(
+        makeReport({ "src/engine/dispatch.ts": [{ mutator: "EqualityOperator", status: "Survived", line: 7 }] }),
+      ),
+    },
+    execs: [MB_OK, diffOf("M\0src/engine/dispatch.ts\0"), { code: 0, stdout: "" }],
+    env: { MUTATION_GATE_BASE: "origin/main" },
+  });
+  expect(main(deps)).toBe(EXIT.gateFail);
+  expect(outputs[0].decision).toBe("fail");
+  expect(outputs[0].summary).toContain("src/engine/dispatch.ts:7");
+});
+
+test("main: stryker exiting without a report is infra, not a verdict", () => {
+  const { deps, outputs } = fakeDeps({
+    files: { "stryker.conf.json": CONF, "src/engine/dispatch.ts": "a\n" },
+    execs: [MB_OK, diffOf("M\0src/engine/dispatch.ts\0"), { code: 1, stdout: "" }],
+    env: { MUTATION_GATE_BASE: "origin/main" },
+  });
+  expect(main(deps)).toBe(EXIT.infra);
+  expect(outputs[0].decision).toBe("infra");
+  expect(outputs[0].summary).toContain("without writing");
+});
+
+test("main: an unsupported conf glob is refused with the GLOBS remedy", () => {
+  const { deps, outputs } = fakeDeps({
+    files: { "stryker.conf.json": JSON.stringify({ mutate: ["src/!(*.test).ts"] }) },
+    execs: [MB_OK, diffOf("M\0src/a.ts\0")],
+    env: { MUTATION_GATE_BASE: "origin/main" },
+  });
+  expect(main(deps)).toBe(EXIT.infra);
+  expect(outputs[0].summary).toContain("MUTATION_GATE_GLOBS");
+});
+
+test("main: skip label loud-skips a small PR", () => {
+  const { deps, outputs } = fakeDeps({
+    files: { "stryker.conf.json": CONF, "src/engine/dispatch.ts": "a\n" },
+    execs: [MB_OK, diffOf("M\0src/engine/dispatch.ts\0")],
+    env: { MUTATION_GATE_BASE: "origin/main", MUTATION_GATE_SKIP: "1" },
+  });
+  expect(main(deps)).toBe(EXIT.ok);
+  expect(outputs[0].decision).toBe("skip-label");
+});
+
+test("resolveDefaultBase prefers origin/HEAD, falls back to main", () => {
+  const viaHead = fakeDeps({ execs: [{ code: 0, stdout: "refs/remotes/origin/trunk\n" }] });
+  expect(resolveDefaultBase(viaHead.deps)).toBe("origin/trunk");
+  const noHead = fakeDeps({ execs: [{ code: 1, stdout: "" }] });
+  expect(resolveDefaultBase(noHead.deps)).toBe("main");
+});
+
+test("readMutateGlobs reads the conf and rejects a missing mutate array", () => {
+  const ok = fakeDeps({ files: { "stryker.conf.json": CONF } });
+  expect(readMutateGlobs(ok.deps, "stryker.conf.json")).toEqual(["src/engine/**/*.ts", "!src/engine/**/*.test.ts"]);
+  const bad = fakeDeps({ files: { "stryker.conf.json": "{}" } });
+  expect(() => readMutateGlobs(bad.deps, "stryker.conf.json")).toThrow("MUTATION_GATE_GLOBS");
+});
+
+test("realDeps exec runs a real command and captures stdout", () => {
+  const d = realDeps();
+  const r = d.exec(["git", "--version"]);
+  expect(r.code).toBe(0);
+  expect(r.stdout).toContain("git version");
 });
