@@ -6,5 +6,6 @@
 	"concurrency": 1,
 	"mutate": ["src/engine/**/*.ts", "!src/engine/**/*.test.ts"],
 	"reporters": ["clear-text", "progress", "html"],
-	"tempDirName": ".stryker-tmp"
+	"tempDirName": ".stryker-tmp",
+	"tsconfigFile": "tsconfig.stryker-unused.json"
 }
