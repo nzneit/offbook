@@ -41,7 +41,7 @@ jobs:
           MUTATION_GATE_BASE: origin/${{ github.event.pull_request.base.ref }} # the branch, never the payload SHA
           MUTATION_GATE_FORCE: ${{ contains(github.event.pull_request.labels.*.name, 'mutate-force') && '1' || '' }}
           MUTATION_GATE_SKIP: ${{ contains(github.event.pull_request.labels.*.name, 'mutate-skip') && '1' || '' }}
-          # MUTATION_GATE_EXTRA_ARGS: "--concurrency 4"  # set from the Task 10 measurement
+          MUTATION_GATE_EXTRA_ARGS: "--concurrency 4" # Task 10 measurement: conc-1 exceeded the 15-min job timeout at 409 lines; conc-4 completed in 7.7 min (27.5 mutants/min) with a clean, non-corrupted report
         run: node scripts/mutation-gate.mjs
       - name: sticky comment
         if: always() && steps.gate.outputs.decision != ''
