@@ -1,7 +1,7 @@
 # Changed-file mutation gate for PRs: design
 
 **Date**: 2026-08-04
-**Status**: approved design, not yet implemented; revised same day after an adversarial agent review (findings folded in below)
+**Status**: implemented 2026-08-05 (see D-027)
 **Provenance**: brainstorm dialog 2026-08-04. Engine size figures measured during the dialog (`wc -l`; D-011 campaign counts). Stryker CLI spellings verified against the installed `@stryker-mutator/core` 9.6.1 during the adversarial review: `--mutate`, `--incremental`, `--incrementalFile`, and `--reporters` exist as comma-split CLI options; CLI-supplied arrays replace the conf's wholesale (`@stryker-mutator/util` deepMerge), so the conf file is never modified; the JSON reporter's default output is exactly `reports/mutation/mutation.json`; `thresholds.break` defaults to null, so Stryker exits 0 with survivors, which makes report interpretation (not exit-code gating) mandatory, not merely preferable.
 
 ## Problem
@@ -117,7 +117,7 @@ Notes:
 
 Engine's mutable source is 917 lines across 7 files and produced 461 mutants in the D-011 campaign (427 non-ignored + 34 ignored), about 0.5 mutants per line. The largest single file (`index.ts`, 363 lines) bounds the smallest usable threshold: below ~400, a single-file PR to the biggest engine file could never be gated.
 
-The conf pins `concurrency: 1`, and the gate inherits it unless overridden, so the naive arithmetic (800 lines ≈ 400 mutants inside 15 minutes) is over an unmeasured **serial** pipeline: one fresh `bun test` process per mutant plus the initial dry run. The old coverage-tooling design note ("requires `--concurrency 1`") predates the installed runner 1.3.8, whose README documents parallel workers, but perTest coverage under parallel workers has never been verified in this repo. Resolution: the e2e rehearsal measures mutants-per-minute at concurrency 1 **and** 4 on the actual runner; the winning setting (applied via `MUTATION_GATE_EXTRA_ARGS`) and the re-derived `THRESHOLD_LINES` default are recorded in D-027. `THRESHOLD_LINES=800` and `timeout-minutes: 15` are provisional until that measurement. The timeout stays the hard backstop either way.
+The conf pins `concurrency: 1` as its baseline — that default still governs a local `bun run mutate` full campaign — but the gate's own workflow now overrides it via `MUTATION_GATE_EXTRA_ARGS: "--concurrency 4"`, the measured setting below; the naive arithmetic (800 lines ≈ 400 mutants inside 15 minutes) no longer describes an unmeasured **serial** pipeline. The old coverage-tooling design note ("requires `--concurrency 1`") predates the installed runner 1.3.8, whose README documents parallel workers; perTest coverage under parallel workers was measured clean under concurrency 4 (no coverage-correlation warnings in the run log). **Measured** (Task 10 rehearsal, ubuntu-latest, 2026-08-04): mutating a 409-line set (`src/engine/index.ts` + `instances.ts`) at concurrency 1 hit the 15-minute job timeout with no report produced; concurrency 4 on the identical set completed cleanly in 7m42s at **27.53 mutants/min**. Concurrency 4 ships. The derived sustainable threshold (27.53 × 12 / 0.5 ≈ 661, rounded to 700) sits within a factor of 2 of 800, so `THRESHOLD_LINES` **stays 800**, unchanged. Full numbers, the drift-survivor finding, and the stryker.conf.json fixes required to get the rehearsal running at all are recorded in D-027. `timeout-minutes: 15` stays the hard backstop either way.
 
 ## Edge cases
 
