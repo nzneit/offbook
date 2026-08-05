@@ -513,3 +513,61 @@ test("realDeps exec runs a real command and captures stdout", () => {
   expect(r.code).toBe(0);
   expect(r.stdout).toContain("git version");
 });
+
+test("incremental: missing baseline loud-skips without spawning stryker", () => {
+  const { deps, calls, outputs } = fakeDeps({
+    files: { "stryker.conf.json": CONF, "src/engine/dispatch.ts": "a\n" },
+    execs: [MB_OK, diffOf("M\0src/engine/dispatch.ts\0")],
+    env: { MUTATION_GATE_BASE: "origin/main", MUTATION_GATE_MODE: "incremental" },
+  });
+  expect(main(deps)).toBe(EXIT.ok);
+  expect(outputs[0].decision).toBe("skip-no-baseline");
+  expect(calls.length).toBe(2);
+});
+
+test("incremental: with a baseline, argv has --incremental and no --mutate", () => {
+  const { deps, calls, outputs } = fakeDeps({
+    files: {
+      "stryker.conf.json": CONF,
+      "src/engine/dispatch.ts": "a\n",
+      "reports/stryker-incremental.json": "{}",
+      "reports/mutation/mutation.json": JSON.stringify(
+        makeReport({ "src/engine/dispatch.ts": [{ mutator: "X", status: "Killed" }] }),
+      ),
+    },
+    execs: [MB_OK, diffOf("M\0src/engine/dispatch.ts\0"), { code: 0, stdout: "" }],
+    env: { MUTATION_GATE_BASE: "origin/main", MUTATION_GATE_MODE: "incremental" },
+  });
+  expect(main(deps)).toBe(EXIT.ok);
+  expect(outputs[0].decision).toBe("pass");
+  const stryker = calls[2];
+  expect(stryker).toContain("--incremental");
+  expect(stryker[stryker.indexOf("--incrementalFile") + 1]).toBe("reports/stryker-incremental.json");
+  expect(stryker).not.toContain("--mutate");
+});
+
+test("incremental: REQUIRE_BASELINE=false runs without a baseline", () => {
+  const { deps, outputs } = fakeDeps({
+    files: {
+      "stryker.conf.json": CONF,
+      "src/engine/dispatch.ts": "a\n",
+      "reports/mutation/mutation.json": JSON.stringify(
+        makeReport({ "src/engine/dispatch.ts": [{ mutator: "X", status: "Killed" }] }),
+      ),
+    },
+    execs: [MB_OK, diffOf("M\0src/engine/dispatch.ts\0"), { code: 0, stdout: "" }],
+    env: {
+      MUTATION_GATE_BASE: "origin/main",
+      MUTATION_GATE_MODE: "incremental",
+      MUTATION_GATE_REQUIRE_BASELINE: "false",
+    },
+  });
+  expect(main(deps)).toBe(EXIT.ok);
+  expect(outputs[0].decision).toBe("pass");
+});
+
+test("an unknown mode is an infra failure", () => {
+  const { deps, outputs } = fakeDeps({ env: { MUTATION_GATE_MODE: "yolo" } });
+  expect(main(deps)).toBe(EXIT.infra);
+  expect(outputs[0].summary).toContain('unknown MUTATION_GATE_MODE "yolo"');
+});
