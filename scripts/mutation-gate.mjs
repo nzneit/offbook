@@ -20,7 +20,7 @@
 // Exit codes: 0 pass/skip, 1 gate failure (undetected mutants), 2 infra failure.
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, realpathSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 export function parseNameStatusZ(raw) {
@@ -190,7 +190,7 @@ export function interpretReport(report, breakScore) {
   const undetected = [];
   for (const [file, data] of Object.entries(report.files ?? {})) {
     for (const mutant of data.mutants) {
-      if (!(mutant.status in counts)) {
+      if (!Object.hasOwn(counts, mutant.status)) {
         throw new Error(`mutation-gate: unknown mutant status "${mutant.status}"`);
       }
       counts[mutant.status] += 1;
@@ -320,6 +320,7 @@ export function main(deps) {
       strykerArgs = [...cfg.strykerCmd, "--mutate", files.join(","),
         "--reporters", "clear-text,progress,json,html", ...cfg.extraArgs];
     }
+    if (d.exists(cfg.reportPath)) d.remove(cfg.reportPath);
     const run = d.exec(strykerArgs, { inherit: true });
     if (!d.exists(cfg.reportPath)) {
       return finish(d, "infra", renderInfra(
@@ -348,6 +349,7 @@ export function realDeps() {
     },
     readFile: (p) => readFileSync(p, "utf8"),
     exists: existsSync,
+    remove: (p) => rmSync(p, { force: true }),
     writeSummary(md) {
       if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${md}\n`);
     },
