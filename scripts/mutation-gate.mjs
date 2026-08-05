@@ -49,3 +49,59 @@ export function countLines(content) {
   if (lines[lines.length - 1] === "") lines.pop();
   return lines.length;
 }
+
+export class UnsupportedGlobError extends Error {
+  constructor(pattern) {
+    super(
+      `mutation-gate: glob "${pattern}" uses syntax outside the supported subset ` +
+        `(**, *, ?, {a,b}, leading !). Set MUTATION_GATE_GLOBS to equivalent simple globs.`,
+    );
+    this.name = "UnsupportedGlobError";
+  }
+}
+
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+export function globToRegExp(pattern) {
+  if (/[()[\]\\]/.test(pattern)) throw new UnsupportedGlobError(pattern);
+  let out = "";
+  let i = 0;
+  while (i < pattern.length) {
+    const ch = pattern[i];
+    if (ch === "*") {
+      if (pattern.startsWith("**/", i)) {
+        out += "(?:[^/]+/)*";
+        i += 3;
+      } else if (pattern.startsWith("**", i)) {
+        out += ".*";
+        i += 2;
+      } else {
+        out += "[^/]*";
+        i += 1;
+      }
+    } else if (ch === "?") {
+      out += "[^/]";
+      i += 1;
+    } else if (ch === "{") {
+      const end = pattern.indexOf("}", i);
+      const body = end === -1 ? "" : pattern.slice(i + 1, end);
+      if (end === -1 || /[*?{]/.test(body)) throw new UnsupportedGlobError(pattern);
+      out += `(?:${body.split(",").map(escapeRegExp).join("|")})`;
+      i = end + 1;
+    } else {
+      out += escapeRegExp(ch);
+      i += 1;
+    }
+  }
+  return new RegExp(`^${out}$`);
+}
+
+export function matchesMutateGlobs(path, globs) {
+  let included = false;
+  for (const glob of globs) {
+    const negated = glob.startsWith("!");
+    const pattern = negated ? glob.slice(1) : glob;
+    if (globToRegExp(pattern).test(path)) included = !negated;
+  }
+  return included;
+}
