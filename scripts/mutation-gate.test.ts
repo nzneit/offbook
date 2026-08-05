@@ -642,7 +642,7 @@ test("an unknown mode is an infra failure", () => {
 test("CLI entry: invoking the script directly under bun actually runs main() (no silent no-op)", () => {
   const result = Bun.spawnSync({
     cmd: ["bun", "scripts/mutation-gate.mjs"],
-    env: { ...process.env, MUTATION_GATE_MODE: "yolo" },
+    env: { ...process.env, MUTATION_GATE_MODE: "yolo", GITHUB_STEP_SUMMARY: undefined, GITHUB_OUTPUT: undefined },
   });
   expect(result.exitCode).toBe(2);
   expect(result.stderr.toString()).toContain('unknown MUTATION_GATE_MODE "yolo"');
