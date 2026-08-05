@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { parseNameStatusZ, countLines, globToRegExp, matchesMutateGlobs, UnsupportedGlobError } from "./mutation-gate.mjs";
+import { parseNameStatusZ, countLines, globToRegExp, matchesMutateGlobs, UnsupportedGlobError, siblingOf, selectMutateSet } from "./mutation-gate.mjs";
 
 test("parseNameStatusZ splits adds/modifies from deletes", () => {
   const raw = "A\0src/engine/new.ts\0M\0src/engine/dispatch.ts\0D\0src/engine/old.test.ts\0";
@@ -72,4 +72,77 @@ test("extglobs, character classes, escapes, wildcards-in-braces are refused, nev
 
 test("regex metacharacters in glob literals are escaped (a dot is a dot)", () => {
   expect(globToRegExp("src/a.ts").test("src/axts")).toBe(false);
+});
+
+test("siblingOf derives the source next to a test file", () => {
+  expect(siblingOf("src/engine/scheduler.test.ts")).toBe("src/engine/scheduler.ts");
+  expect(siblingOf("src/engine/faker.spec.tsx")).toBe("src/engine/faker.tsx");
+  expect(siblingOf("src/engine/scheduler.ts")).toBe(null);
+});
+
+const ENGINE_GLOBS = ["src/engine/**/*.ts", "!src/engine/**/*.test.ts"];
+
+test("selectMutateSet keeps matching changed sources, drops the rest", () => {
+  const files = selectMutateSet({
+    changed: ["src/engine/dispatch.ts", "src/broker/index.ts", "README.md"],
+    deleted: [],
+    globs: ENGINE_GLOBS,
+    testSiblings: true,
+    exists: () => true,
+  });
+  expect(files).toEqual(["src/engine/dispatch.ts"]);
+});
+
+test("a changed test file pulls its existing sibling source", () => {
+  const files = selectMutateSet({
+    changed: ["src/engine/scheduler.test.ts"],
+    deleted: [],
+    globs: ENGINE_GLOBS,
+    testSiblings: true,
+    exists: (p) => p === "src/engine/scheduler.ts",
+  });
+  expect(files).toEqual(["src/engine/scheduler.ts"]);
+});
+
+test("a deleted test file pulls its surviving sibling (the test-deletion evasion)", () => {
+  const files = selectMutateSet({
+    changed: [],
+    deleted: ["src/engine/scheduler.test.ts"],
+    globs: ENGINE_GLOBS,
+    testSiblings: true,
+    exists: (p) => p === "src/engine/scheduler.ts",
+  });
+  expect(files).toEqual(["src/engine/scheduler.ts"]);
+});
+
+test("deleting module and test together pulls nothing (existence-at-HEAD)", () => {
+  const files = selectMutateSet({
+    changed: [],
+    deleted: ["src/engine/gone.ts", "src/engine/gone.test.ts"],
+    globs: ENGINE_GLOBS,
+    testSiblings: true,
+    exists: () => false,
+  });
+  expect(files).toEqual([]);
+});
+
+test("testSiblings=false disables the rule; output is deduped and sorted", () => {
+  expect(
+    selectMutateSet({
+      changed: ["src/engine/scheduler.test.ts"],
+      deleted: [],
+      globs: ENGINE_GLOBS,
+      testSiblings: false,
+      exists: () => true,
+    }),
+  ).toEqual([]);
+  expect(
+    selectMutateSet({
+      changed: ["src/engine/b.ts", "src/engine/a.ts", "src/engine/a.test.ts"],
+      deleted: [],
+      globs: ENGINE_GLOBS,
+      testSiblings: true,
+      exists: () => true,
+    }),
+  ).toEqual(["src/engine/a.ts", "src/engine/b.ts"]);
 });

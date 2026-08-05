@@ -105,3 +105,22 @@ export function matchesMutateGlobs(path, globs) {
   }
   return included;
 }
+
+export function siblingOf(path) {
+  const m = path.match(/^(.*)\.(test|spec)(\.[^./]+)$/);
+  return m ? `${m[1]}${m[3]}` : null;
+}
+
+export function selectMutateSet({ changed, deleted, globs, testSiblings, exists }) {
+  const set = new Set();
+  for (const path of changed) {
+    if (matchesMutateGlobs(path, globs)) set.add(path);
+  }
+  if (testSiblings) {
+    for (const path of [...changed, ...deleted]) {
+      const sibling = siblingOf(path);
+      if (sibling && exists(sibling) && matchesMutateGlobs(sibling, globs)) set.add(sibling);
+    }
+  }
+  return [...set].sort();
+}
