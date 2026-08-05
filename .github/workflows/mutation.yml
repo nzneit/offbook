@@ -41,6 +41,7 @@ jobs:
           MUTATION_GATE_BASE: origin/${{ github.event.pull_request.base.ref }} # the branch, never the payload SHA
           MUTATION_GATE_FORCE: ${{ contains(github.event.pull_request.labels.*.name, 'mutate-force') && '1' || '' }}
           MUTATION_GATE_SKIP: ${{ contains(github.event.pull_request.labels.*.name, 'mutate-skip') && '1' || '' }}
+          MUTATION_GATE_THRESHOLD_LINES: "1"
           # MUTATION_GATE_EXTRA_ARGS: "--concurrency 4"  # set from the Task 10 measurement
         run: node scripts/mutation-gate.mjs
       - name: sticky comment
