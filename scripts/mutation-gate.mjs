@@ -178,3 +178,25 @@ export function decide({ files, totalLines, thresholdLines, force, skip }) {
   if (totalLines > thresholdLines) return "skip-size";
   return "run";
 }
+
+export function interpretReport(report, breakScore) {
+  const counts = {
+    Killed: 0, Survived: 0, NoCoverage: 0, Timeout: 0, CompileError: 0, RuntimeError: 0, Ignored: 0, Pending: 0,
+  };
+  const undetected = [];
+  for (const [file, data] of Object.entries(report.files ?? {})) {
+    for (const mutant of data.mutants) {
+      if (!(mutant.status in counts)) {
+        throw new Error(`mutation-gate: unknown mutant status "${mutant.status}"`);
+      }
+      counts[mutant.status] += 1;
+      if (mutant.status === "Survived" || mutant.status === "NoCoverage") {
+        undetected.push({ file, line: mutant.location.start.line, mutator: mutant.mutatorName });
+      }
+    }
+  }
+  const detected = counts.Killed + counts.Timeout;
+  const valid = detected + counts.Survived + counts.NoCoverage;
+  const score = valid === 0 ? 100 : (100 * detected) / valid;
+  return { counts, undetected, score, verdict: score < breakScore ? "fail" : "pass" };
+}

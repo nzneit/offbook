@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { parseNameStatusZ, countLines, globToRegExp, matchesMutateGlobs, UnsupportedGlobError, siblingOf, selectMutateSet, DEFAULTS, readConfig, decide } from "./mutation-gate.mjs";
+import { parseNameStatusZ, countLines, globToRegExp, matchesMutateGlobs, UnsupportedGlobError, siblingOf, selectMutateSet, DEFAULTS, readConfig, decide, interpretReport } from "./mutation-gate.mjs";
 
 test("parseNameStatusZ splits adds/modifies from deletes", () => {
   const raw = "A\0src/engine/new.ts\0M\0src/engine/dispatch.ts\0D\0src/engine/old.test.ts\0";
@@ -199,4 +199,97 @@ test("readConfig treats 0/false/no/empty as false for flags and rejects non-numb
   expect(readConfig({ MUTATION_GATE_SKIP: "0" }).skip).toBe(false);
   expect(readConfig({ MUTATION_GATE_TEST_SIBLINGS: "" }).testSiblings).toBe(true);
   expect(() => readConfig({ MUTATION_GATE_THRESHOLD_LINES: "many" })).toThrow("not a number");
+});
+
+type FixtureMutant = { mutator: string; status: string; line?: number };
+export function makeReport(mutantsByFile: Record<string, FixtureMutant[]>) {
+  return {
+    schemaVersion: "2",
+    thresholds: { high: 80, low: 60 },
+    files: Object.fromEntries(
+      Object.entries(mutantsByFile).map(([file, mutants]) => [
+        file,
+        {
+          language: "typescript",
+          source: "",
+          mutants: mutants.map((m, i) => ({
+            id: String(i),
+            mutatorName: m.mutator,
+            status: m.status,
+            location: { start: { line: m.line ?? 1, column: 1 }, end: { line: m.line ?? 1, column: 2 } },
+          })),
+        },
+      ]),
+    ),
+  };
+}
+
+test("all killed passes at break 100; Timeout counts as detected (the D-011 reading)", () => {
+  const r = interpretReport(
+    makeReport({ "src/engine/a.ts": [{ mutator: "X", status: "Killed" }, { mutator: "X", status: "Timeout" }] }),
+    100,
+  );
+  expect(r.score).toBe(100);
+  expect(r.verdict).toBe("pass");
+});
+
+test("a survivor fails at break 100 and is listed as file:line mutator", () => {
+  const r = interpretReport(
+    makeReport({
+      "src/engine/a.ts": [
+        { mutator: "EqualityOperator", status: "Survived", line: 12 },
+        { mutator: "StringLiteral", status: "Killed" },
+      ],
+    }),
+    100,
+  );
+  expect(r.verdict).toBe("fail");
+  expect(r.score).toBe(50);
+  expect(r.undetected).toEqual([{ file: "src/engine/a.ts", line: 12, mutator: "EqualityOperator" }]);
+});
+
+test("NoCoverage is undetected; Ignored/CompileError/RuntimeError/Pending stay out of the verdict", () => {
+  const r = interpretReport(
+    makeReport({
+      "a.ts": [
+        { mutator: "X", status: "Killed" },
+        { mutator: "X", status: "NoCoverage", line: 3 },
+        { mutator: "X", status: "Ignored" },
+        { mutator: "X", status: "CompileError" },
+        { mutator: "X", status: "RuntimeError" },
+        { mutator: "X", status: "Pending" },
+      ],
+    }),
+    100,
+  );
+  expect(r.score).toBe(50);
+  expect(r.verdict).toBe("fail");
+  expect(r.undetected).toEqual([{ file: "a.ts", line: 3, mutator: "X" }]);
+  expect(r.counts).toEqual({
+    Killed: 1, Survived: 0, NoCoverage: 1, Timeout: 0, CompileError: 1, RuntimeError: 1, Ignored: 1, Pending: 1,
+  });
+});
+
+test("an errors-only run scores 100 (zero valid mutants is a pass, not NaN)", () => {
+  const r = interpretReport(makeReport({ "a.ts": [{ mutator: "X", status: "RuntimeError" }] }), 100);
+  expect(r.score).toBe(100);
+  expect(r.verdict).toBe("pass");
+});
+
+test("break below 100 tolerates survivors down to the threshold, exact score passes", () => {
+  const twoOfThree = makeReport({
+    "a.ts": [
+      { mutator: "X", status: "Killed" },
+      { mutator: "X", status: "Killed" },
+      { mutator: "X", status: "Survived" },
+    ],
+  });
+  expect(interpretReport(twoOfThree, 66).verdict).toBe("pass");
+  expect(interpretReport(twoOfThree, 67).verdict).toBe("fail");
+});
+
+test("an unknown status throws (schema drift surfaces loudly)", () => {
+  expect(() => interpretReport(makeReport({ "a.ts": [{ mutator: "X", status: "Vanished" }] }), 100)).toThrow(
+    'unknown mutant status "Vanished"',
+  );
 });
