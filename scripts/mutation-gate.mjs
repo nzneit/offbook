@@ -124,3 +124,57 @@ export function selectMutateSet({ changed, deleted, globs, testSiblings, exists 
   }
   return [...set].sort();
 }
+
+export const DEFAULTS = Object.freeze({
+  mode: "changed",
+  thresholdLines: 800,
+  breakScore: 100,
+  configPath: "stryker.conf.json",
+  incrementalFile: "reports/stryker-incremental.json",
+  strykerCmd: "node_modules/.bin/stryker run",
+  reportPath: "reports/mutation/mutation.json",
+});
+
+const FALSY = new Set(["0", "false", "no"]);
+const asBool = (v, dflt) => (v === undefined || v === "" ? dflt : !FALSY.has(v.toLowerCase()));
+const asFlag = (v) => v !== undefined && v !== "" && !FALSY.has(v.toLowerCase());
+const asNum = (v, dflt) => {
+  if (v === undefined || v === "") return dflt;
+  const n = Number(v);
+  if (!Number.isFinite(n)) throw new Error(`mutation-gate: not a number: "${v}"`);
+  return n;
+};
+const asList = (v) =>
+  v === undefined
+    ? undefined
+    : v
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+export function readConfig(env) {
+  return {
+    mode: env.MUTATION_GATE_MODE || DEFAULTS.mode,
+    base: env.MUTATION_GATE_BASE || undefined,
+    thresholdLines: asNum(env.MUTATION_GATE_THRESHOLD_LINES, DEFAULTS.thresholdLines),
+    breakScore: asNum(env.MUTATION_GATE_BREAK, DEFAULTS.breakScore),
+    configPath: env.MUTATION_GATE_CONFIG || DEFAULTS.configPath,
+    globsOverride: asList(env.MUTATION_GATE_GLOBS),
+    testSiblings: asBool(env.MUTATION_GATE_TEST_SIBLINGS, true),
+    force: asFlag(env.MUTATION_GATE_FORCE),
+    skip: asFlag(env.MUTATION_GATE_SKIP),
+    requireBaseline: asBool(env.MUTATION_GATE_REQUIRE_BASELINE, true),
+    incrementalFile: env.MUTATION_GATE_INCREMENTAL_FILE || DEFAULTS.incrementalFile,
+    strykerCmd: (env.MUTATION_GATE_STRYKER_CMD || DEFAULTS.strykerCmd).split(" ").filter(Boolean),
+    extraArgs: (env.MUTATION_GATE_EXTRA_ARGS || "").split(" ").filter(Boolean),
+    reportPath: env.MUTATION_GATE_REPORT || DEFAULTS.reportPath,
+  };
+}
+
+export function decide({ files, totalLines, thresholdLines, force, skip }) {
+  if (files.length === 0) return "pass-empty";
+  if (force) return "run";
+  if (skip) return "skip-label";
+  if (totalLines > thresholdLines) return "skip-size";
+  return "run";
+}

@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { parseNameStatusZ, countLines, globToRegExp, matchesMutateGlobs, UnsupportedGlobError, siblingOf, selectMutateSet } from "./mutation-gate.mjs";
+import { parseNameStatusZ, countLines, globToRegExp, matchesMutateGlobs, UnsupportedGlobError, siblingOf, selectMutateSet, DEFAULTS, readConfig, decide } from "./mutation-gate.mjs";
 
 test("parseNameStatusZ splits adds/modifies from deletes", () => {
   const raw = "A\0src/engine/new.ts\0M\0src/engine/dispatch.ts\0D\0src/engine/old.test.ts\0";
@@ -145,4 +145,58 @@ test("testSiblings=false disables the rule; output is deduped and sorted", () =>
       exists: () => true,
     }),
   ).toEqual(["src/engine/a.ts", "src/engine/b.ts"]);
+});
+
+test("decide: empty set passes, labels and threshold act, force wins over both", () => {
+  expect(decide({ files: [], totalLines: 0, thresholdLines: 800, force: false, skip: false })).toBe("pass-empty");
+  expect(decide({ files: ["a"], totalLines: 10, thresholdLines: 800, force: false, skip: false })).toBe("run");
+  expect(decide({ files: ["a"], totalLines: 900, thresholdLines: 800, force: false, skip: false })).toBe("skip-size");
+  expect(decide({ files: ["a"], totalLines: 10, thresholdLines: 800, force: false, skip: true })).toBe("skip-label");
+  expect(decide({ files: ["a"], totalLines: 900, thresholdLines: 800, force: true, skip: true })).toBe("run");
+});
+
+test("readConfig defaults", () => {
+  const cfg = readConfig({});
+  expect(cfg.mode).toBe("changed");
+  expect(cfg.base).toBeUndefined();
+  expect(cfg.thresholdLines).toBe(800);
+  expect(cfg.breakScore).toBe(100);
+  expect(cfg.configPath).toBe("stryker.conf.json");
+  expect(cfg.globsOverride).toBeUndefined();
+  expect(cfg.testSiblings).toBe(true);
+  expect(cfg.force).toBe(false);
+  expect(cfg.skip).toBe(false);
+  expect(cfg.requireBaseline).toBe(true);
+  expect(cfg.incrementalFile).toBe("reports/stryker-incremental.json");
+  expect(cfg.strykerCmd).toEqual(["node_modules/.bin/stryker", "run"]);
+  expect(cfg.extraArgs).toEqual([]);
+  expect(cfg.reportPath).toBe("reports/mutation/mutation.json");
+});
+
+test("readConfig parses overrides", () => {
+  const cfg = readConfig({
+    MUTATION_GATE_MODE: "incremental",
+    MUTATION_GATE_BASE: "origin/develop",
+    MUTATION_GATE_THRESHOLD_LINES: "200",
+    MUTATION_GATE_BREAK: "90",
+    MUTATION_GATE_GLOBS: "lib/**/*.js, !lib/**/*.spec.js",
+    MUTATION_GATE_TEST_SIBLINGS: "false",
+    MUTATION_GATE_FORCE: "1",
+    MUTATION_GATE_EXTRA_ARGS: "--concurrency 4",
+  });
+  expect(cfg.mode).toBe("incremental");
+  expect(cfg.base).toBe("origin/develop");
+  expect(cfg.thresholdLines).toBe(200);
+  expect(cfg.breakScore).toBe(90);
+  expect(cfg.globsOverride).toEqual(["lib/**/*.js", "!lib/**/*.spec.js"]);
+  expect(cfg.testSiblings).toBe(false);
+  expect(cfg.force).toBe(true);
+  expect(cfg.extraArgs).toEqual(["--concurrency", "4"]);
+});
+
+test("readConfig treats 0/false/no/empty as false for flags and rejects non-numbers", () => {
+  expect(readConfig({ MUTATION_GATE_FORCE: "false" }).force).toBe(false);
+  expect(readConfig({ MUTATION_GATE_SKIP: "0" }).skip).toBe(false);
+  expect(readConfig({ MUTATION_GATE_TEST_SIBLINGS: "" }).testSiblings).toBe(true);
+  expect(() => readConfig({ MUTATION_GATE_THRESHOLD_LINES: "many" })).toThrow("not a number");
 });
