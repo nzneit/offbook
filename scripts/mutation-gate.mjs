@@ -200,3 +200,55 @@ export function interpretReport(report, breakScore) {
   const score = valid === 0 ? 100 : (100 * detected) / valid;
   return { counts, undetected, score, verdict: score < breakScore ? "fail" : "pass" };
 }
+
+const SKIP_REASONS = {
+  "pass-empty": "no mutable files changed; nothing to mutate.",
+  "skip-size": "the change is over the size threshold for a CI mutation run.",
+  "skip-label": "the mutate-skip label is set.",
+  "skip-no-baseline": "incremental mode has no baseline incremental file; refusing a surprise full campaign.",
+};
+
+export function renderSkip({ decision, files, totalLines, thresholdLines }) {
+  const lines = [`## mutation gate: ${decision}`, "", SKIP_REASONS[decision] ?? decision];
+  if (decision !== "pass-empty") {
+    lines.push(
+      "",
+      `Mutable files in this change: ${files.length} (${totalLines} lines; threshold ${thresholdLines}).`,
+      "The gate did not run. Before merging, run the mutation check locally: `bun run mutate`",
+      "(or `MUTATION_GATE_BASE=<base> node scripts/mutation-gate.mjs` for the changed-file run).",
+      "Labels: `mutate-force` runs the gate anyway; `mutate-skip` waves it off.",
+    );
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+export function renderResult({ files, result, breakScore }) {
+  const c = result.counts;
+  const lines = [
+    `## mutation gate: ${result.verdict} (score ${result.score.toFixed(2)}, break ${breakScore})`,
+    "",
+    `Mutated ${files.length} file(s): ${files.join(", ")}`,
+    `Mutants: ${c.Killed} killed, ${c.Timeout} timeout, ${c.Survived} survived, ${c.NoCoverage} no-coverage; ` +
+      `${c.Ignored} ignored, ${c.CompileError + c.RuntimeError} errored, ${c.Pending} pending.`,
+  ];
+  if (result.undetected.length > 0) {
+    lines.push("", "Undetected mutants (kill each with a test, or annotate with a reasoned",
+      "`// Stryker disable next-line <Mutator>: <why it is unobservable>`):", "");
+    for (const m of result.undetected) {
+      lines.push(`- \`${m.file}:${m.line}\` ${m.mutator}`);
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+export function renderInfra(message) {
+  return `## mutation gate: infra failure\n\n${message}\n\nThis is an infrastructure error, not a verdict on the PR's tests.\n`;
+}
+
+export function formatGithubOutputs(outputs) {
+  const lines = [];
+  for (const [key, value] of Object.entries(outputs)) {
+    lines.push(`${key}<<__MUTATION_GATE_EOF__`, String(value), "__MUTATION_GATE_EOF__");
+  }
+  return `${lines.join("\n")}\n`;
+}

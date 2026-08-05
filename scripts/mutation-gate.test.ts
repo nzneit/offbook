@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { parseNameStatusZ, countLines, globToRegExp, matchesMutateGlobs, UnsupportedGlobError, siblingOf, selectMutateSet, DEFAULTS, readConfig, decide, interpretReport } from "./mutation-gate.mjs";
+import { parseNameStatusZ, countLines, globToRegExp, matchesMutateGlobs, UnsupportedGlobError, siblingOf, selectMutateSet, DEFAULTS, readConfig, decide, interpretReport, renderSkip, renderResult, renderInfra, formatGithubOutputs } from "./mutation-gate.mjs";
 
 test("parseNameStatusZ splits adds/modifies from deletes", () => {
   const raw = "A\0src/engine/new.ts\0M\0src/engine/dispatch.ts\0D\0src/engine/old.test.ts\0";
@@ -291,5 +291,60 @@ test("break below 100 tolerates survivors down to the threshold, exact score pas
 test("an unknown status throws (schema drift surfaces loudly)", () => {
   expect(() => interpretReport(makeReport({ "a.ts": [{ mutator: "X", status: "Vanished" }] }), 100)).toThrow(
     'unknown mutant status "Vanished"',
+  );
+});
+
+test("renderSkip names the numbers, the labels, and the local command", () => {
+  const md = renderSkip({ decision: "skip-size", files: ["src/engine/index.ts"], totalLines: 950, thresholdLines: 800 });
+  expect(md).toContain("skip-size");
+  expect(md).toContain("950");
+  expect(md).toContain("800");
+  expect(md).toContain("bun run mutate");
+  expect(md).toContain("mutate-force");
+  expect(renderSkip({ decision: "pass-empty", files: [], totalLines: 0, thresholdLines: 800 })).toContain(
+    "no mutable files changed",
+  );
+  expect(
+    renderSkip({ decision: "skip-no-baseline", files: ["a.ts"], totalLines: 1, thresholdLines: 800 }),
+  ).toContain("baseline");
+});
+
+test("renderResult on failure lists each undetected mutant with the kill-or-annotate instruction", () => {
+  const result = {
+    counts: { Killed: 1, Survived: 1, NoCoverage: 0, Timeout: 0, CompileError: 0, RuntimeError: 0, Ignored: 0, Pending: 0 },
+    undetected: [{ file: "src/engine/a.ts", line: 12, mutator: "EqualityOperator" }],
+    score: 50,
+    verdict: "fail" as const,
+  };
+  const md = renderResult({ files: ["src/engine/a.ts"], result, breakScore: 100 });
+  expect(md).toContain("fail");
+  expect(md).toContain("50.00");
+  expect(md).toContain("src/engine/a.ts:12");
+  expect(md).toContain("EqualityOperator");
+  expect(md).toContain("Stryker disable next-line");
+});
+
+test("renderResult on pass reports the score and mutant counts", () => {
+  const result = {
+    counts: { Killed: 3, Survived: 0, NoCoverage: 0, Timeout: 1, CompileError: 0, RuntimeError: 0, Ignored: 2, Pending: 0 },
+    undetected: [],
+    score: 100,
+    verdict: "pass" as const,
+  };
+  const md = renderResult({ files: ["src/engine/a.ts"], result, breakScore: 100 });
+  expect(md).toContain("pass");
+  expect(md).toContain("100.00");
+  expect(md).toContain("3 killed");
+});
+
+test("renderInfra says it is not a verdict", () => {
+  expect(renderInfra("boom")).toContain("boom");
+  expect(renderInfra("boom")).toContain("not a verdict");
+});
+
+test("formatGithubOutputs emits the heredoc form for each key", () => {
+  expect(formatGithubOutputs({ decision: "fail", summary: "line1\nline2" })).toBe(
+    "decision<<__MUTATION_GATE_EOF__\nfail\n__MUTATION_GATE_EOF__\n" +
+      "summary<<__MUTATION_GATE_EOF__\nline1\nline2\n__MUTATION_GATE_EOF__\n",
   );
 });
