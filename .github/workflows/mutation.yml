@@ -65,7 +65,7 @@ jobs:
             gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" -F body=@"$BODY_FILE"
           fi
       - name: report artifact
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: mutation-report
