@@ -576,6 +576,39 @@ test("inbound with no registration, or a handler without onInbound, is a silent 
 	expect(errors).toEqual([]); // neither path threw inside the scheduler task
 });
 
+test("inbound with no matching handler and a scenarios dep whose call returns undefined is a silent no-op (L2 seam optional at both levels, R-016)", async () => {
+	const errors: unknown[][] = [];
+	const orig = console.error;
+	console.error = (...a: unknown[]) => {
+		errors.push(a);
+	};
+	try {
+		const config = loadConfig({ seed: 1 });
+		const emitted: NormalizedMessage[] = [];
+		const engine = createEngine({
+			config,
+			broker: {
+				emit: async (m) => {
+					emitted.push(m);
+				},
+			},
+			registry: makeRegistry,
+			record: (v) => ({ ...v, seq: 1, observedAt: "t" }) as Violation,
+			dispatch: createDispatchRegistry(), // no handler registered: select finds no match
+			scenarios: () => undefined, // L2 wired but no scenario runtime active yet
+		});
+		engine.onInbound({
+			message: { topic: "state/d1", payload: { status: "ok" } },
+			meta: { clientId: "c", seq: 1, receivedAt: 0 },
+		});
+		await engine.idle();
+		expect(emitted).toEqual([]);
+	} finally {
+		console.error = orig;
+	}
+	expect(errors).toEqual([]); // deps.scenarios?.()?.onInbound: a getter returning undefined never throws
+});
+
 test("a '+' inside a topic level is not a wildcard: the subscribe materializes (level-exact detection)", async () => {
 	const { engine, emitted } = buildEngine();
 	engine.onSubscribe("state/x+y");
