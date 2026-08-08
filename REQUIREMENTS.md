@@ -330,6 +330,18 @@ Every error reachable on the clone→demo→init→wire→up→first-publish pat
 **TEST**: src/config/index.test.ts, src/registry/index.test.ts, src/engine/index.test.ts, src/compose/initial-state.test.ts, src/control-plane/index.test.ts, src/cli/doctor.test.ts, test/cli-dispatch.test.ts
 `topicOverrides.<address>.initialState: false` (services.yaml) declares a reactive-only channel: the registry resolves the flag onto `Channel.initialState` (toClient records only; no spec-binding tier; only `false` is meaningful), the engine's L1 proactive floor skips the channel on every materialization leg (concrete subscribe, eager startup, `seedInstances`, `reset` republish) while the instance ledger, L2/L3 emissions, wildcard retained replay, and the explicit example surfaces stay untouched; an L3 `initialState` handler still wins, with a compose-root warn-log naming channel and handler re-run after a specs refresh; four `spec-load` warnings (`override-dangling-key`, `initial-state-on-from-client`, `initial-state-non-boolean`, `initial-state-cross-service`) make misconfiguration loud; `GET /v1/topics` exposes `initialState: false` on suppressed channels only.
 
+#### Embedding substrate — reference templates, doctor-advertised edit loop, app-connection recipe
+**UID**: R-041
+**STATUS**: specified
+**COVERS**: docs/specs/adoption.md#embedding-substrate
+`offbook init` scaffolds reference-quality config templates (`services.yaml` with `gitHost` explained in place and all three `repo` forms as commented alternatives, every field annotated required-or-default against what `parseServices` implements; `environments.yaml` with a plain-words purpose statement), both closing by naming `offbook doctor` as the local edit loop; `init`'s next-steps output advertises `doctor`; `docs/guides/wiring-your-service.md` gains the "Point your app at offbook" env-var recipe (demo-app's `?ws=` override as the zero-build variant); a template-parses gate uncomments the worked examples and asserts the config parsers accept them.
+
+#### Onboarding skill — agent-driven embedding + `offbook skill install`
+**UID**: R-042
+**STATUS**: specified
+**COVERS**: docs/specs/adoption.md#onboard-skill
+A bundled Claude Code skill (`skills/onboard/`) drives the embedding journey conversationally (doctor preflight, spec-location interview, init + doctor loop, app-side env-var refactor with diff approval, package scripts, first-light verification, optional CI recipe) under the authority chain contracts > guides > skill; `offbook skill install [dir]` copies it into the app repo's `.claude/skills/offbook-onboard/` (copy-if-absent, `--force` to overwrite, source resolved from the running tool); `check-docs` extends the relative-link gate over the skill and adds a verb-existence check so the skill cannot name dead verbs.
+
 <!--
 Seeding is staged (doc-system.md §7). Batch 1 (R-001..R-007) + R-008 (M0) + R-009 (broker tier-1 residual): seeded; reconciled where traces exist (the R-006/R-007 spikes closed 2026-08-03 via the real-application runs, D-026). Batch 2+ (R-010..R-031): the full module/spike/gate carve per D-007 and docs/archive/intake/2026-07-21-batch-2-seeding-carve.md.
 What remains unseeded resolves case by case (not bulk):

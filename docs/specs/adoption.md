@@ -1,6 +1,6 @@
 # Adoption surface — README, guides, `doctor`, first-run gates <!-- anchor: adoption -->
 
-**Status**: design for `R-034`–`R-036` (see `REQUIREMENTS.md`); decisions folded into `D-016`. This doc is canonical for the adopter-facing document set, the `offbook doctor` verb, and the first-run error/doc-rot gates. The frozen contracts are untouched: no `/v1` endpoint is added, `Diagnostic.kind` stays a closed union, and §4/§5 interfaces are byte-identical — `doctor` is a CLI-local verb (the D-014/D-015 precedent).
+**Status**: design for `R-034`–`R-036` (see `REQUIREMENTS.md`); decisions folded into `D-016`. This doc is canonical for the adopter-facing document set, the `offbook doctor` verb, and the first-run error/doc-rot gates. The frozen contracts are untouched: no `/v1` endpoint is added, `Diagnostic.kind` stays a closed union, and §4/§5 interfaces are byte-identical — `doctor` is a CLI-local verb (the D-014/D-015 precedent). **§8–§9 (added 2026-08-07)** extend this surface with the embedding-onboarding design for `R-041`–`R-042` (D-028), under the same stance: `offbook skill install` is CLI-local, no contract change.
 
 **Audience framing (fixed during design):** layered. The immediate audience is the adopter's own team, cloning from internal git inside the air gap (Bun is installable there, npm dependencies resolve, and spec repos clone from the internal host — verified constraints, not hopes). The org-wide layer is deliberately deferred; every deferral leaves a prepared hinge (§5). n=1 discipline holds: nothing here is built for hypothetical adopters.
 
@@ -116,6 +116,8 @@ Explicitly out of scope now; each item's hinge is already in place so widening t
 | Interactive init wizard | `doctor`'s checks-as-data substrate (§3): the wizard iterates the same checks and prompts fixes |
 | Compiled single-file binary | `bun build --compile` is a known-viable escape hatch if a machine ever can't get Bun — no work now |
 
+**Hinge consumed (2026-08-07, D-028):** the interactive-wizard niche is now occupied by the §9 onboarding skill — a conversational front door that arrived cheaper than a TTY wizard. The `DoctorCheck[]` substrate stays in place should a non-agent wizard ever be wanted; the deferral itself stands.
+
 ## 6. Testing
 
 - **`src/cli/doctor.test.ts`** — per-check failure modes in temp dirs (missing/broken services.yaml, unreachable repo with timeout, busy port, stale runfile), `--json` shape, exit codes. Per-file unique ports, repo convention.
@@ -123,6 +125,9 @@ Explicitly out of scope now; each item's hinge is already in place so widening t
 - **`test/guides-cookbook.test.ts`** — the §4 cookbook gate.
 - **`scripts/check-docs.test.ts`** — link-gate cases added to the existing checker tests.
 - **Error-message pins** — beside the existing CLI tests that already pin messages.
+- **`test/init-templates.test.ts`** — the §8 template-parses gate (worked examples uncommented and parsed; as-scaffolded files parse).
+- **`src/cli/skill.test.ts`** — `offbook skill install` behaviors: fresh copy, present-identical no-op, present-different refusal, `--force` overwrite.
+- **`scripts/check-docs.test.ts`** — §9 gate cases added: relative-link gate over `skills/onboard/**`, verb-existence check.
 - All behind the standard `bun test` + `bun scripts/check-docs.ts` gates.
 
 ## 7. Paper trail
@@ -131,3 +136,65 @@ Explicitly out of scope now; each item's hinge is already in place so widening t
 - **`R-035`** — `offbook doctor`. §3.
 - **`R-036`** — first-run error audit + executable quickstart/cookbook gates. §4.
 - **`D-016`** — approach B (guided path: docs + targeted hardening) over docs-only and productization-now; the §5 hinge table.
+- **`R-041`** — embedding substrate (reference templates, doctor discoverability, app-connection recipe, template-parses gate). §8.
+- **`R-042`** — onboarding skill + `offbook skill install`. §9.
+- **`D-028`** — two-layer embedding onboarding (substrate + agent skill) over editor schemas and the init wizard; the §5 hinge-consumption note.
+
+## 8. Embedding substrate — templates, doctor discoverability, app connection <!-- anchor: embedding-substrate -->
+
+**Status**: design for `R-041` (D-028), 2026-08-07. The §1 journey got a teammate to a moving demo and a wired service; the observed friction now sits one step later, in **embedding** — getting offbook to live in the app repo. Two concrete pains (adopter observation, n=1 discipline): the `services.yaml` shape is recall-from-docs at edit time, and the app's broker URL is hardcoded in client source — an edit the tool itself can never perform (§9 picks that one up).
+
+### Reference-quality `init` templates
+
+`INIT_SERVICES` (currently a minimal commented example) becomes a fill-in-the-blank reference document:
+
+- `gitHost` explained in place: the base URL for slug-form repos, **no built-in default** — a slug without it is a config error (G20).
+- The worked example service shows **all three `repo` forms** as commented alternatives: slug (`org/my-service`), full URL, absolute local path.
+- Every field annotated required-or-default; the exact wording is written against what `parseServices` implements — the parser is the truth, the template transcribes it.
+- `INIT_ENVIRONMENTS` gets the same treatment: a plain-words statement of what the file is for (records requested spec versions per environment; v1 fetches branch tips regardless — resolution-mode: branch) and when an adopter would touch it.
+- Both templates close by naming the edit loop: `offbook doctor` validates shape locally without fetching (§3 check 3); its `specs-reachable` check (§3 check 4) confirms each repo resolves.
+
+### Doctor discoverability
+
+`init`'s next-steps output currently reads "set gitHost + your services in services.yaml, then `offbook up`". It gains the middle step — validate with `offbook doctor` as you edit. The capability exists (§3); what was missing is the advertisement at the moment of need.
+
+### App-connection recipe
+
+`docs/guides/wiring-your-service.md` gains a **"Point your app at offbook"** section: extract the client's broker URL behind a build-time env var — real backend as the default, `ws://localhost:9001` in `.env.development` — with the demo-app's runtime `?ws=` override noted as the zero-build variant. A derived guide section under the standard conflict rule; no contract is touched.
+
+### Template-parses gate
+
+`test/init-templates.test.ts` extracts the commented worked example from each scaffolded template, uncomments it, and asserts `parseServices` / `parseEnvironments` accept it; the as-scaffolded files (empty `services: {}` / `default: {}`) must parse too. The templates break loudly if the config shape ever changes — the §4 executable-docs ethos applied to scaffolds.
+
+## 9. Onboarding skill — the agent front door <!-- anchor: onboard-skill -->
+
+**Status**: design for `R-042` (D-028), 2026-08-07. Most of the adopting team has Claude Code available inside the air gap (verified constraint, not a hope). The two §8 frictions are agent-shaped: an agent authors valid yaml without recall, and the app-side refactor is an edit inside the client repo that only an agent (or a human) can perform. The skill is a **layer over §8, never a replacement** — the manual path must stand alone for teammates without an agent, and the skill defers to it.
+
+### Distribution: `offbook skill install [dir]`
+
+- The skill ships in-repo at `skills/onboard/` (a `SKILL.md` plus any support files). A new CLI-local verb, `offbook skill install [dir]` (default `.`, run from the app repo root), copies it to `<dir>/.claude/skills/offbook-onboard/`. Copy-if-absent; if present and different, report the divergence and require `--force`. The source resolves from the running tool itself (no path hunting — `bun link` already put `offbook` on PATH).
+- The verb joins the *maintain* group (§2 verb overview + `USAGE`). D-014/D-015 precedent: CLI-local, no `/v1`, no contract change.
+- Installing into the app repo (committed) makes onboarding **self-propagating**: the second teammate gets the skill by cloning the app repo. No chicken-and-egg: the skill does not arrive via `init`, so it is installable before anything else exists.
+
+### What the skill drives
+
+The embedding journey end to end, leaning on §8 and the guides at every step:
+
+1. **Preflight** — `offbook doctor`; missing runtime/deps route to the README install steps.
+2. **Interview** — where each service's spec lives (gitHost, repo, specPath, branch), one question at a time.
+3. **Scaffold** — `offbook init mock/`, fill `services.yaml` from the interview, re-run `doctor` after each edit until clean.
+4. **App-side refactor** — find the hardcoded broker URL, extract it behind a build-time env var per the §8 recipe, show the diff, get approval before applying.
+5. **Package scripts** — `mock:up` / `mock:down` per `daily-loop.md`.
+6. **First light** — `offbook up`; `offbook topics` confirms ingestion; start the app; confirm the connect landed; show `offbook validation --watch`.
+7. **CI (offered, optional)** — the `offbook check` recipe from `daily-loop.md`.
+
+### Authority chain
+
+Stated in the skill itself: `contracts.md` > guides > skill. If the skill disagrees with a guide, the skill is wrong — the doc-map conflict rule extended one more derivation step.
+
+### Rot gates
+
+- The §4 relative-link gate extends over `skills/onboard/**`.
+- A new check-docs check: every `offbook <verb>` the skill names must exist in the CLI's verb set (sourced from the same `USAGE` block the CLI prints) — no dead-verb references.
+- The verb gets ordinary unit tests (§6).
+- Agent *behavior* is acknowledged as not CI-testable; the gates pin what is pinnable (links, verbs, templates).
