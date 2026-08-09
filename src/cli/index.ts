@@ -1319,7 +1319,7 @@ async function cmdDoctor(rest: string[], io: Io): Promise<number> {
 
 // --- dispatch ---
 
-const USAGE = `usage: offbook <command>
+export const USAGE = `usage: offbook <command>
 
   init [dir]                 scaffold services.yaml, environments.yaml, scenarios/, handlers/
   doctor [dir] [--offline] [--json] [--run-dir <dir>]  preflight: runtime, deps, config, spec reachability, ports
@@ -1362,6 +1362,13 @@ const VERBS: Record<string, (rest: string[], io: Io) => Promise<number>> = {
 	init: cmdInit,
 	doctor: cmdDoctor,
 };
+
+// R-042 — the dispatch truth the VERB_FORMS coherence test pins (`demo` is
+// dispatched outside the table, in run()).
+export const DISPATCH_VERBS: readonly string[] = [
+	...Object.keys(VERBS),
+	"demo",
+];
 
 export async function run(argv: string[], io: Io = consoleIo): Promise<number> {
 	const [cmd, ...rest] = argv;
