@@ -985,10 +985,16 @@ async function preflightPorts(config: Config): Promise<void> {
 	if (
 		busy.some((b) => b.label === "ctrl") &&
 		(await probeOffbook(config.controlPlanePort))
-	)
+	) {
+		const others = busy.filter((b) => b.label !== "ctrl");
+		const alsoBusy =
+			others.length > 0
+				? `; also busy: ${others.map((b) => `${b.label} ${b.port}`).join(", ")}`
+				: "";
 		throw new CliError(
-			"an offbook from another directory owns these ports (likely the demo) — run `offbook down` there, or pass --ws-port/--ctrl-port",
+			`another offbook owns the control port ${config.controlPlanePort}${alsoBusy} — \`offbook down\` in that project's directory frees the control port; check the others separately if they persist`,
 		);
+	}
 	throw new CliError(
 		`port(s) in use: ${busy.map((b) => `${b.label} ${b.port}`).join(", ")} — another broker/server? set ${busy.map((b) => b.flag).join("/")} (P7); \`offbook doctor\` checks all three ports`,
 	);

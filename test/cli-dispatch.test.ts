@@ -974,10 +974,10 @@ test("up preflights the ports in the foreground (named fix, no detached EADDRINU
 		),
 	).toBe(1);
 	expect(up.out.join("\n")).toContain("reclaiming stale runfile");
-	expect(up.err.join("\n")).toContain(
-		"an offbook from another directory owns these ports",
-	);
-	expect(up.err.join("\n")).toContain("--ctrl-port");
+	expect(up.err.join("\n")).toContain("another offbook owns the control port");
+	expect(up.err.join("\n")).toContain(String(CTRL));
+	expect(up.err.join("\n")).not.toContain("owns these ports");
+	expect(up.err.join("\n")).not.toContain("likely the demo");
 	expect(await readRunfile(dir)).toBeUndefined(); // reclaimed; nothing spawned
 });
 
@@ -1001,9 +1001,10 @@ test("up against ports owned by another offbook attributes it instead of 'anothe
 			a.io,
 		),
 	).toBe(1);
-	expect(a.err.join("\n")).toContain(
-		"an offbook from another directory owns these ports",
-	);
+	expect(a.err.join("\n")).toContain("another offbook owns the control port");
+	expect(a.err.join("\n")).toContain(String(CTRL));
+	expect(a.err.join("\n")).not.toContain("owns these ports");
+	expect(a.err.join("\n")).not.toContain("likely the demo");
 });
 
 test("interactive default boots lenient-loud past a bad scenario (autonomous, strict=false); up --strict makes it fatal", async () => {

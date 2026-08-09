@@ -356,9 +356,9 @@ test("ports: a busy ctrl port that answers as offbook attributes it instead of a
 		);
 		const check = byName(attributed, "ports");
 		expect(check.status).toBe("fail");
-		expect(check.detail).toContain(
-			"an offbook from another directory owns these ports",
-		);
+		expect(check.detail).toContain("another offbook owns the control port");
+		expect(check.detail).not.toContain("owns these ports");
+		expect(check.detail).not.toContain("likely the demo");
 	} finally {
 		server.stop(true);
 	}

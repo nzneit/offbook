@@ -330,12 +330,16 @@ const ports: DoctorCheck = {
 		if (
 			busy.some((b) => b.startsWith("ctrl")) &&
 			(await probeOffbook(ctx.ports.ctrl))
-		)
+		) {
+			const others = busy.filter((b) => !b.startsWith("ctrl"));
+			const alsoBusy =
+				others.length > 0 ? `; also busy: ${others.join(", ")}` : "";
 			return {
 				status: "fail",
-				detail: `an offbook from another directory owns these ports (ctrl ${ctx.ports.ctrl} answers as offbook — likely the demo)`,
-				hint: "run `offbook down` in that directory, or pass --ws-port/--ctrl-port to `offbook up`",
+				detail: `another offbook owns the control port ${ctx.ports.ctrl}${alsoBusy}`,
+				hint: "`offbook down` in that project's directory frees the control port; check the others separately if they persist",
 			};
+		}
 		return busy.length === 0
 			? {
 					status: "pass",

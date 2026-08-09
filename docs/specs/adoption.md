@@ -222,7 +222,7 @@ Stated in the skill itself: `contracts.md` > guides > skill. If the skill disagr
 
 ### Port-conflict attribution
 
-`up`'s preflight and doctor's `ports` check (§3 check 6) evaluate **all three ports before composing the error** (today's preflight throws on the first busy port — ws — so a ctrl-only rule would never fire in the motivating all-three-busy demo scenario); whenever the **ctrl** port is among the busy set, probe it with the existing `probeOffbook`. If it answers as offbook, the message becomes: "an offbook from another directory owns these ports (likely the demo) — run `offbook down` there, or pass `--ws-port`/`--ctrl-port`". Only when ctrl is free (ws/tcp busy alone) does the generic foreign-process message stand — a stated fallback, not a gap.
+`up`'s preflight and doctor's `ports` check (§3 check 6) evaluate **all three ports before composing the error** (today's preflight throws on the first busy port — ws — so a ctrl-only rule would never fire in the motivating all-three-busy demo scenario); whenever the **ctrl** port is among the busy set, probe it with the existing `probeOffbook`. If it answers as offbook, the message claims only what was verified: "another offbook owns the control port `<n>`; also busy: `<other labels>` — `offbook down` in that project's directory frees the control port; check the others separately if they persist" (the "also busy" clause appears only when ws/tcp are busy too; no claim of ownership over them, and no guess at which offbook instance it is). Only when ctrl is free (ws/tcp busy alone) does the generic foreign-process message stand — a stated fallback, not a gap.
 
 ### Staleness honesty
 
