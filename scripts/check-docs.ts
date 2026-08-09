@@ -3,6 +3,7 @@
 // Zero dependencies: node:fs + hand-parsing, matching the retired docs-index.ts.
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { SUBCOMMAND_FIRST_TOKENS, VERB_FORMS } from "#src/cli/verbs.ts";
 
 const ROOT = join(import.meta.dir, "..");
 
@@ -226,6 +227,79 @@ export function checkLinks(
   return errs;
 }
 
+// R-042 — the skill's relative links must be INTRA-SKILL (adoption.md §9):
+// the consumed copy lives in the app repo, so a link out of the skill dir
+// resolves on the wrong filesystem by construction.
+export function checkSkillLinks(
+  files: { path: string; text: string }[],
+): string[] {
+  const errs: string[] = [];
+  for (const f of files)
+    for (const m of f.text.matchAll(/\]\(([^)\s]+)\)/g)) {
+      const target = m[1];
+      if (/^[a-z][a-z+.-]*:/.test(target) || target.startsWith("#")) continue;
+      const rel = target.split("#")[0];
+      if (rel === "") continue;
+      const resolved = join(dirname(f.path), rel);
+      if (!resolved.startsWith("skills/offbook-onboard/"))
+        errs.push(`${f.path}: link escapes the skill dir → ${target}`);
+      else if (!existsSync(join(ROOT, resolved)))
+        errs.push(`${f.path}: broken link → ${target}`);
+    }
+  return errs;
+}
+
+// R-042 — no dead verbs in the skill: every `offbook <form>` it names must
+// be a VERB_FORMS member (set membership; `<...>` placeholders exempt,
+// flags ignored; a second token participates only when the first token has
+// any two-token form — `mode autonomous` is `mode` + argument). Residual
+// (stated in adoption.md §9): verb FORMS only — flag names unchecked.
+export function checkSkillVerbs(
+  files: { path: string; text: string }[],
+  forms: readonly string[] = VERB_FORMS,
+  subFirst: ReadonlySet<string> = SUBCOMMAND_FIRST_TOKENS,
+): string[] {
+  const errs: string[] = [];
+  const members = new Set(forms);
+  for (const f of files)
+    for (const m of f.text.matchAll(/`offbook ([^`]+)`|^\s*(?:\$ )?offbook (.+)$/gm)) {
+      const rest = (m[1] ?? m[2] ?? "").trim();
+      if (rest.startsWith("-")) continue; // `offbook --version` etc: flags, not verbs
+      const tokens = rest.split(/\s+/).filter((t) => !t.startsWith("-"));
+      if (tokens.length === 0 || tokens[0].startsWith("<")) continue;
+      const first = tokens[0];
+      const second =
+        tokens[1] !== undefined && !tokens[1].startsWith("<")
+          ? tokens[1]
+          : undefined;
+      // branch split (plan-review finding 1): a valid bare first token must
+      // NOT excuse an invalid two-token form — `offbook specs prune` fails
+      // even though `specs` alone is a member.
+      if (subFirst.has(first) && second !== undefined) {
+        if (!members.has(`${first} ${second}`))
+          errs.push(
+            `${f.path}: names unknown verb form 'offbook ${first} ${second}'`,
+          );
+      } else if (!members.has(first))
+        errs.push(`${f.path}: names unknown verb form 'offbook ${first}'`);
+    }
+  return errs;
+}
+
+// R-042 — SKILL.md frontmatter: discovery depends on it (adoption.md §9).
+export function checkSkillFrontmatter(text: string): string[] {
+  const m = text.match(/^---\n([\s\S]*?)\n---/);
+  if (!m) return ["skills/offbook-onboard/SKILL.md: missing frontmatter"];
+  const name = m[1].match(/^name:\s*(\S+)\s*$/m)?.[1];
+  const desc = m[1].match(/^description:\s*(.+)$/m)?.[1]?.trim();
+  const errs: string[] = [];
+  if (name !== "offbook-onboard")
+    errs.push(`SKILL.md frontmatter name '${name}' ≠ 'offbook-onboard' (must match the install dir)`);
+  if (desc === undefined || desc === "")
+    errs.push("SKILL.md frontmatter needs a non-empty description");
+  return errs;
+}
+
 function main(): void {
   const reqs = parseEntries(read("REQUIREMENTS.md") ?? "", 4).filter((e) => e.meta.UID);
   const decs = parseEntries(read("DECISIONS.md") ?? "", 3).filter((e) => /^D-\d+/.test(e.title));
@@ -243,6 +317,13 @@ function main(): void {
     for (const name of readdirSync(guidesDir).filter((n) => n.endsWith(".md")))
       adopterDocs.push({ path: `docs/guides/${name}`, text: readFileSync(join(guidesDir, name), "utf8") });
 
+  const skillDir = join(ROOT, "skills/offbook-onboard");
+  const skillDocs: { path: string; text: string }[] = [];
+  if (existsSync(skillDir))
+    for (const rel of readdirSync(skillDir, { recursive: true }) as string[])
+      if (rel.endsWith(".md"))
+        skillDocs.push({ path: `skills/offbook-onboard/${rel}`, text: readFileSync(join(skillDir, rel), "utf8") });
+
   const errors = [
     ...checkIds(reqs, "R", (e) => e.meta.UID ?? ""),
     ...checkIds(decs, "D", (e) => e.title.match(/^(D-\d+)/)?.[1] ?? ""),
@@ -252,6 +333,13 @@ function main(): void {
     ...checkTestTraces(reqs, read),
     ...checkTagSweep(listTestFiles(), reqs),
     ...checkLinks(adopterDocs, (rel) => existsSync(join(ROOT, rel))),
+    ...checkSkillLinks(skillDocs),
+    ...checkSkillVerbs(skillDocs),
+    ...(skillDocs.length > 0
+      ? checkSkillFrontmatter(
+          skillDocs.find((f) => f.path.endsWith("SKILL.md"))?.text ?? "",
+        )
+      : []),
   ];
 
   if (errors.length) {

@@ -275,3 +275,33 @@ test("checkLinks ignores absolute URLs, mailto, and in-page anchors", () => {
   );
   expect(errs).toEqual([]);
 });
+
+// [utest->R-042]
+import {
+  checkSkillFrontmatter,
+  checkSkillLinks,
+  checkSkillVerbs,
+} from "./check-docs.ts";
+
+test("checkSkillVerbs: membership semantics (fork e, corrected)", () => {
+	const doc = (text: string) => [{ path: "skills/offbook-onboard/SKILL.md", text }];
+	expect(checkSkillVerbs(doc("run `offbook doctor` then `offbook specs`"))).toEqual([]);
+	expect(checkSkillVerbs(doc("`offbook specs update` refreshes"))).toEqual([]);
+	expect(checkSkillVerbs(doc("`offbook mode autonomous` flips it"))).toEqual([]);
+	expect(checkSkillVerbs(doc("`offbook publish <topic> --example`"))).toEqual([]);
+	expect(checkSkillVerbs(doc("try `offbook skil install`"))).toHaveLength(1);
+	expect(checkSkillVerbs(doc("`offbook specs prune` cleans"))).toHaveLength(1);
+});
+
+test("checkSkillLinks: intra-skill only", () => {
+	const at = (text: string) => [{ path: "skills/offbook-onboard/SKILL.md", text }];
+	expect(checkSkillLinks(at("[guide](../../docs/guides/daily-loop.md)"))).toHaveLength(1);
+	expect(checkSkillLinks(at("[here](#the-journey)"))).toEqual([]);
+	expect(checkSkillLinks(at("[web](https://example.com)"))).toEqual([]);
+});
+
+test("checkSkillFrontmatter: name must match the install dir", () => {
+	expect(checkSkillFrontmatter("---\nname: offbook-onboard\ndescription: x\n---\nbody")).toEqual([]);
+	expect(checkSkillFrontmatter("---\nname: onboard\ndescription: x\n---\n")).toHaveLength(1);
+	expect(checkSkillFrontmatter("no frontmatter")).toHaveLength(1);
+});
