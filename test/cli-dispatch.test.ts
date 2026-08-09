@@ -779,6 +779,24 @@ test("clientsFromLog: counts only post-last-boot-line connects, skips malformed"
 	expect(r.connects).toBe(2); // stale-run excluded (before the last boot line)
 	expect(r.last).toEqual({ clientId: "cli-2", at: iso });
 	expect(clientsFromLog("")).toEqual({ connects: 0 });
+
+	// boot line is the last line (no connects after)
+	expect(
+		clientsFromLog(
+			`[offbook] ${iso} boot: services.yaml sha256:${"c".repeat(64)}`,
+		),
+	).toEqual({ connects: 0 });
+
+	// torn JSON case: matches regex but fails JSON.parse, mixed with valid connects
+	const withTorn = [
+		`[offbook] ${iso} boot: services.yaml sha256:${"d".repeat(64)}`,
+		`[offbook] ${iso} ws-connect {"clientId":"valid-1"}`,
+		`[offbook] ${iso} ws-connect {bad: json}`,
+		`[offbook] ${iso} tcp-connect {"clientId":"valid-2"}`,
+	].join("\n");
+	const rTorn = clientsFromLog(withTorn);
+	expect(rTorn.connects).toBe(2); // torn line skipped
+	expect(rTorn.last).toEqual({ clientId: "valid-2", at: iso });
 });
 
 // --- suite B: the real up → status → specs → check → down process cycle ---
@@ -829,7 +847,7 @@ test("up spawns the detached server from a local-git project, status/specs/logs 
 			/spec thermostat: main@.*asyncapi\.yaml @ [0-9a-f]{8}/,
 		);
 		expect(stText).toMatch(/fetched .* \(\d+[smhd] ago\)/); // neutral spec age (P2)
-		expect(stText).toContain("clients:"); // zero-connects form for this fixture
+		expect(stText).toContain("no connects observed this run"); // zero-connects branch
 
 		const sp = io();
 		expect(await run(["specs", "--run-dir", runDir], sp.io)).toBe(0);
