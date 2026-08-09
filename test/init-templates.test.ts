@@ -11,6 +11,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { checkoutOrigin, repoRoot } from "#src/cli/checkout.ts";
 import type { Io } from "#src/cli/index.ts";
 import { run } from "#src/cli/index.ts";
 import { parseEnvironments, parseServices } from "#src/config/index.ts";
@@ -77,4 +78,11 @@ test("init scaffolds README.md: doctor-first, install steps, no invented host", 
 	// origin observed or ask-a-teammate — never a made-up host (the dev
 	// checkout HAS an origin, so this asserts the observed form end-to-end)
 	expect(readme).not.toContain("git.example.com");
+	// the clone URL is the OBSERVED origin of this checkout, not an invented one
+	const origin = await checkoutOrigin(repoRoot());
+	if (origin !== undefined) {
+		expect(readme).toContain(`git clone ${origin} offbook`);
+	} else {
+		expect(readme).toContain("ask a teammate");
+	}
 });

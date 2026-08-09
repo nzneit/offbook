@@ -1279,7 +1279,7 @@ const INIT_SCENARIO = `# offbook L2 scenarios — declarative reactive/triggered
 
 // R-041 — the one committed artifact that names the next step for a
 // teammate WITHOUT an agent (fresh app-repo clone: mock/, scripts, and
-// skill present, \`offbook: command not found\`). The clone URL is OBSERVED
+// skill present, `offbook: command not found`). The clone URL is OBSERVED
 // from the running tool's own checkout — never the app repo's remote, and
 // never invented (the <internal-git> rule).
 function initReadme(originUrl: string | undefined): string {
