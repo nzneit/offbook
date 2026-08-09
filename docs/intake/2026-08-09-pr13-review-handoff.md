@@ -75,7 +75,7 @@
   ```
 - **Acceptance:** new case in `src/cli/checkout.test.ts` (throwaway repo with origin `https://user:token@example.invalid/x.git`): result contains `example.invalid/x.git` and does not contain `user` or `token`; an scp-like origin round-trips unchanged; existing checkout/skill/init tests still pass (full `bun test` exit 0).
 - **Relates to:** F11 (the stamp's other environment-specific value).
-- **Status:** ☐ open
+- **Status:** ☑ resolved
 
 ### F2 — Degenerate skill install (dest is a file) crashes doctor and defeats `--force` recovery
 - **Where:** `src/cli/skill.ts` `cmdSkill` (lines 147–165): `compareSkillTrees` runs before the `--force` branch; `src/cli/doctor.ts` `skillCheck` (line 395): `compareSkillTrees` has no try/catch and `runDoctor` (lines 427–430) runs checks bare.
@@ -265,3 +265,4 @@ Resolve **F1 before F11** (both touch what the stamp/README embed; F1's sanitize
 | ID | Decision taken | File(s) patched | Resolver | Date |
 |---|---|---|---|---|
 | F2 | Mechanical guards at both sites (recommended resolution adopted as-is): `cmdSkill` checks `statSync(destDir).isDirectory()` before comparing — non-directory dest throws a `--force`-advising `CliError` without `--force`, clean-replaces with it; `compareSkillTrees` is wrapped in try/catch (unreadable entries treated as "differs"). `skillCheck` wraps its `compareSkillTrees` call and returns `warn` with a `--force`-advising detail on throw instead of letting `runDoctor` crash. | `src/cli/skill.ts`, `src/cli/doctor.ts`, `src/cli/skill.test.ts`, `src/cli/doctor.test.ts` | subagent batch A | 2026-08-09 |
+| F1 | Strip userinfo, keep the URL (recommended resolution adopted as-is): `checkoutOrigin` now parses the remote URL and clears `username`/`password` before returning it, covering both sinks (`initReadme`'s clone line, the skill install stamp's `originUrl`) from one choke point; scp-like remotes (`git@host:path`) fail `URL` parsing and pass through unchanged (no embeddable secret). | `src/cli/checkout.ts`, `src/cli/checkout.test.ts` | subagent batch A | 2026-08-09 |

@@ -64,6 +64,34 @@ test("checkoutOrigin: undefined without a remote, the URL with one", async () =>
 	);
 });
 
+// [utest->R-042]
+test("checkoutOrigin: strips userinfo from a credentialed remote; scp-like remotes round-trip unchanged", async () => {
+	const credentialed = await tempRepo();
+	await sh(
+		credentialed,
+		"git",
+		"remote",
+		"add",
+		"origin",
+		"https://user:token@example.invalid/x.git",
+	);
+	const sanitized = await checkoutOrigin(credentialed);
+	expect(sanitized).toContain("example.invalid/x.git");
+	expect(sanitized).not.toContain("user");
+	expect(sanitized).not.toContain("token");
+
+	const scp = await tempRepo();
+	await sh(
+		scp,
+		"git",
+		"remote",
+		"add",
+		"origin",
+		"git@git.example.com:org/offbook.git",
+	);
+	expect(await checkoutOrigin(scp)).toBe("git@git.example.com:org/offbook.git");
+});
+
 test("gitToplevel resolves from a subdir; gitIgnored honors .gitignore", async () => {
 	const repo = await tempRepo();
 	const sub = join(repo, "mock");

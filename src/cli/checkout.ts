@@ -32,10 +32,24 @@ export async function checkoutCommit(root = repoRoot()): Promise<string> {
 	return dirty === undefined ? sha : `${sha}-dirty`;
 }
 
+// R-042/F1 — the origin is embedded verbatim into committed artifacts (the
+// init README's clone line, the skill install stamp): strip any userinfo
+// (`https://user:token@host/...`) so a credentialed remote never lands in
+// git history. scp-like remotes (`git@host:path`) aren't URL-parseable and
+// carry a conventional username, not a secret — pass them through unchanged.
 export async function checkoutOrigin(
 	root = repoRoot(),
 ): Promise<string | undefined> {
-	return git(["remote", "get-url", "origin"], root);
+	const url = await git(["remote", "get-url", "origin"], root);
+	if (url === undefined) return undefined;
+	try {
+		const u = new URL(url);
+		u.username = "";
+		u.password = "";
+		return u.toString();
+	} catch {
+		return url; // scp-like (git@host:path): no embeddable secret
+	}
 }
 
 export async function gitToplevel(dir: string): Promise<string | undefined> {
