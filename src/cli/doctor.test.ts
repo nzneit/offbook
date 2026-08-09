@@ -2,7 +2,7 @@
 // names a next step (docs/specs/adoption.md §3).
 // [utest->R-035]
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { DoctorCtx, DoctorReport } from "./doctor.ts";
@@ -430,9 +430,16 @@ test("doctor skill check: non-repo pass, absent pass, identical pass, edited war
 		join(repo, ".claude/skills/offbook-onboard/SKILL.md"),
 		"edited\n",
 	);
-	const r4 = await runDoctor(ctxWith({ projectDir: repo }), [skillOnly]);
+	// examine from a SUBDIRECTORY, not the toplevel itself — otherwise the
+	// hint's `${top}` is indistinguishable from a `${ctx.projectDir}` bug
+	const sub = join(repo, "app");
+	mkdirSync(sub);
+	const resolvedTop = realpathSync(repo); // beware /tmp symlinks
+	const r4 = await runDoctor(ctxWith({ projectDir: sub }), [skillOnly]);
 	expect(r4.checks[0].status).toBe("warn");
 	expect(r4.checks[0].hint).toContain("offbook skill install --force");
+	expect(r4.checks[0].hint).toContain(resolvedTop);
+	expect(r4.checks[0].hint).not.toContain(join(resolvedTop, "app"));
 	expect(r4.ok).toBe(true); // warn never fails doctor
 });
 

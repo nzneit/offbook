@@ -377,7 +377,13 @@ const skillCheck: DoctorCheck = {
 				detail:
 					"onboarding skill not installed (optional — `offbook skill install` adds it)",
 			};
-		const diff = await compareSkillTrees(bundledSkillDir(), installed);
+		const src = bundledSkillDir();
+		if (!existsSync(src))
+			return {
+				status: "warn",
+				detail: `bundled skill missing from the offbook checkout (${src}) — incomplete checkout?`,
+			};
+		const diff = await compareSkillTrees(src, installed);
 		return diff.identical
 			? {
 					status: "pass",
