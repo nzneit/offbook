@@ -67,3 +67,14 @@ test("scenario scaffold: fenced example satisfies the doctor check-5 shape", asy
 	}
 	expect(parseYaml(raw)).toBeNull(); // as-scaffolded: all comments, parses to null (doctor treats as fine)
 });
+
+test("init scaffolds README.md: doctor-first, install steps, no invented host", async () => {
+	const dir = await scaffold();
+	const readme = await Bun.file(join(dir, "README.md")).text();
+	expect(readme).toContain("offbook doctor");
+	expect(readme).toContain("bun link");
+	expect(readme).toMatch(/git clone \S+ offbook/);
+	// origin observed or ask-a-teammate — never a made-up host (the dev
+	// checkout HAS an origin, so this asserts the observed form end-to-end)
+	expect(readme).not.toContain("git.example.com");
+});

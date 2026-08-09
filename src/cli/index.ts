@@ -27,7 +27,7 @@ import type {
 } from "#src/model/index.ts";
 import { DEFAULT_CONFIG } from "#src/model/index.ts";
 import { buildRegistry } from "#src/registry/index.ts";
-import { checkoutCommit, repoRoot } from "./checkout.ts";
+import { checkoutCommit, checkoutOrigin, repoRoot } from "./checkout.ts";
 import type { Api } from "./client.ts";
 import { api, CliError, resolveCtrlPort } from "./client.ts";
 import type { CheckStatus, DoctorCtx } from "./doctor.ts";
@@ -1277,6 +1277,42 @@ const INIT_SCENARIO = `# offbook L2 scenarios — declarative reactive/triggered
 ## docs/guides/scenario-cookbook.md
 `;
 
+// R-041 — the one committed artifact that names the next step for a
+// teammate WITHOUT an agent (fresh app-repo clone: mock/, scripts, and
+// skill present, \`offbook: command not found\`). The clone URL is OBSERVED
+// from the running tool's own checkout — never the app repo's remote, and
+// never invented (the <internal-git> rule).
+function initReadme(originUrl: string | undefined): string {
+	const cloneLine =
+		originUrl !== undefined
+			? `git clone ${originUrl} offbook`
+			: "git clone <ask a teammate for the offbook clone URL> offbook";
+	return `# offbook mock project
+
+This directory mocks this app's MQTT-over-WebSockets backend from its
+AsyncAPI specs (services.yaml points at them). The app connects to
+\`ws://localhost:9001\` exactly as it would to the real backend.
+
+## Install offbook (once per machine)
+
+\`\`\`sh
+${cloneLine}
+cd offbook && bun install && bun link
+\`\`\`
+
+## Use
+
+\`\`\`sh
+offbook doctor   # start here — validates this project + your environment
+offbook up       # serve the mock
+offbook down
+\`\`\`
+
+Guides live in the offbook checkout under docs/guides/ (getting-started,
+wiring-your-service, scenario-cookbook, daily-loop).
+`;
+}
+
 async function cmdInit(rest: string[], io: Io): Promise<number> {
 	const { positionals } = parseFlags(rest, {});
 	const dir = positionals[0] ?? ".";
@@ -1296,6 +1332,10 @@ async function cmdInit(rest: string[], io: Io): Promise<number> {
 	};
 	await writeIfAbsent("services.yaml", INIT_SERVICES);
 	await writeIfAbsent("environments.yaml", INIT_ENVIRONMENTS);
+	await writeIfAbsent(
+		"README.md",
+		initReadme(await checkoutOrigin(repoRoot())),
+	);
 	mkdirSync(join(dir, "scenarios"), { recursive: true });
 	await writeIfAbsent("scenarios/00-example.yaml", INIT_SCENARIO);
 	mkdirSync(join(dir, "handlers"), { recursive: true });
