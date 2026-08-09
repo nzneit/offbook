@@ -1212,24 +1212,58 @@ async function cmdLogs(rest: string[], io: Io): Promise<number> {
 
 // --- init scaffold (R-025 refines; local file work only) ---
 
+// R-041 — reference-quality scaffolds (adoption.md §8). Fence convention:
+// exactly ONE canonical worked example per template between the marker
+// lines, commented at code depth ("# "); alternatives and prose sit at
+// prose depth ("## ") outside the fence, so test/init-templates.test.ts's
+// extraction (strip one "# " per line, parse STANDALONE) is mechanical.
+// gitHost stays a COMMENTED example, never an active placeholder (contracts
+// §6, the EI1 amendment): unset must remain the true config state so a
+// slug-form repo hits the clean G20 error, not a fetch against garbage.
 const INIT_SERVICES = `# offbook — where each service's AsyncAPI spec lives (services.yaml).
-# gitHost: https://git.example.com   # base URL for org/name repo slugs
+# Validate as you edit: \`offbook doctor\` checks this file locally (no
+# network) and confirms each repo resolves (the specs-reachable check).
+#
+# gitHost: https://git.example.com
+##  ^ uncomment and set: the base URL slug-form repos resolve against.
+##  NO built-in default — a slug-form repo with no gitHost is a config
+##  error. Full-URL and absolute-path repos need no gitHost.
 services: {}
+# --- example ---
 # services:
 #   my-service:
-#     repo: org/my-service     # slug (resolved against gitHost), full URL, or absolute path
+#     repo: org/my-service
 #     specPath: asyncapi.yaml
 #     branch: main
+# --- end example ---
+## repo (required) — three accepted forms:
+##   slug:           org/my-service        (resolved against gitHost)
+##   full URL:       https://git.example.com/org/my-service.git
+##   absolute path:  /home/you/checkouts/my-service
+## specPath (required) — path to the AsyncAPI doc inside the repo.
+## branch (optional) — defaults to main.
+## Per-service extras: gitHost (overrides the global), qosDefault (0|1|2),
+## retainDefault, topicOverrides — docs/guides/wiring-your-service.md.
 `;
 
-const INIT_ENVIRONMENTS = `# offbook — requested spec versions per environment.
-# v1 records these but fetches branch tips (resolution-mode: branch).
+const INIT_ENVIRONMENTS = `# offbook — requested spec versions per environment (environments.yaml).
+# What it is for: records WHICH spec version each environment wants, so
+# provenance lands in specs.lock. v1 always fetches branch tips regardless
+# (resolution-mode: branch) — you rarely touch this file until pinned
+# resolution ships. Validate with \`offbook doctor\`.
 environments:
   default: {}
+# --- example ---
+# environments:
+#   staging:
+#     my-service: "1.4.2"
+# --- end example ---
 `;
 
 const INIT_SCENARIO = `# offbook L2 scenarios — declarative reactive/triggered emissions.
-# Example (uncomment and adapt to your spec's topics):
+# \`offbook doctor\` shape-checks scenarios/*.yaml; a running server reports
+# full binding diagnostics (\`offbook diagnostics\`).
+# --- example ---
 # - name: accept-set
 #   when:
 #     topic: command/{deviceId}/set
@@ -1238,6 +1272,9 @@ const INIT_SCENARIO = `# offbook L2 scenarios — declarative reactive/triggered
 #         topic: state/{{deviceId}}
 #         payload: { deviceId: "{{deviceId}}", status: accepted }
 #         delay: 50-80ms
+# --- end example ---
+## Adapt the topics to your spec (\`offbook topics\` lists them); recipes:
+## docs/guides/scenario-cookbook.md
 `;
 
 async function cmdInit(rest: string[], io: Io): Promise<number> {
@@ -1269,7 +1306,7 @@ async function cmdInit(rest: string[], io: Io): Promise<number> {
 		`offbook init — scaffolded ${created.join(", ")}, scenarios/, handlers/`,
 	);
 	io.out(
-		"next: set gitHost + your services in services.yaml, then `offbook up`",
+		"next: set gitHost + your services in services.yaml (validate with `offbook doctor` as you edit), then `offbook up`",
 	);
 	return 0;
 }
