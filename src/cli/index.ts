@@ -119,6 +119,39 @@ const glyph = (severity: string): string =>
 
 const shortHash = (h: string): string => h.replace(/^sha256:/, "").slice(0, 8);
 
+// R-043 — connects observed THIS RUN (adoption.md §10): the log appends
+// across runs, so "this run" = fingerprint lines after the LAST boot line
+// (under --watch each respawn writes a new boot line — the count restarts
+// per respawn, which is the acceptance-test semantics). Connects observed,
+// never a live count: that is what the log truthfully knows.
+export function clientsFromLog(logText: string): {
+	connects: number;
+	last?: { clientId: string; at: string };
+} {
+	const lines = logText.split("\n");
+	let start = 0;
+	for (let i = lines.length - 1; i >= 0; i--)
+		if (/^\[offbook\] \S+ boot: /.test(lines[i])) {
+			start = i + 1;
+			break;
+		}
+	let connects = 0;
+	let last: { clientId: string; at: string } | undefined;
+	for (const line of lines.slice(start)) {
+		const m = line.match(/^\[offbook\] (\S+) (?:ws|tcp)-connect (\{.*\})$/);
+		if (!m) continue;
+		try {
+			const fields = JSON.parse(m[2]) as { clientId?: unknown };
+			if (typeof fields.clientId !== "string") continue;
+			connects++;
+			last = { clientId: fields.clientId, at: m[1] };
+		} catch {
+			// malformed fingerprint line: skip, never crash status (R-043)
+		}
+	}
+	return { connects, last };
+}
+
 // P2: spec age shows NEUTRALLY (no stale threshold) — the dev weighs it.
 function specAge(fetchedAt: string, now = Date.now()): string {
 	const ms = now - Date.parse(fetchedAt);
@@ -1136,6 +1169,11 @@ async function cmdStatus(rest: string[], io: Io): Promise<number> {
 	}
 	const run = resolved.run;
 	const a = api(run.controlPlanePort);
+	const clients = clientsFromLog(
+		await Bun.file(logPath(runDir))
+			.text()
+			.catch(() => ""),
+	);
 	const [modeRes, specsRes, valRes, diagRes] = (await Promise.all([
 		a.get("/v1/mode"),
 		a.get("/v1/specs"),
@@ -1156,6 +1194,7 @@ async function cmdStatus(rest: string[], io: Io): Promise<number> {
 					specs: specsRes.specs,
 					validation: valRes.summary,
 					diagnostics: diagRes.summary,
+					clients,
 				},
 				null,
 				2,
@@ -1171,6 +1210,11 @@ async function cmdStatus(rest: string[], io: Io): Promise<number> {
 	);
 	io.out(
 		`  point your MQTT client at ws://localhost:${run.brokerWsPort} (MQTT 3.1.1)`,
+	);
+	io.out(
+		clients.connects === 0
+			? `  clients: no connects observed this run — is your app pointed at ws://localhost:${run.brokerWsPort}?`
+			: `  clients: ${clients.connects} connect(s) this run · last ${clients.last?.clientId} at ${clients.last?.at}`,
 	);
 	if (specsRes.specs.length === 0) io.out("  specs: (none)");
 	for (const s of specsRes.specs) {

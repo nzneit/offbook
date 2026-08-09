@@ -18,7 +18,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Io } from "#src/cli/index.ts";
-import { renderTopicList, run } from "#src/cli/index.ts";
+import { clientsFromLog, renderTopicList, run } from "#src/cli/index.ts";
 import { readRunfile, writeRunfile } from "#src/cli/runfile.ts";
 import type { Composed } from "#src/compose/index.ts";
 import { compose } from "#src/compose/index.ts";
@@ -763,6 +763,24 @@ test("mergeRegistries: one registry over all services — most-specific wins acr
 	expect(merged.matchesFilter("state/+", "state/main")).toBe(true);
 });
 
+// [itest->R-043]
+test("clientsFromLog: counts only post-last-boot-line connects, skips malformed", () => {
+	const iso = "2026-08-08T10:00:00.000Z";
+	const lines = [
+		`[offbook] ${iso} boot: services.yaml sha256:${"a".repeat(64)}`,
+		`[offbook] ${iso} ws-connect {"clientId":"stale-run"}`,
+		`[offbook] ${iso} boot: services.yaml sha256:${"b".repeat(64)}`,
+		`[offbook] ${iso} ws-connect {"clientId":"web-1","protocolLevel":4}`,
+		`[offbook] ${iso} ws-connect not-json`,
+		`[offbook] ${iso} mqtt-subscribe {"clientId":"web-1","topic":"state/x"}`,
+		`[offbook] ${iso} tcp-connect {"clientId":"cli-2"}`,
+	].join("\n");
+	const r = clientsFromLog(lines);
+	expect(r.connects).toBe(2); // stale-run excluded (before the last boot line)
+	expect(r.last).toEqual({ clientId: "cli-2", at: iso });
+	expect(clientsFromLog("")).toEqual({ connects: 0 });
+});
+
 // --- suite B: the real up → status → specs → check → down process cycle ---
 
 test("up spawns the detached server from a local-git project, status/specs/logs read it, down stops it", async () => {
@@ -811,6 +829,7 @@ test("up spawns the detached server from a local-git project, status/specs/logs 
 			/spec thermostat: main@.*asyncapi\.yaml @ [0-9a-f]{8}/,
 		);
 		expect(stText).toMatch(/fetched .* \(\d+[smhd] ago\)/); // neutral spec age (P2)
+		expect(stText).toContain("clients:"); // zero-connects form for this fixture
 
 		const sp = io();
 		expect(await run(["specs", "--run-dir", runDir], sp.io)).toBe(0);
