@@ -38,6 +38,8 @@ import {
 } from "./project-fixture.ts";
 
 // 19xxx/129xx: distinct from control-plane (18xxx), ci-settlement (16xxx), m0
+// (this file's other literal ports: 19010-19040/12910-12940, 19045/12945/19845
+// — see each test; kept out of named consts since they're single-use)
 const WS = 19001;
 const TCP = 12901;
 const CTRL = 19801;
@@ -1005,6 +1007,46 @@ test("up against ports owned by another offbook attributes it instead of 'anothe
 	expect(a.err.join("\n")).toContain(String(CTRL));
 	expect(a.err.join("\n")).not.toContain("owns these ports");
 	expect(a.err.join("\n")).not.toContain("likely the demo");
+});
+
+// F5 — the branch that must NOT attribute: a foreign (non-offbook) listener
+// on the ctrl port fails probeOffbook's mode-shape check, so `up` preflight
+// must fall back to the generic busy message, not claim another offbook.
+// [itest->R-043]
+test("up against a ctrl port held by a foreign listener falls back to the generic busy message", async () => {
+	const FOREIGN_WS = 19045;
+	const FOREIGN_TCP = 12945;
+	const FOREIGN_CTRL = 19845; // not offbook: no `mode` field in the response
+	const foreign = Bun.serve({
+		port: FOREIGN_CTRL,
+		fetch: () => Response.json({ ok: true }),
+	});
+	try {
+		const scratch = mkdtempSync(join(tmpdir(), "attr-neg-"));
+		const b = io();
+		expect(
+			await run(
+				[
+					"up",
+					"--run-dir",
+					scratch,
+					"--ws-port",
+					String(FOREIGN_WS),
+					"--tcp-port",
+					String(FOREIGN_TCP),
+					"--ctrl-port",
+					String(FOREIGN_CTRL),
+				],
+				b.io,
+			),
+		).toBe(1);
+		expect(b.err.join("\n")).toContain("port(s) in use");
+		expect(b.err.join("\n")).toContain(`ctrl ${FOREIGN_CTRL}`);
+		expect(b.err.join("\n")).not.toContain("another offbook owns");
+		expect(b.err.join("\n")).not.toContain("another directory");
+	} finally {
+		foreign.stop(true);
+	}
 });
 
 test("interactive default boots lenient-loud past a bad scenario (autonomous, strict=false); up --strict makes it fatal", async () => {

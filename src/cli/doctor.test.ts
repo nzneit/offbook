@@ -10,7 +10,7 @@ import { DOCTOR_CHECKS, runDoctor, versionAtLeast } from "./doctor.ts";
 import { run } from "./index.ts";
 import { writeRunfile } from "./runfile.ts";
 
-// ports for this file (repo convention: unique per file): 19130-19134, 12995
+// ports for this file (repo convention: unique per file): 19130-19135, 12995
 
 function ctxWith(over: Partial<DoctorCtx>): DoctorCtx {
 	return {
@@ -359,6 +359,33 @@ test("ports: a busy ctrl port that answers as offbook attributes it instead of a
 		expect(check.detail).toContain("another offbook owns the control port");
 		expect(check.detail).not.toContain("owns these ports");
 		expect(check.detail).not.toContain("likely the demo");
+	} finally {
+		server.stop(true);
+	}
+});
+
+// F5 — the branch that must NOT attribute: a foreign (non-offbook) listener
+// on the ctrl port fails probeOffbook's mode-shape check, so doctor must
+// fall back to the generic busy detail, not claim another offbook owns it.
+// [itest->R-043]
+test("ports: a busy ctrl port held by a foreign listener falls back to the generic busy detail", async () => {
+	const server = Bun.serve({
+		port: 19135,
+		fetch: () => Response.json({ ok: true }), // no `mode` field: not offbook
+	});
+	try {
+		const foreign = await runDoctor(
+			ctxWith({
+				repoRoot: GOOD_REPO_ROOT,
+				projectDir: projectWith({}),
+				ports: { ws: 19130, tcp: 12995, ctrl: 19135 },
+			}),
+		);
+		const check = byName(foreign, "ports");
+		expect(check.status).toBe("fail");
+		expect(check.detail).toBe("port(s) busy: ctrl 19135");
+		expect(check.detail).not.toContain("another offbook owns");
+		expect(check.detail).not.toContain("another directory");
 	} finally {
 		server.stop(true);
 	}
