@@ -392,7 +392,17 @@ const skillCheck: DoctorCheck = {
 				status: "warn",
 				detail: `bundled skill missing from the offbook checkout (${src}) — incomplete checkout?`,
 			};
-		const diff = await compareSkillTrees(src, installed);
+		let diff: Awaited<ReturnType<typeof compareSkillTrees>>;
+		try {
+			diff = await compareSkillTrees(src, installed);
+		} catch {
+			// degenerate install (dest is a file, or an unreadable entry inside
+			// it): warn-never-fail still applies — `--force` is the recovery
+			return {
+				status: "warn",
+				detail: `installed skill unreadable/degenerate at ${installed} — \`offbook skill install --force\` replaces it`,
+			};
+		}
 		return diff.identical
 			? {
 					status: "pass",

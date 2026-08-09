@@ -84,7 +84,7 @@
 - **Decision owed:** none — mechanical (guard both sites; `--force` treats a non-directory dest as replaceable).
 - **Recommended resolution:** in `cmdSkill`, before the compare: if `existsSync(destDir)` and `!statSync(destDir).isDirectory()`, then with `--force` do `rmSync(destDir, { recursive: true, force: true })` and fall through to `copySkill`; without `--force`, `throw new CliError(...)` naming the state and advising `--force`. Wrap the remaining `compareSkillTrees` call in try/catch and treat a throw as "differs (unreadable)": refuse without `--force`, clean-replace with it. In `skillCheck`, wrap the compare and return `{ status: "warn", detail: "installed skill unreadable/degenerate at <path> — \`offbook skill install --force\` replaces it" }` on throw.
 - **Acceptance:** in a temp repo with `.claude/skills/offbook-onboard` created as a *file*: `runDoctor` returns all 8 checks with check 8 `warn` and `ok: true`; `cmdSkill(["install"])` exits 1 with the advisory; `cmdSkill(["install", "--force"])` exits 0 and installs the tree (new cases in `src/cli/doctor.test.ts` + `src/cli/skill.test.ts`, tagged to their existing R-042 arrow-tags); full `bun test` exit 0.
-- **Status:** ☐ open
+- **Status:** ☑ resolved
 
 ---
 
@@ -264,4 +264,4 @@ Resolve **F1 before F11** (both touch what the stamp/README embed; F1's sanitize
 
 | ID | Decision taken | File(s) patched | Resolver | Date |
 |---|---|---|---|---|
-| | | | | |
+| F2 | Mechanical guards at both sites (recommended resolution adopted as-is): `cmdSkill` checks `statSync(destDir).isDirectory()` before comparing — non-directory dest throws a `--force`-advising `CliError` without `--force`, clean-replaces with it; `compareSkillTrees` is wrapped in try/catch (unreadable entries treated as "differs"). `skillCheck` wraps its `compareSkillTrees` call and returns `warn` with a `--force`-advising detail on throw instead of letting `runDoctor` crash. | `src/cli/skill.ts`, `src/cli/doctor.ts`, `src/cli/skill.test.ts`, `src/cli/doctor.test.ts` | subagent batch A | 2026-08-09 |

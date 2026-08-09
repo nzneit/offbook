@@ -84,6 +84,21 @@ test("present-different refuses with the divergence (exit 1); --force clean-repl
 	expect(existsSync(join(DEST(repo), "orphan.md"))).toBe(false); // clean-replace, not overlay
 });
 
+test("degenerate dest (a file, not a directory): refuses without --force, cleans and installs with --force", async () => {
+	const repo = await tempAppRepo();
+	mkdirSync(join(repo, ".claude", "skills"), { recursive: true });
+	writeFileSync(DEST(repo), "not a directory\n");
+	const refused = io();
+	expect(await run(["skill", "install", "--dest", repo], refused.io)).toBe(1);
+	expect(refused.err.join("\n")).toContain("exists and is not a directory");
+	expect(refused.err.join("\n")).toContain("--force");
+	expect(existsSync(DEST(repo))).toBe(true); // untouched — no recovery attempted
+	expect(
+		await run(["skill", "install", "--dest", repo, "--force"], io().io),
+	).toBe(0);
+	expect(existsSync(join(DEST(repo), "SKILL.md"))).toBe(true);
+});
+
 test("no positional: outside a git repo errors with a next step; --dest below toplevel and gitignored targets warn", async () => {
 	const noRepo = mkdtempSync(join(tmpdir(), "offbook-norepo-"));
 	const prev = process.cwd();

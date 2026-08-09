@@ -5,7 +5,7 @@
 // would install where no session looks); --dest is the explicit escape
 // hatch. "Different" = byte-level tree equality, stamp excluded; --force =
 // clean-replace (overlay would orphan old files and jam every compare).
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, rmSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import {
 	checkoutCommit,
@@ -145,24 +145,45 @@ export async function cmdSkill(rest: string[], io: Io): Promise<number> {
 		);
 
 	if (existsSync(destDir)) {
-		const diff = await compareSkillTrees(srcDir, destDir);
-		if (diff.identical) {
-			io.out(`offbook skill install: already up to date (${destDir})`);
-			return 0;
+		if (!statSync(destDir).isDirectory()) {
+			// dest exists but isn't a directory (e.g. a stray file left behind) —
+			// nothing to compare; --force is the only offbook-native way out
+			if (!force)
+				throw new CliError(
+					`skill install: ${destDir} exists and is not a directory — \`offbook skill install --force\` replaces it`,
+				);
+			rmSync(destDir, { recursive: true, force: true }); // clean-replace, never overlay
+		} else {
+			let diff: Awaited<ReturnType<typeof compareSkillTrees>> | undefined;
+			try {
+				diff = await compareSkillTrees(srcDir, destDir);
+			} catch {
+				diff = undefined; // an unreadable entry: can't certify identity either way
+			}
+			if (diff?.identical) {
+				io.out(`offbook skill install: already up to date (${destDir})`);
+				return 0;
+			}
+			if (!force) {
+				if (diff === undefined)
+					io.err(
+						`offbook skill install: ${destDir} is unreadable/degenerate — \`offbook skill install --force\` replaces it`,
+					);
+				else {
+					io.err(
+						`offbook skill install: ${destDir} differs from the bundled skill:`,
+					);
+					for (const f of diff.changed) io.err(`  changed: ${f}`);
+					for (const f of diff.added) io.err(`  only in install: ${f}`);
+					for (const f of diff.removed) io.err(`  missing from install: ${f}`);
+				}
+				io.err(
+					"local edits are drift — upstream them, or `--force` to clean-replace",
+				);
+				return 1;
+			}
+			rmSync(destDir, { recursive: true, force: true }); // clean-replace, never overlay
 		}
-		if (!force) {
-			io.err(
-				`offbook skill install: ${destDir} differs from the bundled skill:`,
-			);
-			for (const f of diff.changed) io.err(`  changed: ${f}`);
-			for (const f of diff.added) io.err(`  only in install: ${f}`);
-			for (const f of diff.removed) io.err(`  missing from install: ${f}`);
-			io.err(
-				"local edits are drift — upstream them, or `--force` to clean-replace",
-			);
-			return 1;
-		}
-		rmSync(destDir, { recursive: true, force: true }); // clean-replace, never overlay
 	}
 	await copySkill(srcDir, destDir);
 	if (await gitIgnored(destDir, targetRoot))
