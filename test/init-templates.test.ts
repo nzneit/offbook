@@ -74,13 +74,13 @@ test("init scaffolds README.md: doctor-first, install steps, no invented host", 
 	const readme = await Bun.file(join(dir, "README.md")).text();
 	expect(readme).toContain("offbook doctor");
 	expect(readme).toContain("bun link");
-	expect(readme).toMatch(/git clone \S+ offbook/);
 	// origin observed or ask-a-teammate — never a made-up host (the dev
 	// checkout HAS an origin, so this asserts the observed form end-to-end)
 	expect(readme).not.toContain("git.example.com");
 	// the clone URL is the OBSERVED origin of this checkout, not an invented one
 	const origin = await checkoutOrigin(repoRoot());
 	if (origin !== undefined) {
+		expect(readme).toMatch(/git clone \S+ offbook/);
 		expect(readme).toContain(`git clone ${origin} offbook`);
 	} else {
 		expect(readme).toContain("ask a teammate");

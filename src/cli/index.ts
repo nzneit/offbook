@@ -120,6 +120,11 @@ const glyph = (severity: string): string =>
 
 const shortHash = (h: string): string => h.replace(/^sha256:/, "").slice(0, 8);
 
+// shared by clientsFromLog (finds the last boot line) and
+// specsStalenessWarning (reads what it recorded) — one offbook.log boot-line
+// shape, matched once.
+const BOOT_LINE = /^\[offbook\] \S+ boot: (.*)$/;
+
 // R-043 — connects observed THIS RUN (adoption.md §10): the log appends
 // across runs, so "this run" = fingerprint lines after the LAST boot line
 // (under --watch each respawn writes a new boot line — the count restarts
@@ -132,7 +137,7 @@ export function clientsFromLog(logText: string): {
 	const lines = logText.split("\n");
 	let start = 0;
 	for (let i = lines.length - 1; i >= 0; i--)
-		if (/^\[offbook\] \S+ boot: /.test(lines[i])) {
+		if (BOOT_LINE.test(lines[i])) {
 			start = i + 1;
 			break;
 		}
@@ -672,7 +677,7 @@ export async function specsStalenessWarning(
 		.catch(() => "");
 	let bootHash: string | undefined;
 	for (const line of logText.split("\n").reverse()) {
-		const m = line.match(/^\[offbook\] \S+ boot: (.*)$/);
+		const m = line.match(BOOT_LINE);
 		if (!m) continue;
 		bootHash = m[1].match(/^services\.yaml sha256:([0-9a-f]{64})$/)?.[1];
 		break; // last boot line wins, whatever it recorded

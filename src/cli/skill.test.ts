@@ -2,7 +2,7 @@
 // (stamp written), identical no-op, present-different refusal (exit 1,
 // divergence listed), --force clean-replace, stamp excluded from compare,
 // bare/unknown subcommand usage, toplevel resolution, outside-a-repo
-// error, --dest override + warnings.
+// error, --dest override + warnings, --dest swallowing a flag as its value.
 // [utest->R-042]
 import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -37,6 +37,12 @@ test("bare `offbook skill` and unknown subcommands are usage errors (exit 1)", a
 	expect(await run(["skill"], a.io)).toBe(1);
 	expect(a.err[0]).toContain("usage: offbook skill install");
 	expect(await run(["skill", "uninstall"], io().io)).toBe(1);
+});
+
+test("--dest with a missing/flag-shaped value is refused, never swallows the next flag as the path", async () => {
+	const a = io();
+	expect(await run(["skill", "install", "--dest", "--force"], a.io)).toBe(1);
+	expect(a.err.join("\n")).toContain("--dest needs a directory");
 });
 
 test("fresh install into --dest: copies SKILL.md, writes the stamp", async () => {

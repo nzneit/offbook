@@ -106,11 +106,15 @@ export async function cmdSkill(rest: string[], io: Io): Promise<number> {
 	let force = false;
 	for (let i = 0; i < flags.length; i++) {
 		if (flags[i] === "--force") force = true;
-		else if (flags[i] === "--dest") dest = flags[++i];
-		else throw new CliError(`skill install: unknown flag '${flags[i]}'`);
+		else if (flags[i] === "--dest") {
+			const value = flags[++i];
+			// missing OR another flag swallowed as the path (e.g. `--dest --force`
+			// would silently install into a dir literally named "--force")
+			if (value === undefined || value.startsWith("-"))
+				throw new CliError("skill install: --dest needs a directory");
+			dest = value;
+		} else throw new CliError(`skill install: unknown flag '${flags[i]}'`);
 	}
-	if (dest === undefined && flags.includes("--dest"))
-		throw new CliError("skill install: --dest needs a directory");
 
 	let targetRoot: string;
 	if (dest !== undefined) {

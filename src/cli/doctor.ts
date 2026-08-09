@@ -295,7 +295,7 @@ async function portFree(port: number): Promise<boolean> {
 		// 127.0.0.1, not "localhost": on a dual-stack host, hostname resolution
 		// can hand back a DIFFERENT loopback address than an existing bind, so a
 		// second Bun.listen("localhost") silently succeeds on ::1 vs 127.0.0.1
-		// (matches `preflightPort`'s address for the same reason).
+		// (matches `portListenable`/`preflightPorts`' address for the same reason).
 		const listener = Bun.listen({
 			hostname: "127.0.0.1",
 			port,
