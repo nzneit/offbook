@@ -24,6 +24,7 @@ export const VERB_FORMS: readonly string[] = [
 	"diagnostics",
 	"specs",
 	"specs update",
+	"skill install",
 ];
 
 // first tokens that take a subcommand (any verb with a two-token form)

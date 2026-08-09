@@ -1,0 +1,172 @@
+// R-042 — `offbook skill install` (adoption.md §9): copy the bundled skill
+// into the app repo's .claude/skills/offbook-onboard/. No positional — the
+// destination is the git toplevel from cwd (fork f: a [dir] positional
+// means "project dir" on init/doctor, and `skill install mock/` by analogy
+// would install where no session looks); --dest is the explicit escape
+// hatch. "Different" = byte-level tree equality, stamp excluded; --force =
+// clean-replace (overlay would orphan old files and jam every compare).
+import { existsSync, rmSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
+import {
+	checkoutCommit,
+	checkoutOrigin,
+	gitIgnored,
+	gitToplevel,
+	repoRoot,
+} from "./checkout.ts";
+import { CliError } from "./client.ts";
+import type { Io } from "./index.ts";
+
+const SKILL_NAME = "offbook-onboard";
+const STAMP = ".installed-from";
+
+export function bundledSkillDir(): string {
+	return join(repoRoot(), "skills", SKILL_NAME);
+}
+
+async function listFiles(dir: string): Promise<string[]> {
+	return (
+		await Array.fromAsync(new Bun.Glob("**/*").scan({ cwd: dir, dot: true }))
+	)
+		.filter((f) => basename(f) !== STAMP)
+		.sort();
+}
+
+export async function compareSkillTrees(
+	srcDir: string,
+	destDir: string,
+): Promise<{
+	identical: boolean;
+	changed: string[];
+	added: string[];
+	removed: string[];
+}> {
+	const src = await listFiles(srcDir);
+	const dest = await listFiles(destDir);
+	const srcSet = new Set(src);
+	const destSet = new Set(dest);
+	const added = dest.filter((f) => !srcSet.has(f)); // present only in the install
+	const removed = src.filter((f) => !destSet.has(f));
+	const changed: string[] = [];
+	for (const f of src.filter((x) => destSet.has(x))) {
+		const [a, b] = await Promise.all([
+			Bun.file(join(srcDir, f)).arrayBuffer(),
+			Bun.file(join(destDir, f)).arrayBuffer(),
+		]);
+		if (Buffer.compare(Buffer.from(a), Buffer.from(b)) !== 0) changed.push(f);
+	}
+	return {
+		identical: added.length + removed.length + changed.length === 0,
+		changed,
+		added,
+		removed,
+	};
+}
+
+async function copySkill(srcDir: string, destDir: string): Promise<void> {
+	for (const f of await listFiles(srcDir))
+		await Bun.write(join(destDir, f), Bun.file(join(srcDir, f)));
+	await Bun.write(
+		join(destDir, STAMP),
+		`${JSON.stringify(
+			{
+				version:
+					(
+						JSON.parse(
+							await Bun.file(join(repoRoot(), "package.json")).text(),
+						) as {
+							version?: string;
+						}
+					).version ?? "0.0.0",
+				commit: await checkoutCommit(),
+				installedAt: new Date().toISOString(),
+				sourcePath: repoRoot(),
+				// observed at install time, never authored (adoption.md §9); omitted
+				// when the checkout has no remote — the skill's locator wording then
+				// falls back to "ask a teammate"
+				...(await checkoutOrigin().then((o) =>
+					o === undefined ? {} : { originUrl: o },
+				)),
+			},
+			null,
+			2,
+		)}\n`,
+	);
+}
+
+export async function cmdSkill(rest: string[], io: Io): Promise<number> {
+	const [sub, ...flags] = rest;
+	if (sub !== "install") {
+		io.err(
+			"usage: offbook skill install [--dest <dir>] [--force] — install the onboarding skill into this repo's .claude/skills/",
+		);
+		return 1;
+	}
+	let dest: string | undefined;
+	let force = false;
+	for (let i = 0; i < flags.length; i++) {
+		if (flags[i] === "--force") force = true;
+		else if (flags[i] === "--dest") dest = flags[++i];
+		else throw new CliError(`skill install: unknown flag '${flags[i]}'`);
+	}
+	if (dest === undefined && flags.includes("--dest"))
+		throw new CliError("skill install: --dest needs a directory");
+
+	let targetRoot: string;
+	if (dest !== undefined) {
+		targetRoot = resolve(dest);
+		const top = await gitToplevel(targetRoot);
+		if (top !== undefined && resolve(top) !== targetRoot)
+			io.err(
+				"⚠ --dest is below the repo toplevel — a Claude Code session at the repo root won't discover a skill installed here",
+			);
+		if (top === undefined)
+			io.err(
+				"⚠ --dest is not inside a git repo — the skill cannot propagate to teammates from here",
+			);
+	} else {
+		const top = await gitToplevel(process.cwd());
+		if (top === undefined)
+			throw new CliError(
+				"skill install: not inside a git repository — cd into your app repo (or pass --dest <dir>)",
+			);
+		targetRoot = top;
+	}
+
+	const destDir = join(targetRoot, ".claude", "skills", SKILL_NAME);
+	const srcDir = bundledSkillDir();
+	if (!existsSync(srcDir))
+		throw new CliError(
+			`skill install: bundled skill missing at ${srcDir} — the offbook checkout looks incomplete`,
+		);
+
+	if (existsSync(destDir)) {
+		const diff = await compareSkillTrees(srcDir, destDir);
+		if (diff.identical) {
+			io.out(`offbook skill install: already up to date (${destDir})`);
+			return 0;
+		}
+		if (!force) {
+			io.err(
+				`offbook skill install: ${destDir} differs from the bundled skill:`,
+			);
+			for (const f of diff.changed) io.err(`  changed: ${f}`);
+			for (const f of diff.added) io.err(`  only in install: ${f}`);
+			for (const f of diff.removed) io.err(`  missing from install: ${f}`);
+			io.err(
+				"local edits are drift — upstream them, or `--force` to clean-replace",
+			);
+			return 1;
+		}
+		rmSync(destDir, { recursive: true, force: true }); // clean-replace, never overlay
+	}
+	await copySkill(srcDir, destDir);
+	if (await gitIgnored(destDir, targetRoot))
+		io.err(
+			"⚠ .claude/ is gitignored here — the skill won't propagate; un-ignore it or teammates never see it",
+		);
+	io.out(
+		`offbook skill install: installed to ${destDir} — commit it so teammates get the skill`,
+	);
+	return 0;
+}

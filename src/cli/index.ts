@@ -41,6 +41,7 @@ import {
 	resolveRunning,
 	writeRunfile,
 } from "./runfile.ts";
+import { cmdSkill } from "./skill.ts";
 
 const DEMO_SPEC = `${import.meta.dir}/../demo/thermostat.yaml`;
 
@@ -1401,6 +1402,7 @@ export const USAGE = `usage: offbook <command>
 
   init [dir]                 scaffold services.yaml, environments.yaml, scenarios/, handlers/
   doctor [dir] [--offline] [--json] [--run-dir <dir>]  preflight: runtime, deps, config, spec reachability, ports
+  skill install [--dest <dir>] [--force]  install the onboarding skill into this repo's .claude/skills/
   demo [--serve]             bundled demo spec — one-shot catch, or --serve to keep serving
   up [--ci] [--strict] [--watch] [--seed n] [--ws-port n] [--tcp-port n] [--ctrl-port n] [--env e]
   down                       stop the running server (idempotent)
@@ -1439,6 +1441,7 @@ const VERBS: Record<string, (rest: string[], io: Io) => Promise<number>> = {
 	logs: cmdLogs,
 	init: cmdInit,
 	doctor: cmdDoctor,
+	skill: cmdSkill,
 };
 
 // R-042 — the dispatch truth the VERB_FORMS coherence test pins (`demo` is
