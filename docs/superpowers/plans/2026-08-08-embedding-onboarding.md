@@ -18,6 +18,7 @@
 - **Test tags:** every test file (or added block) carries the arrow-tag comment for its requirement (`// [utest->R-041]`, `// [itest->R-043]`, …) — `check-docs` verifies tags in both directions once statuses flip to `tested` (Task 15).
 - **Test ports:** per-file unique. New integration assertions reuse `test/cli-dispatch.test.ts`'s existing server/ports (19001/12901/19801); new unit test files need no ports.
 - **Code style:** tabs, double quotes, match surrounding comment density. Run `bun run lint` before each commit.
+- **Formatting:** Biome enforces its 80-col formatting on `src/`/`test/` — a `biome check .` format diff is a gate fail; apply fixes, and per D-023 **read what `--write` changed before trusting it**. `scripts/` is excluded from Biome entirely (`biome.json` `!**/scripts`), so check-docs additions keep that file's local 2-space style. Long plan-snippet lines may need mechanical reflow to pass — reflow, don't restructure.
 
 ---
 
@@ -82,7 +83,7 @@ export const DISPATCH_VERBS: readonly string[] = [
 ];
 ```
 
-- [ ] **Step 3: Write the failing coherence test `test/verb-forms.test.ts`**
+- [ ] **Step 3: Write the coherence test `test/verb-forms.test.ts`** (unlike most steps this one should pass immediately — it pins existing state; a failure means the VERB_FORMS transcription in Step 1 is wrong, and USAGE is the authority)
 
 ```ts
 // R-042 — VERB_FORMS ↔ dispatch ↔ USAGE coherence (adoption.md §9): one
@@ -273,11 +274,11 @@ test("gitToplevel resolves from a subdir; gitIgnored honors .gitignore", async (
 });
 ```
 
-Run: `bun test src/cli/checkout.test.ts` — expected FAIL (module not found) before Step 1 is saved; PASS after (0 fails; ignore a coverage-floor exit 1).
+Run: `bun test src/cli/checkout.test.ts` — expected FAIL (module not found) before Step 1 is saved; PASS after (0 fails; ignore a coverage-floor exit 1). **Machine-state assumption (verified true here and in CI):** the non-repo cases rely on the OS tmpdir not being inside any git repository; on an exotic setup `rev-parse` would resolve a parent repo — surface it, don't chase it.
 
 - [ ] **Step 3: Wire `--version` into `run()`**
 
-In `src/cli/index.ts` `run()` (line 1366), after `const [cmd, ...rest] = argv;` and **before** the `demo` special case, insert:
+In `src/cli/index.ts` `run()` (line 1366), insert as the **first statement inside the `try` block** (line 1368) — before the `demo` special case, so a git failure still routes through the CliError rendering:
 
 ```ts
 		if (cmd === "--version" || cmd === "-v") {
@@ -484,14 +485,14 @@ test("scenario scaffold: fenced example satisfies the doctor check-5 shape", asy
 
 - [ ] **Step 4: Run red → green**
 
-Run: `bun test test/init-templates.test.ts` — expected FAIL before Step 1 lands (`missing example fence`), PASS after (0 fails). Then run the full `bun test`: **`test/cli-dispatch.test.ts` will fail on the pinned init next-steps string** (~line 711-723 block) — update the expectation there to the new string from Step 2, and update any pinned template-content assertions the run surfaces.
+Run: `bun test test/init-templates.test.ts` — expected FAIL before Step 1 lands (`missing example fence`), PASS after (0 fails). Then run the full `bun test`: **no existing test pins the next-steps string or the template contents** (verified — `test/cli-dispatch.test.ts:711-723` checks scaffold-file existence and re-run refusal only), so expect zero regressions; if anything does surface, update the pin to the new strings.
 
 - [ ] **Step 5: Full gates + commit**
 
 Run: `bun run lint && bun run typecheck && bun test && bun scripts/check-docs.ts` — all exit 0.
 
 ```bash
-git add src/cli/index.ts test/init-templates.test.ts test/cli-dispatch.test.ts
+git add src/cli/index.ts test/init-templates.test.ts
 git commit -m "feat: reference init templates + fenced template-parses gate (R-041)"
 ```
 
@@ -572,14 +573,14 @@ test("init scaffolds README.md: doctor-first, install steps, no invented host", 
 
 - [ ] **Step 3: Run red → green, check init's summary line**
 
-Run: `bun test test/init-templates.test.ts` — FAIL (no README.md) → implement Step 1 → PASS. Also extend `cmdInit`'s `created` summary output (line 1267-1269) naturally covers it via `created.join(", ")` — verify `offbook init` output now lists `README.md`; update the cli-dispatch pin if it asserts the exact scaffold list.
+Run: `bun test test/init-templates.test.ts` — FAIL (no README.md) → implement Step 1 → PASS. `cmdInit`'s `created` summary output (line 1267-1269) covers it naturally via `created.join(", ")` — verify `offbook init` output now lists `README.md` (no existing test pins the scaffold list — verified; nothing to update). **Machine-state note:** the `git clone \S+ offbook` assertion requires the running checkout to have an `origin` remote (true for this repo and CI); on an origin-less clone the ask-a-teammate fallback renders (it contains spaces, so the regex fails by design) — surface that, don't chase it.
 
 - [ ] **Step 4: Full gates + commit**
 
 Run: `bun run lint && bun run typecheck && bun test` — all exit 0.
 
 ```bash
-git add src/cli/index.ts test/init-templates.test.ts test/cli-dispatch.test.ts
+git add src/cli/index.ts test/init-templates.test.ts
 git commit -m "feat: init scaffolds a project README with the observed-origin clone URL (R-041)"
 ```
 
@@ -594,7 +595,7 @@ git commit -m "feat: init scaffolds a project README with the observed-origin cl
 
 - [ ] **Step 1: Append §8 to `docs/guides/wiring-your-service.md`**
 
-```markdown
+````markdown
 ## 8. Point your app at offbook
 
 Your app should reach the broker through one build-time env var, with the
@@ -621,7 +622,7 @@ env vars are only exposed to client code when prefixed. Zero-rebuild
 variant: a runtime query-param override, as the bundled demo app does
 (`?ws=<port>` — see `demo-app/src/App.tsx`); your app needs that one-time
 code change before the URL is switchable without a rebuild.
-```
+````
 
 - [ ] **Step 2: Amend §4 ("First `offbook up`") with the acceptance test**
 
@@ -779,12 +780,16 @@ export function checkSkillVerbs(
         tokens[1] !== undefined && !tokens[1].startsWith("<")
           ? tokens[1]
           : undefined;
-      const form =
-        subFirst.has(first) && second !== undefined ? `${first} ${second}` : first;
-      if (!members.has(form) && !members.has(first))
-        errs.push(`${f.path}: names unknown verb form 'offbook ${form}'`);
-      else if (subFirst.has(first) && second === undefined && !members.has(first))
-        errs.push(`${f.path}: bare 'offbook ${first}' has no bare form`);
+      // branch split (plan-review finding 1): a valid bare first token must
+      // NOT excuse an invalid two-token form — `offbook specs prune` fails
+      // even though `specs` alone is a member.
+      if (subFirst.has(first) && second !== undefined) {
+        if (!members.has(`${first} ${second}`))
+          errs.push(
+            `${f.path}: names unknown verb form 'offbook ${first} ${second}'`,
+          );
+      } else if (!members.has(first))
+        errs.push(`${f.path}: names unknown verb form 'offbook ${first}'`);
     }
   return errs;
 }
@@ -818,15 +823,15 @@ Wire into `main()` (beside the `checkLinks` call): read every `.md` under `skill
 
 - [ ] **Step 3: Add failing-then-passing cases to `scripts/check-docs.test.ts`**
 
-Append (match the file's existing import/test style; it already imports from `#scripts/check-docs.ts`):
+Append — note the file's actual conventions (verified): it imports from `"./check-docs.ts"` (same-directory relative, the D-013 style — NOT `#scripts/…`) and uses 2-space indentation; Biome ignores `scripts/` entirely, so keep the file's local style:
 
 ```ts
 // [utest->R-042]
 import {
-	checkSkillFrontmatter,
-	checkSkillLinks,
-	checkSkillVerbs,
-} from "#scripts/check-docs.ts";
+  checkSkillFrontmatter,
+  checkSkillLinks,
+  checkSkillVerbs,
+} from "./check-docs.ts";
 
 test("checkSkillVerbs: membership semantics (fork e, corrected)", () => {
 	const doc = (text: string) => [{ path: "skills/offbook-onboard/SKILL.md", text }];
@@ -852,11 +857,11 @@ test("checkSkillFrontmatter: name must match the install dir", () => {
 });
 ```
 
-Note for the implementer: `checkSkillVerbs`'s two-token guard means `skill` (added to VERB_FORMS in Task 7) makes bare `offbook skill` fail — but until Task 7, `skill` is not in VERB_FORMS, so **the SKILL.md written in Step 1 (which says `offbook skill install --force`) will fail the gate as an unknown form**. That is the gate working; Task 7 adds the form. Until then `bun scripts/check-docs.ts` reports exactly that one error — run it, confirm the error text names `skill install`, and defer the green run to Task 7. Keep this task's commit gated on `bun test` (the unit tests above), not on check-docs.
+Note for the implementer: `checkSkillVerbs`'s two-token guard means `skill` (added to VERB_FORMS in Task 7) makes bare `offbook skill` fail — but until Task 7, `skill` is not in VERB_FORMS, so **the SKILL.md written in Step 1 (which says `offbook skill install --force`) will fail the gate as an unknown form**. That is the gate working; Task 7 adds the form. Until then `bun scripts/check-docs.ts` reports exactly that one error — run it, confirm the single error reads `names unknown verb form 'offbook skill'` (bare `skill` — pre-Task-7 no `skill` form of any arity exists, so the first token itself is the reported form), and defer the green run to Task 7. Keep this task's commit gated on `bun test` (the unit tests above), not on check-docs.
 
 - [ ] **Step 4: Run + commit**
 
-Run: `bun test scripts/check-docs.test.ts` (0 fails), `bun run lint && bun run typecheck && bun test` (exit 0), `bun scripts/check-docs.ts` — **expected: exactly one error, the known `skill install` form (resolved in Task 7)**.
+Run: `bun test scripts/check-docs.test.ts` (0 fails), `bun run lint && bun run typecheck && bun test` (exit 0), `bun scripts/check-docs.ts` — **expected: exactly one error, `names unknown verb form 'offbook skill'` (resolved in Task 7)**.
 
 ```bash
 git add skills/offbook-onboard/SKILL.md scripts/check-docs.ts scripts/check-docs.test.ts
@@ -1137,6 +1142,26 @@ test("no positional: outside a git repo errors with a next step; --dest below to
 	expect(await run(["skill", "install", "--dest", ignored], warned.io)).toBe(0);
 	expect(warned.err.join("\n")).toContain("won't propagate");
 });
+
+test("no positional: installs at the git toplevel resolved from a subdir cwd", async () => {
+	// the default-destination SUCCESS path (§6 "toplevel destination
+	// resolution") — every other install test uses --dest
+	const repo = await tempAppRepo();
+	const sub = join(repo, "mock");
+	mkdirSync(sub, { recursive: true });
+	const prev = process.cwd();
+	try {
+		process.chdir(sub);
+		expect(await run(["skill", "install"], io().io)).toBe(0);
+	} finally {
+		process.chdir(prev);
+	}
+	// compare via the toplevel git itself reports — mkdtemp paths can differ
+	// from git's resolved toplevel on symlinked tmpdirs
+	const { gitToplevel } = await import("./checkout.ts");
+	const top = (await gitToplevel(repo)) ?? repo;
+	expect(existsSync(join(top, ".claude", "skills", "offbook-onboard", "SKILL.md"))).toBe(true);
+});
 ```
 
 - [ ] **Step 4: Run red → green, then the doc gate goes green too**
@@ -1190,7 +1215,10 @@ const skillCheck: DoctorCheck = {
 			: {
 					status: "warn",
 					detail: `installed skill at ${installed} differs from the bundled one (${[...diff.changed, ...diff.added, ...diff.removed].length} file(s))`,
-					hint: "stale/edited skill — `offbook skill install --force` refreshes it",
+					// the hint NAMES the resolved toplevel (adoption.md §3): `skill
+					// install --force` resolves from CWD, which can differ from the
+					// examined dir's repo
+					hint: `stale/edited skill — \`offbook skill install --force\` from ${top} refreshes it`,
 				};
 	},
 };
@@ -1227,11 +1255,11 @@ test("doctor skill check: non-repo pass, absent pass, identical pass, edited war
 });
 ```
 
-Implementer notes: `skillOnly` = the check object — export `DOCTOR_CHECKS` is already exported; grab it via `DOCTOR_CHECKS.find((c) => c.name === "skill")!` (name it `skillOnly` locally, pass `[skillOnly]` to `runDoctor` exactly as the existing per-check tests do). Reuse the file's existing `git()` helper and ctx construction — read the top of `src/cli/doctor.test.ts` and mirror it; the snippet's `baseCtx` stands for the file's existing ctx fixture.
+Implementer notes (corrected against the real file): `skillOnly = DOCTOR_CHECKS.find((c) => c.name === "skill")!`; passing `[skillOnly]` works because `runDoctor(ctx, checks = DOCTOR_CHECKS)` takes an optional checks array (`src/cli/doctor.ts:367-369`) — the existing tests run all checks and select via `byName`, either style is fine. The file has **no** `git()` helper and **no** `baseCtx` — its real helpers are `ctxWith()`, `fakeRepo()`, `projectWith()`, `byName()` (read the file top and mirror them): where the snippet says `{ ...baseCtx, projectDir: X }`, build the ctx with `ctxWith({ projectDir: X })` (adjust to its actual signature), and write a four-line `Bun.spawn` git helper locally (mirror Task 2's `sh()`). `Io` is not imported there — use an inline `{ out: () => {}, err: () => {} }` literal with no type annotation.
 
 - [ ] **Step 3: Run red → green**
 
-Run: `bun test src/cli/doctor.test.ts` — FAIL (check absent) → Step 1 → PASS (0 fails).
+Run: `bun test src/cli/doctor.test.ts` — FAIL (check absent) → Step 1 → then one MORE failure remains (verified): **`src/cli/doctor.test.ts:408-416` pins the exact check-name list** `["runtime","deps","project","specs-reachable","scenarios","ports","runfile"]` in the `--json` shape test — append `"skill"` to that expected list. Then PASS (0 fails).
 
 - [ ] **Step 4: Full gates + commit**
 
@@ -1255,7 +1283,7 @@ git commit -m "feat: doctor check 8 — installed-skill staleness, warn-never-fa
 
 - [ ] **Step 1: Add the boot line to `src/cli/serve.ts`**
 
-Add `import { createHash } from "node:crypto";` to the imports. After `await composed.start();` (line 52) and before the `ports` const, insert:
+Add `import { createHash } from "node:crypto";` to the imports. After `await composed.start();` (line 52) and before the `ports` const, insert (known micro-gap, accepted: a connect landing in the instant between `start()` and this line predates the boot line and is excluded from the count — the same accepted semantics as watch-respawn resets):
 
 ```ts
 	// R-043 — the boot line (adoption.md §10): every startup logs what it
@@ -1280,7 +1308,7 @@ In `test/cli-dispatch.test.ts` suite B (the `up → status → … → down` tes
 	expect(logText).toMatch(/\] boot: services\.yaml sha256:[0-9a-f]{64}$/m);
 ```
 
-(Adjust the log path to the fixture's actual `--run-dir` if the test passes one — read the surrounding test body first.) In `test/demo-serve.test.ts`, add the matching assertion after its server is up: `expect(logText).toContain("] boot: bundled demo spec")`.
+(Adjust the log path to the fixture's actual `--run-dir` if the test passes one — read the surrounding test body first.) In `test/demo-serve.test.ts`, add the matching assertion in its **second (spawned-server) test** — the file's log variable is named `logged`, not `logText`: `expect(logged).toContain("] boot: bundled demo spec")`, with a `// [itest->R-043]` tag line above the added assertion (Task 15's R-043 trace lists this file; check-docs verifies tags in both directions once the status flips).
 
 - [ ] **Step 3: Run red → green**
 
@@ -1496,7 +1524,7 @@ test("specsStalenessWarning: warns on hash mismatch, skips demo/absent/ctrl-only
 });
 ```
 
-(`createHash` import already exists in the test file or add `import { createHash } from "node:crypto";`.) In suite B's cycle: after `up`, edit the fixture's `services.yaml` (append a comment), run `specs update` via `run(["specs", "update", ...CTRL_FLAG])` — **note**: with `--ctrl-port` it must NOT warn (skip case); run it again without `--ctrl-port` but with the fixture's `--run-dir` and assert the warn line appears in `out`.
+(`createHash` import already exists in the test file or add `import { createHash } from "node:crypto";`.) In suite B's cycle: after `up`, edit the fixture's `services.yaml` (append a comment), then run `specs update` **twice**. First with suite B's own live server's ctrl port (`--ctrl-port` — read the actual constant from the surrounding suite-B test, ~19810; do NOT use suite A's `CTRL_FLAG`: suite A's compose has no `resolveSpecs`, so `refreshSpecs()` returns `[]` and a no-warn assertion there is vacuous): assert exit 0 and no warn line — the ctrl-port skip case against a server that actually refreshes. Then without `--ctrl-port` but with the fixture's `--run-dir`: assert the warn line appears in `out`.
 
 - [ ] **Step 4: Run red → green, full gates, commit**
 
@@ -1528,6 +1556,8 @@ In `cmdTopics`'s no-server fallback branch (the `else` at line 289), before assi
 					"no running offbook in this run-dir — run `offbook up` here, or pass --ctrl-port; the bundled-demo fallback is human-only",
 				);
 ```
+
+House-style note: flags are unbackticked in CLI messages (cf. `src/cli/client.ts:30`); adoption.md §10's backticks around `--ctrl-port` are markdown formatting, not part of the pinned string — this message is the pin.
 
 - [ ] **Step 2: Failing test** (in `test/cli-dispatch.test.ts`, tagged `// [itest->R-043]` — use a fresh temp `--run-dir` so no runfile resolves)
 
@@ -1607,7 +1637,7 @@ async function preflightPorts(config: Config): Promise<void> {
 }
 ```
 
-Call site (was lines 910-912): `await preflightPorts(config);`. Run the full `bun test` — **any test pinning the old `port ${port} in use` message will fail; update those pins to the new composed message.**
+Call site (was lines 910-912): `await preflightPorts(config);`. Run the full `bun test` — **exactly one existing pin breaks (verified): `test/cli-dispatch.test.ts:889`** expects `` port ${CTRL} in use `` in a test whose busy port is held by suite A's own composed offbook server, so after this change `probeOffbook` answers there and the **attribution** message fires — update that pin to expect `an offbook from another directory owns these ports`, NOT the new generic message. The neighboring pins survive as-is (`:890` `--ctrl-port`, `:1048` asserts only the `--watch` note, `:1226` asserts `offbook doctor`, which the new generic message still contains).
 
 - [ ] **Step 2: Attribution in doctor's `ports` check**
 
@@ -1645,7 +1675,7 @@ test("up against ports owned by another offbook attributes it instead of 'anothe
 });
 ```
 
-`src/cli/doctor.test.ts` (tagged `// [itest->R-043]`): mirror the existing busy-port test but point `ctx.ports.ctrl` at the file's live composed server's ctrl port → expect the attribution detail; keep a non-offbook listener case (a bare `Bun.listen` on the ctrl port) → expect the generic `port(s) busy` detail (existing test, should still pass).
+`src/cli/doctor.test.ts` (tagged `// [itest->R-043]`): doctor.test.ts has **no** composed server — its liveness fixture is a fake control plane, `Bun.serve({ fetch: () => Response.json({ mode: "passive" }) })` (`src/cli/doctor.test.ts:369-372`), which satisfies `probeOffbook`. Mirror that pattern on a per-file-unique port for the attribution case (fake server on the ctx's ctrl port → expect the attribution detail); keep a bare `Bun.listen` non-offbook case → the generic `port(s) busy` detail (the existing busy-port test should still pass unchanged).
 
 - [ ] **Step 4: Run red → green, full gates, commit**
 
@@ -1683,12 +1713,12 @@ git commit -m "docs: align the skill's wording with shipped verb behavior (R-042
 
 - [ ] **Step 1: Flip the three registry entries**
 
-For each of R-041/R-042/R-043 in `REQUIREMENTS.md`: `**STATUS**: specified` → `tested`, and add the trace lines between STATUS and COVERS:
+For each of R-041/R-042/R-043 in `REQUIREMENTS.md`: `**STATUS**: specified` → `tested`, and add the trace lines **after the COVERS line** (the R-040 house convention; the parser is order-insensitive but match the registry's style):
 
 ```
 R-041 —
 **IMPL**: src/cli/index.ts, src/cli/checkout.ts, docs/guides/wiring-your-service.md
-**TEST**: test/init-templates.test.ts, test/cli-dispatch.test.ts
+**TEST**: test/init-templates.test.ts
 
 R-042 —
 **IMPL**: skills/offbook-onboard/, src/cli/skill.ts, src/cli/verbs.ts, src/cli/checkout.ts, src/cli/index.ts, src/cli/doctor.ts, scripts/check-docs.ts
@@ -1725,3 +1755,18 @@ git commit -m "docs: flip R-041–R-043 to tested with traces; sweep AGENTS/READ
 - **Spec coverage:** §8 → Tasks 3/4/5; §9 → Tasks 6/7/8/14 (+ `--version` Task 2, VERB_FORMS Task 1); §10 → Tasks 9/10/11/12/13; lifecycle bookkeeping → Task 15. The §9 "installable before any offbook project exists" claim needs no task (it is a property of Task 7's design). Runners-up from the review round (CI recipe, offline up, `.gitignore` append, specs.lock guide sentence) are deliberately NOT in this plan — unallocated by D-028.
 - **Ordering constraint:** Task 6 leaves `check-docs` intentionally red on exactly one known error (the skill names `skill install` before the form exists); Task 7 resolves it. Do not reorder 6 after 7 — the SKILL.md content is what Task 7's install tests copy.
 - **Type consistency:** `compareSkillTrees` return shape is consumed by Task 8 verbatim; `clientsFromLog`/`specsStalenessWarning` are exported from `src/cli/index.ts` for their pure tests; `VERB_FORMS`/`SUBCOMMAND_FIRST_TOKENS` names match between Tasks 1/6/7.
+- **§6 relocation note:** adoption.md §6 places the `--version` output-shape case under `src/cli/skill.test.ts` and the coherence test "beside the existing CLI dispatch tests"; this plan homes them in `test/verb-forms.test.ts`. Acceptable relocations — Task 15's traces name the actual files, and the traces (not §6's prose) are what check-docs verifies.
+
+## Verified Clean (adversarial plan review, 2026-08-08) — do NOT "fix" these
+
+Probe-verified during the plan's adversarial review. An executor who "corrects" any of these is introducing a bug:
+
+- The coherence test's `/^ {2}\S/` line filter correctly excludes USAGE's wrapped continuation lines (18 leading spaces) and the footer; `[autonomous|passive]`, `[--json]`, `[--serve]`, `[-f]`, `[dir]` all fall through the bare-`[word]` rule safely.
+- The `skill.ts ↔ index.ts` import cycle is type-only and erased (`verbatimModuleSyntax: true` in tsconfig); `import.meta.main` at `src/cli/index.ts:1391` guards the CLI side effect, so importing the module from tests is safe.
+- `Bun.Glob("**/*").scan({ dot: true })` yields files only (dotfiles included) — `listFiles` and the stamp exclusion work as written.
+- `git check-ignore` exits 0 for a nonexistent path under an ignored directory — the post-copy gitignore warning works.
+- The SKILL.md verb-gate walk yields exactly one pre-Task-7 error (`offbook skill`) and zero after Task 7; `offbook init mock/`, `offbook doctor mock/`, cross-line spans, and `publish <a-toClient-topic> --example` are all handled (placeholders exempt, positionals unchecked by design).
+- G20 (slug without gitHost) is enforced in `resolveRepoUrl`, not `parseServices` — Task 3's standalone fenced example parses without a gitHost.
+- The mutation PR gate's globs are `src/engine/**` only — nothing in this plan triggers it. The bunfig per-file coverage floor is cleared by the new files' tests. No pre-commit hook exists, so Task 6's known-red check-docs state commits fine.
+- `checkTagSweep` allows arrow tags on `specified` requirements — the per-task tags do not break the intermediate check-docs runs; they become load-bearing only at Task 15's status flip.
+- No test pins the USAGE footer or the `status --json` key set; suite A's module-scope server is live for tests appended anywhere in `test/cli-dispatch.test.ts`; the human topics-fallback pin (`test/cli-dispatch.test.ts:664`) survives Task 12.
