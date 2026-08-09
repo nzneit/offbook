@@ -39,3 +39,13 @@ test("no USAGE verb line names a form outside VERB_FORMS", () => {
 			expect(VERB_FORMS).toContain(`${verb} ${m[1]}`);
 	}
 });
+
+test("offbook --version prints version + commit and exits 0", async () => {
+	const out: string[] = [];
+	const code = await (await import("#src/cli/index.ts")).run(["--version"], {
+		out: (l) => out.push(l),
+		err: () => {},
+	});
+	expect(code).toBe(0);
+	expect(out[0]).toMatch(/^offbook \d+\.\d+\.\d+ \(.+\)$/);
+});

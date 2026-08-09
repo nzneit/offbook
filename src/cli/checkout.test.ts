@@ -1,0 +1,78 @@
+// R-042 — checkout identity: sha/dirty/unknown, origin, toplevel, ignore.
+// Runs against throwaway git repos in temp dirs — never the real checkout
+// (its dirty state would flake the assertions).
+// [utest->R-042]
+import { expect, test } from "bun:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+	checkoutCommit,
+	checkoutOrigin,
+	gitIgnored,
+	gitToplevel,
+} from "./checkout.ts";
+
+async function sh(cwd: string, ...args: string[]): Promise<void> {
+	const proc = Bun.spawn(args, { cwd, stdout: "ignore", stderr: "ignore" });
+	if ((await proc.exited) !== 0) throw new Error(`failed: ${args.join(" ")}`);
+}
+
+async function tempRepo(): Promise<string> {
+	const dir = mkdtempSync(join(tmpdir(), "offbook-checkout-"));
+	await sh(dir, "git", "init", "-q", "-b", "main");
+	await sh(
+		dir,
+		"git",
+		"-c",
+		"user.email=t@t",
+		"-c",
+		"user.name=t",
+		"commit",
+		"--allow-empty",
+		"-q",
+		"-m",
+		"x",
+	);
+	return dir;
+}
+
+test("checkoutCommit: clean sha, -dirty suffix, unknown outside a repo", async () => {
+	const repo = await tempRepo();
+	const clean = await checkoutCommit(repo);
+	expect(clean).toMatch(/^[0-9a-f]{4,}$/);
+	writeFileSync(join(repo, "x.txt"), "x");
+	expect(await checkoutCommit(repo)).toBe(`${clean}-dirty`);
+	expect(await checkoutCommit(mkdtempSync(join(tmpdir(), "norepo-")))).toBe(
+		"unknown",
+	);
+});
+
+test("checkoutOrigin: undefined without a remote, the URL with one", async () => {
+	const repo = await tempRepo();
+	expect(await checkoutOrigin(repo)).toBeUndefined();
+	await sh(
+		repo,
+		"git",
+		"remote",
+		"add",
+		"origin",
+		"https://git.example.com/org/offbook.git",
+	);
+	expect(await checkoutOrigin(repo)).toBe(
+		"https://git.example.com/org/offbook.git",
+	);
+});
+
+test("gitToplevel resolves from a subdir; gitIgnored honors .gitignore", async () => {
+	const repo = await tempRepo();
+	const sub = join(repo, "mock");
+	await sh(repo, "mkdir", "-p", sub);
+	expect(await gitToplevel(sub)).toBe(await gitToplevel(repo));
+	expect(
+		await gitToplevel(mkdtempSync(join(tmpdir(), "norepo-"))),
+	).toBeUndefined();
+	writeFileSync(join(repo, ".gitignore"), ".claude/\n");
+	expect(await gitIgnored(join(repo, ".claude/skills"), repo)).toBe(true);
+	expect(await gitIgnored(join(repo, "src"), repo)).toBe(false);
+});

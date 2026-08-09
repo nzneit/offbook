@@ -27,6 +27,7 @@ import type {
 } from "#src/model/index.ts";
 import { DEFAULT_CONFIG } from "#src/model/index.ts";
 import { buildRegistry } from "#src/registry/index.ts";
+import { checkoutCommit, repoRoot } from "./checkout.ts";
 import type { Api } from "./client.ts";
 import { api, CliError, resolveCtrlPort } from "./client.ts";
 import type { CheckStatus, DoctorCtx } from "./doctor.ts";
@@ -1341,7 +1342,7 @@ export const USAGE = `usage: offbook <command>
   diagnostics [--watch] [--json]  scenario/spec load issues
   specs [update]             spec provenance; update re-resolves + hot-swaps
 
-client verbs accept --run-dir <dir> (default .offbook) and --ctrl-port <n>`;
+client verbs accept --run-dir <dir> (default .offbook) and --ctrl-port <n>; \`offbook --version\` prints the tool's version + source commit`;
 
 const VERBS: Record<string, (rest: string[], io: Io) => Promise<number>> = {
 	topics: cmdTopics,
@@ -1373,6 +1374,16 @@ export const DISPATCH_VERBS: readonly string[] = [
 export async function run(argv: string[], io: Io = consoleIo): Promise<number> {
 	const [cmd, ...rest] = argv;
 	try {
+		if (cmd === "--version" || cmd === "-v") {
+			const root = repoRoot();
+			const pkg = JSON.parse(
+				await Bun.file(join(root, "package.json")).text(),
+			) as { version?: string };
+			io.out(
+				`offbook ${pkg.version ?? "0.0.0"} (${await checkoutCommit(root)})`,
+			);
+			return 0;
+		}
 		if (cmd === "demo") {
 			if (rest.includes("--serve")) return await cmdDemoServe(rest, io);
 			const { output } = await runDemo();
