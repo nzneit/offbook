@@ -37,7 +37,7 @@ Deliberately short; depth lives in the guides. Sections, in order:
 
    …then open `http://localhost:9090`, click around, click **Break the schema**, watch the violation land. Teardown: Ctrl-C the demo-app, `offbook down`. `<internal-git>` stays a literal reader-substituted placeholder in the README (the host varies by deployment; do not invent one). The clone/install block is untagged (the gate runs inside the repo); only the post-install blocks carry the `quickstart` tag and are executed by the gate.
 5. **Your own service** — three lines: `offbook init`, edit `services.yaml`, `offbook up`; pointer to `docs/guides/wiring-your-service.md`.
-6. **Verb overview** — the CLI verbs grouped by lifecycle: *run* (`up`, `down`, `status`, `logs`, `demo`), *observe* (`topics`, `state`, `validation`, `diagnostics`, `check`), *interact* (`publish`, `scenario`, `scenarios`, `mode`, `reset`), *maintain* (`init`, `specs`, `doctor`). One line each, no flags (flags live in `offbook <cmd>`'s own errors and the guides).
+6. **Verb overview** — the CLI verbs grouped by lifecycle: *run* (`up`, `down`, `status`, `logs`, `demo`), *observe* (`topics`, `state`, `validation`, `diagnostics`, `check`), *interact* (`publish`, `scenario`, `scenarios`, `mode`, `reset`), *maintain* (`init`, `specs`, `doctor`, `skill` — §9). One line each, no flags (flags live in `offbook <cmd>`'s own errors and the guides).
 7. **Pointers** — the guides, and for contributors, `AGENTS.md`.
 
 ### `docs/guides/` (new directory)
@@ -64,6 +64,9 @@ A preflight verb: runs a fixed, ordered list of named checks, each reporting pas
 | 5 | `scenarios` | all `scenarios/*.yaml` are well-formed (YAML parses; a list of scenarios, each with `name` and `then` — `when` is optional, absent means on-demand-only) | no scenario files ("none found — see the cookbook") | parse/shape error (file + reason) |
 | 6 | `ports` | ws/tcp/ctrl ports free, **or** a live offbook owns them ("already up, pid N") | — | foreign process on a port ("port 9001 busy — stop it or pass `--ws-port`") |
 | 7 | `runfile` | no runfile, or runfile pid alive | stale runfile, pid dead ("stale `.offbook/run` — `offbook down` cleans it") | — |
+| 8 | `skill` (§9, R-042) | absent (detail names `offbook skill install`), or installed copy byte-identical to the running tool's bundled skill | installed copy differs ("stale/edited skill — `offbook skill install --force` refreshes it") | — |
+
+- **Check 8 scope**: resolves the git toplevel from the examined dir and looks for `.claude/skills/offbook-onboard/`; the compare excludes the `.installed-from` stamp (§9). Absent is a pass, not a warn — not every project wants the skill; a stale skill never fails doctor (it does not break the tool).
 
 - **Ports checked**: the defaults `up` would use (ws 9001, tcp 1883, ctrl 9080) unless a runfile exists — live *or* stale — in which case its recorded ports (a stale runfile's ports are exactly the ones `up` will reclaim).
 - **Version floor single source**: a new `engines.bun` field in `package.json`; `doctor` reads it (and it is exactly what a future release pipeline pins, §5). The floor value is fixed at implementation time: the Bun `major.minor` the repo is actually developed and tested against (read `bun --version`), never a guessed-lower bound.
@@ -123,11 +126,11 @@ Explicitly out of scope now; each item's hinge is already in place so widening t
 - **`src/cli/doctor.test.ts`** — per-check failure modes in temp dirs (missing/broken services.yaml, unreachable repo with timeout, busy port, stale runfile), `--json` shape, exit codes. Per-file unique ports, repo convention.
 - **`test/readme-quickstart.test.ts`** — the §4 quickstart gate (execution + fence equivalence).
 - **`test/guides-cookbook.test.ts`** — the §4 cookbook gate.
-- **`scripts/check-docs.test.ts`** — link-gate cases added to the existing checker tests.
 - **Error-message pins** — beside the existing CLI tests that already pin messages.
 - **`test/init-templates.test.ts`** — the §8 template-parses gate (worked examples uncommented and parsed; as-scaffolded files parse).
-- **`src/cli/skill.test.ts`** — `offbook skill install` behaviors: fresh copy, present-identical no-op, present-different refusal, `--force` overwrite.
-- **`scripts/check-docs.test.ts`** — §9 gate cases added: relative-link gate over `skills/onboard/**`, verb-existence check.
+- **`src/cli/skill.test.ts`** — `offbook skill install` behaviors: fresh copy (stamp written), present-identical no-op, present-different refusal (exit 1, divergence listed), `--force` clean-replace (orphaned old files removed), stamp excluded from the compare, bare/unknown subcommand usage (exit 1), `--version` output shape, toplevel destination resolution, outside-a-repo error, `--dest` override, below-toplevel warning, gitignored-target warning. Doctor check 8's absent/identical/different cases land beside the other per-check cases in `src/cli/doctor.test.ts`.
+- **`scripts/check-docs.test.ts`** — the §4 link-gate cases plus the §9 gate cases: intra-skill link rule, verb-existence extraction grammar (placeholder exemption, flag skip, two-token enforcement), SKILL.md frontmatter assertions.
+- **VERB_FORMS coherence test** — first tokens ≡ dispatch keys ∪ {`demo`}; VERB_FORMS ↔ USAGE equivalence in both directions (beside the existing CLI dispatch tests).
 - All behind the standard `bun test` + `bun scripts/check-docs.ts` gates.
 
 ## 7. Paper trail
@@ -148,11 +151,12 @@ Explicitly out of scope now; each item's hinge is already in place so widening t
 
 `INIT_SERVICES` (currently a minimal commented example) becomes a fill-in-the-blank reference document:
 
-- `gitHost` explained in place: the base URL for slug-form repos, **no built-in default** — a slug without it is a config error (G20).
-- The worked example service shows **all three `repo` forms** as commented alternatives: slug (`org/my-service`), full URL, absolute local path.
-- Every field annotated required-or-default; the exact wording is written against what `parseServices` implements — the parser is the truth, the template transcribes it.
-- `INIT_ENVIRONMENTS` gets the same treatment: a plain-words statement of what the file is for (records requested spec versions per environment; v1 fetches branch tips regardless — resolution-mode: branch) and when an adopter would touch it.
+- `gitHost` explained in place: the base URL for slug-form repos, **no built-in default** — a slug without it is a config error (G20). Always a **commented** example, never an active placeholder value (the contracts §6 EI1 amendment, D-028): unset must stay the true config state so a slug hits the clean G20 error, not a fetch failure against a garbage host.
+- **Fence convention (the gate's substrate):** each template carries exactly **one** canonical worked example between `# --- example ---` / `# --- end example ---` marker lines, commented at code depth (`# `). Non-canonical alternatives — the URL-form and absolute-path `repo` variants — sit **outside** the fence at prose depth (`## `), so extraction is mechanical and alternatives can never collide into duplicate keys.
+- Every field annotated required-or-default; the annotations are written against the owning module (`parseServices` for shape, ingestion for branch defaulting, registry for the qos/retain tiers) and reviewed against contracts §6, which stays canonical — the §8 gate pins *parseability*, not annotation truth.
+- `INIT_ENVIRONMENTS` gets the same treatment: a plain-words statement of what the file is for (records requested spec versions per environment; v1 fetches branch tips regardless — resolution-mode: branch), when an adopter would touch it, and a minimal fenced worked example (one named environment with a pinned version).
 - Both templates close by naming the edit loop: `offbook doctor` validates shape locally without fetching (§3 check 3); its `specs-reachable` check (§3 check 4) confirms each repo resolves.
+- **`init` also scaffolds a `README.md`** into the project dir (review-round fork d): what this directory is (an offbook mock project), how to install offbook — the clone URL **observed** from the initiating checkout's `git remote get-url origin` at init time (fallback wording "ask a teammate for the offbook clone URL" when no remote answers; the `<internal-git>` never-invent rule holds because the URL is read, not authored) — then "`offbook doctor` first", then guide pointers. The one committed artifact that names the next step for a teammate *without* an agent (the fresh-clone case: `mock/`, scripts, and skill present, `offbook: command not found`). Prose, no fence; pinned by the init unit tests.
 
 ### Doctor discoverability
 
@@ -164,7 +168,7 @@ Explicitly out of scope now; each item's hinge is already in place so widening t
 
 ### Template-parses gate
 
-`test/init-templates.test.ts` extracts the commented worked example from each scaffolded template, uncomments it, and asserts `parseServices` / `parseEnvironments` accept it; the as-scaffolded files (empty `services: {}` / `default: {}`) must parse too. The templates break loudly if the config shape ever changes — the §4 executable-docs ethos applied to scaffolds.
+`test/init-templates.test.ts` extracts each template's fenced example region (the marker lines above), strips exactly one leading `# ` per line, and parses the result **standalone** — replace-not-join: the extracted example is never merged with the template's active `services: {}` / `default: {}` lines, so duplicate-key collisions are impossible by construction. Assertions: `parseServices` / `parseEnvironments` accept the extracted examples; the as-scaffolded files parse as-is; and `scenarios/00-example.yaml`'s fenced example satisfies the doctor check-5 **shape** (a list of scenarios, each with `name` and `then` — shape-only, the same line doctor draws (§3): the example's topics exist in no spec, so a registry load is out of reach by design). The templates break loudly if the config shape ever changes — the §4 executable-docs ethos applied to scaffolds.
 
 ## 9. Onboarding skill — the agent front door <!-- anchor: onboard-skill -->
 
@@ -172,9 +176,15 @@ Explicitly out of scope now; each item's hinge is already in place so widening t
 
 ### Distribution: `offbook skill install [dir]`
 
-- The skill ships in-repo at `skills/onboard/` (a `SKILL.md` plus any support files). A new CLI-local verb, `offbook skill install [dir]` (default `.`, run from the app repo root), copies it to `<dir>/.claude/skills/offbook-onboard/`. Copy-if-absent; if present and different, report the divergence and require `--force`. The source resolves from the running tool itself (no path hunting — `bun link` already put `offbook` on PATH).
+- The skill ships in-repo at `skills/offbook-onboard/` (a `SKILL.md` plus any support files) — the source directory name **equals** the install directory name, so install is a plain copy and the SKILL.md frontmatter `name` can match both ends (h-sweep). A new CLI-local verb, `offbook skill install`, copies it to `<app repo toplevel>/.claude/skills/offbook-onboard/`. Copy-if-absent; if present and different, report the divergence and require `--force`. The source resolves from the running tool itself (no path hunting — `bun link` already put `offbook` on PATH).
+- **Destination resolution (review-round fork f — no positional):** the destination is `git rev-parse --show-toplevel` from the cwd, always; outside a git repo the verb errors with a next step ("not inside a git repository — cd into your app repo") — a skill outside a repo cannot propagate, and the app repo is by definition a clone. `--dest <dir>` is the explicit escape hatch for unusual layouts (a monorepo whose sessions open at a subdir). Deliberately **not** a `[dir]` positional: on `doctor`/`init` that positional means the offbook *project* dir (`mock/`), and `skill install mock/` by analogy would silently install where no session looks — the different argument shape signals the different semantics. Two non-fatal warnings, each naming its consequence: `--dest` below a repo's toplevel warns "a Claude Code session at the repo root won't discover a skill installed here"; a `git check-ignore`d target warns "`.claude/` is gitignored here — the skill won't propagate; un-ignore it or teammates never see it". Warn-and-proceed, not refuse: both states can be intentional.
+- **Pinned verb semantics (review-round fork c):** "different" = byte-level tree equality — file set plus contents, the `.installed-from` stamp excluded. `--force` is **clean-replace** (remove the installed dir, re-copy), never overlay: overlay orphans files from older skill versions and jams every future compare. The present-different refusal exits 1 and shows the divergence (changed/added/removed file names). Bare `offbook skill`, or an unknown subcommand, prints a subcommand usage line and exits 1.
+- **Provenance stamp:** `skill install` writes version, source commit, install date, source path, **and the installing checkout's `git remote get-url origin`** to `.installed-from` inside the installed dir — a dedicated file, **not** SKILL.md, so the staleness compare stays byte-exact against the bundled source with a trivial exclusion rule. The origin URL is *observed* at install time, never invented at authoring time (the `<internal-git>` placeholder rule holds); it is how a second teammate's agent learns the clone URL.
+- **Doc reachability (how the skill finds the guides):** SKILL.md refers to guides by name-in-checkout ("`docs/guides/wiring-your-service.md` in your offbook checkout, located via `.installed-from`"), **never** by relative markdown link — the installed copy lives on a different filesystem subtree than the offbook clone, so cross-tree relative links are broken for the actual consumer by construction. The skill's locator rule: read `.installed-from`; if the recorded source path exists on this machine, the docs are there; otherwise the origin URL names the clone. Copying guide excerpts into the skill was rejected: it doubles the rot surface with no gate reaching into app repos.
+- **Version identity (the substrate for the stamp and §3 check 8):** `offbook --version`, handled at dispatch before verb lookup, prints `offbook <package.json version> (<short-sha>[-dirty])` — the sha read by running git in the repo root the CLI resolves via `import.meta.dir`, falling back to `unknown`. Under `bun link` every install is a live symlink to a personal checkout; this is what lets two teammates name their skew at all.
+- **Installed-copy edits are drift, not customization:** the skill is a derived artifact (like the guides); local edits belong upstream in `skills/offbook-onboard/`. The §3 check-8 warn plus the show-divergence-before-`--force` refusal keeps a deliberate customizer from silent clobbering, but there is no permanent-fork or merge story (n=1 discipline).
 - The verb joins the *maintain* group (§2 verb overview + `USAGE`). D-014/D-015 precedent: CLI-local, no `/v1`, no contract change.
-- Installing into the app repo (committed) makes onboarding **self-propagating**: the second teammate gets the skill by cloning the app repo. No chicken-and-egg: the skill does not arrive via `init`, so it is installable before anything else exists.
+- Installing into the app repo (committed) makes onboarding **self-propagating**: the second teammate gets the skill by cloning the app repo. Scoped honestly (review-round fork d): the skill does not arrive via `init`, so it is installable before any offbook *project* exists in the app repo — but it presupposes the tool itself (clone, `bun install`, `bun link`); preflight step 1 owns the case where `offbook` is missing, and the §8 scaffolded README serves the teammate without an agent.
 
 ### What the skill drives
 
@@ -194,7 +204,31 @@ Stated in the skill itself: `contracts.md` > guides > skill. If the skill disagr
 
 ### Rot gates
 
-- The §4 relative-link gate extends over `skills/onboard/**`.
-- A new check-docs check: every `offbook <verb>` the skill names must exist in the CLI's verb set (sourced from the same `USAGE` block the CLI prints) — no dead-verb references.
+- The link gate over `skills/offbook-onboard/**` asserts every relative link resolves **within the skill directory itself** (intra-skill only) — true on both filesystems by construction, unlike the §4 rule (resolve-in-repo), which would validate links against the offbook tree while the consumed copy lives in the app repo.
+- **Frontmatter gate (h-sweep):** check-docs asserts the SKILL.md frontmatter has `name: offbook-onboard` (matching the directory name at both source and destination — discovery depends on it) and a non-empty `description`.
+- **Verb-existence check, one source of truth (review-round fork e):** a leaf module `src/cli/verbs.ts` exports `VERB_FORMS` — every valid invocation form, one- and two-token (`"specs"` and `"specs update"` are both valid; bare `"skill"` is deliberately absent — only `"skill install"`). It imports nothing, so check-docs importing it keeps the checker dependency-free in spirit. Coherence is pinned by test in both directions: VERB_FORMS' first tokens ≡ the dispatch table's keys ∪ {`demo`}, and every form appears in `USAGE` with no USAGE verb line naming a form outside the list (closing the USAGE↔dispatch gap CLI-wide). The check-docs extraction grammar over `skills/offbook-onboard/**` (inline backtick spans + fenced code blocks): tokens after `offbook`; `<...>`-shaped tokens are placeholders, exempt; leading-dash tokens are flags, ignored; if the first token belongs to a subcommand-taking verb (any verb with a two-token form in VERB_FORMS), the two-token form must match — a dead `offbook skill uninstall` or bare `offbook skill` in skill text fails the gate; otherwise the first token must match a one-token form.
+- **Stated residual:** the gate checks verb *forms* only — flag names and argument semantics are unchecked (a skill naming `--offline` on a verb that dropped it passes). The §3 check-5-note genre: the blind spot is declared, not papered over.
 - The verb gets ordinary unit tests (§6).
 - Agent *behavior* is acknowledged as not CI-testable; the gates pin what is pinnable (links, verbs, templates).
+
+## 10. First-light integrity <!-- anchor: first-light-integrity -->
+
+**Status**: design for `R-043` (D-028, review-round fork g), 2026-08-08. The FMEA of the embedding journey found the most trust-corrupting failures on the **first-light** path are silent: the app quietly talking to the reachable real backend while offbook runs empty (the adopter concludes the tool does nothing), a busy port blamed on a "foreign process" that is offbook's own demo from another directory, and two advertised loops that succeed while stale. All three fixes share one shape, forced by the frozen contracts: **CLI-local, structured-`offbook.log`-based — the D-014/D-015 precedent. No `/v1` endpoint or response shape changes.**
+
+### Connected-clients surface
+
+`offbook status` gains a clients line read from the D-015 connect-fingerprint log lines: connects observed this run, with the last client id and time (`connects: 3, last: web-abc123 14:02:11`). Deliberately *connects observed*, never a live-connection count — that is what the log surface truthfully knows; no disconnect bookkeeping is invented. The wiring guide's first-light section and skill step 6 (§9) make "your app's connect fingerprint appears" the **explicit acceptance test** before first light is declared done — closing the silent-real-backend failure (the app connects to production because `.env.development` is missing/unloaded, everything works, offbook sits empty).
+
+### Port-conflict attribution
+
+When `up`'s preflight or doctor's `ports` check (§3 check 6) finds the **ctrl** port busy, it probes with the existing `probeOffbook`; if the port answers as offbook, the message becomes: "an offbook from another directory owns these ports (likely the demo) — run `offbook down` there, or pass `--ws-port`/`--ctrl-port`". Partial overlap (ws/tcp busy, ctrl free) falls back to the generic foreign-process message — a stated fallback, not a gap.
+
+### Staleness honesty
+
+- **`services.yaml` edits after `up`:** the server logs a boot-manifest line at startup (`loaded services.yaml sha256:…`); `offbook specs update` hashes the current file, compares against the boot line, and warns "services.yaml changed since `offbook up` — restart to apply" on mismatch. Today the new service silently never appears while "specs refreshed" prints success.
+- **`offbook topics --json` with no live server refuses** (exit 1, "no running offbook — run `offbook up`; the demo fallback is human-only") instead of silently returning the bundled demo spec — an agent (including the §9 skill's own ingestion check, step 6) must never mistake demo topics for ingestion. Refusal over a `source` marker: a marker protects only consumers who know to check it; refusal eliminates the class. The human-path fallback and its printed "(no running offbook — showing the bundled demo spec…)" note stay.
+
+### Testing (joins §6)
+
+- **`src/cli/index.test.ts` / `test/cli-dispatch.test.ts`** — status clients line (zero connects, n connects, malformed log lines skipped); topics `--json` no-server refusal (exit 1, message pinned); specs-update staleness warn (hash match silent, mismatch warns).
+- **`src/cli/doctor.test.ts` + up-preflight pins** — busy ctrl port answering as offbook rewrites the message; non-offbook listener keeps the generic message.
