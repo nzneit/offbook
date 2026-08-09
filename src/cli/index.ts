@@ -150,7 +150,8 @@ export function clientsFromLog(logText: string): {
 			const fields = JSON.parse(m[2]) as { clientId?: unknown };
 			if (typeof fields.clientId !== "string") continue;
 			connects++;
-			last = { clientId: fields.clientId, at: m[1] };
+			const clientId = fields.clientId.replace(/\p{Cc}/gu, "?");
+			last = { clientId, at: m[1] };
 		} catch {
 			// malformed fingerprint line: skip, never crash status (R-043)
 		}

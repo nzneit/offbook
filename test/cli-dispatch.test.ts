@@ -822,6 +822,25 @@ test("clientsFromLog: counts only post-last-boot-line connects, skips malformed"
 	expect(rTorn.last).toEqual({ clientId: "valid-2", at: iso });
 });
 
+// [itest->R-043]
+test("clientsFromLog: sanitizes control characters restored by JSON.parse (F4)", () => {
+	const iso = "2026-08-08T10:00:00.000Z";
+	const esc = String.fromCharCode(27);
+	const raw = JSON.stringify({ clientId: `web-${esc}[31mhostile` });
+	const lines = [
+		`[offbook] ${iso} boot: services.yaml sha256:${"e".repeat(64)}`,
+		`[offbook] ${iso} ws-connect ${raw}`,
+	].join("\n");
+	const r = clientsFromLog(lines);
+	expect(r.connects).toBe(1);
+	const clientId = r.last?.clientId ?? "";
+	expect(clientId.includes(esc)).toBe(false);
+	for (let i = 0; i < clientId.length; i++) {
+		const code = clientId.charCodeAt(i);
+		expect(code < 32 || code === 127).toBe(false);
+	}
+});
+
 // --- suite B: the real up → status → specs → check → down process cycle ---
 
 test("up spawns the detached server from a local-git project, status/specs/logs read it, down stops it", async () => {
