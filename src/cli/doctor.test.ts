@@ -393,6 +393,49 @@ test("runfile: absent passes; stale (alive pid, dead port) warns with a `down` h
 	}
 });
 
+// [utest->R-042]
+test("doctor skill check: non-repo pass, absent pass, identical pass, edited warn", async () => {
+	const noRepo = mkdtempSync(join(tmpdir(), "doctor-skill-"));
+	// biome-ignore lint/style/noNonNullAssertion: exact pattern from the brief
+	const skillOnly = DOCTOR_CHECKS.find((c) => c.name === "skill")!;
+	const r1 = await runDoctor(ctxWith({ projectDir: noRepo }), [skillOnly]);
+	expect(r1.checks[0]).toMatchObject({ status: "pass" });
+
+	const repo = mkdtempSync(join(tmpdir(), "doctor-skill-repo-"));
+	const git = async (...args: string[]) => {
+		const p = Bun.spawn(["git", ...args], {
+			cwd: repo,
+			stdout: "ignore",
+			stderr: "ignore",
+			env: {
+				...process.env,
+				GIT_AUTHOR_NAME: "t",
+				GIT_AUTHOR_EMAIL: "t@t",
+				GIT_COMMITTER_NAME: "t",
+				GIT_COMMITTER_EMAIL: "t@t",
+			},
+		});
+		expect(await p.exited).toBe(0);
+	};
+	await git("init", "-q", "-b", "main");
+	const r2 = await runDoctor(ctxWith({ projectDir: repo }), [skillOnly]);
+	expect(r2.checks[0].detail).toContain("not installed");
+
+	const iox = { out: () => {}, err: () => {} };
+	expect(await run(["skill", "install", "--dest", repo], iox)).toBe(0);
+	const r3 = await runDoctor(ctxWith({ projectDir: repo }), [skillOnly]);
+	expect(r3.checks[0]).toMatchObject({ status: "pass" });
+
+	writeFileSync(
+		join(repo, ".claude/skills/offbook-onboard/SKILL.md"),
+		"edited\n",
+	);
+	const r4 = await runDoctor(ctxWith({ projectDir: repo }), [skillOnly]);
+	expect(r4.checks[0].status).toBe("warn");
+	expect(r4.checks[0].hint).toContain("offbook skill install --force");
+	expect(r4.ok).toBe(true); // warn never fails doctor
+});
+
 test("`offbook doctor` verb: --json shape, exit codes, USAGE listing", async () => {
 	const outLines: string[] = [];
 	const io = { out: (l: string) => outLines.push(l), err: () => {} };
@@ -413,6 +456,7 @@ test("`offbook doctor` verb: --json shape, exit codes, USAGE listing", async () 
 		"scenarios",
 		"ports",
 		"runfile",
+		"skill",
 	]);
 	expect(report.ok).toBe(true);
 

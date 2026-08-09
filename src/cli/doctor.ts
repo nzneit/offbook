@@ -7,7 +7,9 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { loadEnvironments, loadServices } from "#src/config/index.ts";
 import { resolveRepoUrl } from "#src/ingestion/index.ts";
+import { gitToplevel } from "./checkout.ts";
 import { resolveRunning } from "./runfile.ts";
+import { bundledSkillDir, compareSkillTrees } from "./skill.ts";
 
 export type CheckStatus = "pass" | "warn" | "fail";
 
@@ -354,6 +356,44 @@ const runfileCheck: DoctorCheck = {
 	},
 };
 
+// R-042 — check 8 (adoption.md §3): the installed skill copy vs the running
+// tool's bundled skill. Warn-never-fail: a stale skill doesn't break the
+// tool. Resolved from the EXAMINED dir's toplevel; the hint names the path
+// because `skill install --force` resolves from CWD, which can differ when
+// `doctor <elsewhere>` examines another repo.
+const skillCheck: DoctorCheck = {
+	name: "skill",
+	async run(ctx) {
+		const top = await gitToplevel(ctx.projectDir);
+		if (top === undefined)
+			return {
+				status: "pass",
+				detail: "not in a git repo (no skill to check)",
+			};
+		const installed = join(top, ".claude", "skills", "offbook-onboard");
+		if (!existsSync(installed))
+			return {
+				status: "pass",
+				detail:
+					"onboarding skill not installed (optional — `offbook skill install` adds it)",
+			};
+		const diff = await compareSkillTrees(bundledSkillDir(), installed);
+		return diff.identical
+			? {
+					status: "pass",
+					detail: `installed skill matches the bundled one (${installed})`,
+				}
+			: {
+					status: "warn",
+					detail: `installed skill at ${installed} differs from the bundled one (${[...diff.changed, ...diff.added, ...diff.removed].length} file(s))`,
+					// the hint NAMES the resolved toplevel (adoption.md §3): `skill
+					// install --force` resolves from CWD, which can differ from the
+					// examined dir's repo
+					hint: `stale/edited skill — \`offbook skill install --force\` from ${top} refreshes it`,
+				};
+	},
+};
+
 export const DOCTOR_CHECKS: DoctorCheck[] = [
 	runtime,
 	deps,
@@ -362,6 +402,7 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
 	scenarios,
 	ports,
 	runfileCheck,
+	skillCheck,
 ];
 
 export async function runDoctor(
