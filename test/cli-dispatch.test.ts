@@ -791,6 +791,12 @@ test("up spawns the detached server from a local-git project, status/specs/logs 
 		expect(upText).toContain("mode passive · seed 7 (--ci profile)"); // --ci co-sets
 		expect(existsSync(join(projectDir, "specs.lock"))).toBe(true);
 
+		// [itest->R-043]
+		const logText = await Bun.file(
+			join(projectDir, ".offbook", "offbook.log"),
+		).text();
+		expect(logText).toMatch(/\] .*boot: services\.yaml sha256:[0-9a-f]{64}$/m);
+
 		// a second up refuses the live double-start (P7)
 		const dup = io();
 		expect(await run(["up", ...flags], dup.io)).toBe(1);

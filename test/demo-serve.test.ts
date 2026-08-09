@@ -120,6 +120,9 @@ test("demo --serve: detached boot, fingerprint line in offbook.log, down cleans 
 			parseFingerprintLines(logged, "demo-serve-probe")?.connect,
 		).toBeDefined();
 
+		// [itest->R-043]
+		expect(logged).toMatch(/\] .*boot: bundled demo spec/);
+
 		expect(
 			await run(["down", "--run-dir", runDir], {
 				out: () => {},

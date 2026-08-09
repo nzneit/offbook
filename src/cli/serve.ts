@@ -13,6 +13,7 @@
 // file with the log APPENDED (the G14 continuity guarantee), points the
 // runfile at the new pid, and exits.
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, watch as fsWatch, openSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "#src/config/index.ts";
@@ -50,6 +51,17 @@ try {
 					log,
 				});
 	await composed.start();
+	// R-043 — the boot line (adoption.md §10): every startup logs what it
+	// loaded. Double duty: `status` scopes connect counts to lines after the
+	// LAST boot line; `specs update` compares this hash against the current
+	// services.yaml to warn on silent staleness.
+	if (boot.demo === true) log("boot: bundled demo spec");
+	else
+		log(
+			`boot: services.yaml sha256:${createHash("sha256")
+				.update(await Bun.file(join(boot.projectDir, "services.yaml")).text())
+				.digest("hex")}`,
+		);
 	const ports = {
 		brokerWsPort: config.brokerWsPort,
 		brokerTcpPort: config.brokerTcpPort,
