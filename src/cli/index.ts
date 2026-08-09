@@ -323,6 +323,10 @@ async function cmdTopics(rest: string[], io: Io): Promise<number> {
 			topics = ((await a.get(`/v1/topics${query}`)) as { topics: TopicInfo[] })
 				.topics;
 		} else {
+			if (values.json === true)
+				throw new CliError(
+					"no running offbook in this run-dir — run `offbook up` here, or pass --ctrl-port; the bundled-demo fallback is human-only",
+				);
 			topics = (await demoTopicInfo()).filter(
 				(t) => direction === undefined || t.direction === direction,
 			);

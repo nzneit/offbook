@@ -678,6 +678,21 @@ test("topics falls back to the bundled demo spec when nothing is running (M0 dis
 	expect(t.err).toEqual([]);
 });
 
+// [itest->R-043]
+test("topics --json with no live server refuses (exit 1, run-dir-qualified); human fallback stays", async () => {
+	const empty = mkdtempSync(join(tmpdir(), "no-server-"));
+	const refused = io();
+	expect(await run(["topics", "--json", "--run-dir", empty], refused.io)).toBe(
+		1,
+	);
+	expect(refused.err.join("\n")).toContain(
+		"bundled-demo fallback is human-only",
+	);
+	const human = io();
+	expect(await run(["topics", "--run-dir", empty], human.io)).toBe(0);
+	expect(human.out[0]).toContain("showing the bundled demo spec"); // pinned note survives
+});
+
 test("down is idempotent on a dead/absent runfile; status exits nonzero when down; logs reads the log file", async () => {
 	const deadPid = Bun.spawnSync(["true"]).pid ?? 4_193_998;
 	const dir = join(base, "run-down");
