@@ -332,20 +332,26 @@ Every error reachable on the clone→demo→init→wire→up→first-publish pat
 
 #### Embedding substrate — reference templates, doctor-advertised edit loop, app-connection recipe
 **UID**: R-041
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/adoption.md#embedding-substrate
+**IMPL**: src/cli/index.ts, src/cli/checkout.ts, docs/guides/wiring-your-service.md
+**TEST**: test/init-templates.test.ts
 `offbook init` scaffolds reference-quality config templates (`services.yaml` with `gitHost` explained in place as a commented example — never an active placeholder, the contracts §6 EI1 amendment — one canonical fenced worked example per template with URL/path `repo` alternatives at prose depth outside the fence, every field annotated required-or-default and reviewed against contracts §6; `environments.yaml` with a plain-words purpose statement plus a minimal fenced example), both closing by naming `offbook doctor` as the local edit loop; `init` also scaffolds a project-dir `README.md` (what this is; install steps with the clone URL observed from the running tool's own checkout — never the app repo's remote — fallback "ask a teammate"; doctor first; guide pointers); `init`'s next-steps output advertises `doctor`; `docs/guides/wiring-your-service.md` gains the "Point your app at offbook" env-var recipe (demo-app's `?ws=` override as the zero-build variant); a template-parses gate extracts each fenced example (replace-not-join, standalone parse) and asserts the config parsers accept it, the as-scaffolded files parse, and the scenario scaffold's example satisfies the doctor check-5 shape.
 
 #### Onboarding skill — agent-driven embedding + `offbook skill install`
 **UID**: R-042
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/adoption.md#onboard-skill
+**IMPL**: skills/offbook-onboard/, src/cli/skill.ts, src/cli/verbs.ts, src/cli/checkout.ts, src/cli/index.ts, src/cli/doctor.ts, scripts/check-docs.ts
+**TEST**: src/cli/skill.test.ts, src/cli/checkout.test.ts, test/verb-forms.test.ts, scripts/check-docs.test.ts, src/cli/doctor.test.ts
 A bundled Claude Code skill (`skills/offbook-onboard/`, source dir = install dir so install is a plain copy, frontmatter `name`/`description` gated) drives the embedding journey conversationally (doctor preflight, spec-location interview, init + doctor loop, app-side env-var refactor with diff approval, package scripts, first-light verification, optional CI recipe) under the authority chain contracts > guides > skill; `offbook skill install` copies it into the app repo's `.claude/skills/offbook-onboard/` (no positional — destination is the git toplevel from cwd, `--dest` the escape hatch, with warnings on a below-toplevel or gitignored target; copy-if-absent with an identical copy a no-op; present-different refusal shows the divergence and exits 1; `--force` = clean-replace; a `.installed-from` provenance stamp (version, source commit, install date, source path, observed origin URL — the stamp *is* the skill's doc locator), excluded from the compare; source resolved from the running tool); `offbook --version` gives the tool a version identity (pkg version + source commit) and doctor check 8 warns when the installed copy differs from the bundled skill; `check-docs` gates the skill's relative links as intra-skill-only and adds a verb-existence check against an exported `VERB_FORMS` leaf module (one- and two-token forms; placeholder/flag-aware extraction grammar; USAGE↔dispatch coherence pinned by test) so the skill cannot name dead verbs or dead subcommands.
 
 #### First-light integrity — silent-failure hardening on the embedding path
 **UID**: R-043
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/adoption.md#first-light-integrity
+**IMPL**: src/cli/serve.ts, src/cli/index.ts, src/cli/doctor.ts, docs/guides/wiring-your-service.md
+**TEST**: test/cli-dispatch.test.ts, src/cli/doctor.test.ts, test/demo-serve.test.ts
 All CLI-local over existing surfaces — structured `offbook.log` lines (D-014/D-015 precedent) plus the runfile/`probeOffbook` machinery; no `/v1` changes: `offbook status` gains a connects-observed clients line read from the D-015 fingerprint lines after the last boot line (last client id + time; never a live count), and the wiring guide + onboarding skill make the connect fingerprint the explicit first-light acceptance test; `up` preflight and doctor's ports check evaluate all three ports and probe a busy ctrl port with `probeOffbook`, attributing an answering offbook ("an offbook from another directory owns these ports…") instead of blaming a foreign process, with ctrl-free overlap falling back to the generic message; the server logs a boot line every startup (`boot: services.yaml sha256:…` / `boot: bundled demo spec`) and `offbook specs update` warns "changed since `offbook up` — restart to apply" on hash mismatch (skipping on `--ctrl-port`-only, demo boots, or no boot line); `offbook topics --json` with no live server refuses (exit 1, run-dir-qualified message) rather than silently returning the bundled demo spec, while the human-path fallback and its printed note stay.
 
 <!--

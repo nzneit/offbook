@@ -72,7 +72,7 @@ Full walkthrough: [wiring your service](docs/guides/wiring-your-service.md).
 | run       | `up` · `down` · `status` · `logs` · `demo` |
 | observe   | `topics` · `state` · `validation` · `diagnostics` · `check` |
 | interact  | `publish` · `scenario` · `scenarios` · `mode` · `reset` |
-| maintain  | `init` · `specs` · `doctor` |
+| maintain  | `init` · `specs` · `doctor` · `skill` |
 
 `offbook` with no arguments prints full usage with flags.
 
