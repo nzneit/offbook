@@ -56,6 +56,11 @@ test("fresh install into --dest: copies SKILL.md, writes the stamp", async () =>
 	expect(typeof stamp.commit).toBe("string");
 	expect(typeof stamp.sourcePath).toBe("string");
 	expect(typeof stamp.installedAt).toBe("string");
+	// F11: a homedir prefix is relativized to `~`, never committed raw — this
+	// checkout lives under $HOME in every environment the gate runs in (local
+	// dev, CI runners), so the stamp should read as a `~`-relative path
+	expect(stamp.sourcePath).not.toContain("/home/");
+	expect(stamp.sourcePath.startsWith("~")).toBe(true);
 });
 
 test("identical re-install is a no-op; stamp is excluded from the compare", async () => {

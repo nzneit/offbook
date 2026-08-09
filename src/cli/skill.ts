@@ -6,7 +6,8 @@
 // hatch. "Different" = byte-level tree equality, stamp excluded; --force =
 // clean-replace (overlay would orphan old files and jam every compare).
 import { existsSync, rmSync, statSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { homedir } from "node:os";
+import { basename, join, resolve, sep } from "node:path";
 import {
 	checkoutCommit,
 	checkoutOrigin,
@@ -22,6 +23,16 @@ const STAMP = ".installed-from";
 
 export function bundledSkillDir(): string {
 	return join(repoRoot(), "skills", SKILL_NAME);
+}
+
+// F11 — the stamp's sourcePath is only meaningful on the installing machine;
+// relativizing a homedir prefix to `~` keeps a committed username/home-layout
+// detail out of teammates' clones. Best effort: an exact prefix match on
+// `homedir()`, nothing fancier (no envvar expansion, no case-folding).
+function relativizeHome(path: string): string {
+	const home = homedir();
+	if (path === home) return "~";
+	return path.startsWith(home + sep) ? `~${path.slice(home.length)}` : path;
 }
 
 async function listFiles(dir: string): Promise<string[]> {
@@ -80,7 +91,10 @@ async function copySkill(srcDir: string, destDir: string): Promise<void> {
 					).version ?? "0.0.0",
 				commit: await checkoutCommit(),
 				installedAt: new Date().toISOString(),
-				sourcePath: repoRoot(),
+				// best effort: only meaningful on the installing machine; a homedir
+				// prefix is relativized to `~` so the stamp doesn't commit one
+				// dev's username/home layout into every teammate's clone (F11)
+				sourcePath: relativizeHome(repoRoot()),
 				// observed at install time, never authored (adoption.md §9); omitted
 				// when the checkout has no remote — the skill's locator wording then
 				// falls back to "ask a teammate"
