@@ -471,6 +471,7 @@ test("doctor skill check: non-repo pass, absent pass, identical pass, edited war
 	await git("init", "-q", "-b", "main");
 	const r2 = await runDoctor(ctxWith({ projectDir: repo }), [skillOnly]);
 	expect(r2.checks[0].detail).toContain("not installed");
+	expect(r2.checks[0].status).toBe("pass"); // F16: not-installed is pass, never fail
 
 	const iox = { out: () => {}, err: () => {} };
 	expect(await run(["skill", "install", "--dest", repo], iox)).toBe(0);
