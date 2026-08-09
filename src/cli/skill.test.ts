@@ -9,6 +9,7 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	realpathSync,
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
@@ -154,6 +155,39 @@ test("--dest naming the toplevel through a symlink: no spurious below-toplevel w
 	const below = io();
 	expect(await run(["skill", "install", "--dest", sub], below.io)).toBe(0);
 	expect(below.err.join("\n")).toContain("below the repo toplevel");
+});
+
+// [utest->R-042]
+test("--force through a symlinked .claude warns, installs at the resolved location, and deletes only the skill leaf (F9)", async () => {
+	const repo = await tempAppRepo();
+	// a dotfiles-managed .claude: symlinked to a sibling dir outside the repo
+	const sibling = mkdtempSync(join(tmpdir(), "offbook-dotfiles-"));
+	symlinkSync(sibling, join(repo, ".claude"), "dir");
+	const marker = join(sibling, "unrelated-dotfile.txt");
+	writeFileSync(marker, "keep me\n");
+
+	const first = io();
+	expect(await run(["skill", "install", "--dest", repo], first.io)).toBe(0);
+	const resolvedSibling = realpathSync(sibling); // beware /tmp symlinks
+	expect(first.err.join("\n")).toContain("resolves outside this repo");
+	expect(first.err.join("\n")).toContain(resolvedSibling);
+	// the propagation advice must be corrected, not just appended
+	expect(first.out.join("\n")).not.toContain(
+		"commit it so teammates get the skill",
+	);
+	const installedSkill = join(resolvedSibling, "skills", "offbook-onboard");
+	expect(existsSync(join(installedSkill, "SKILL.md"))).toBe(true);
+
+	writeFileSync(join(installedSkill, "SKILL.md"), "edited\n");
+	const second = io();
+	expect(
+		await run(["skill", "install", "--dest", repo, "--force"], second.io),
+	).toBe(0);
+	expect(second.err.join("\n")).toContain("resolves outside this repo");
+	expect(await Bun.file(join(installedSkill, "SKILL.md")).text()).not.toBe(
+		"edited\n",
+	); // clean-replaced back to the bundled content
+	expect(existsSync(marker)).toBe(true); // deletion stayed bounded to the leaf
 });
 
 test("no positional: installs at the git toplevel resolved from a subdir cwd", async () => {

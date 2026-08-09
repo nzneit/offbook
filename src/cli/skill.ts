@@ -7,7 +7,7 @@
 // clean-replace (overlay would orphan old files and jam every compare).
 import { existsSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import {
 	checkoutCommit,
 	checkoutOrigin,
@@ -33,6 +33,29 @@ function relativizeHome(path: string): string {
 	const home = homedir();
 	if (path === home) return "~";
 	return path.startsWith(home + sep) ? `~${path.slice(home.length)}` : path;
+}
+
+function deepestExistingAncestor(path: string): string {
+	let p = path;
+	while (!existsSync(p)) {
+		const parent = dirname(p);
+		if (parent === p) return p; // reached the filesystem root
+		p = parent;
+	}
+	return p;
+}
+
+// F9 — resolve as much of `path` as exists on disk (following any symlinks
+// along the way, e.g. a dotfiles-managed `.claude`), then re-attach the
+// not-yet-created remainder literally: the location the install will
+// actually land at once the missing components are created.
+function realpathThroughExistingAncestors(path: string): string {
+	const existing = deepestExistingAncestor(path);
+	return realpathSync(existing) + path.slice(existing.length);
+}
+
+function isWithinRoot(child: string, root: string): boolean {
+	return child === root || child.startsWith(root + sep);
 }
 
 async function listFiles(dir: string): Promise<string[]> {
@@ -162,6 +185,21 @@ export async function cmdSkill(rest: string[], io: Io): Promise<number> {
 			`skill install: bundled skill missing at ${srcDir} — the offbook checkout looks incomplete`,
 		);
 
+	// F9 — `.claude` (or an ancestor of it) may itself be a symlink, e.g. a
+	// dotfiles-managed `.claude` symlinked to `~/dotfiles/claude/`: rmSync and
+	// the write both follow it, landing outside the repo. Warn, don't refuse
+	// — a symlinked `.claude` is a legitimate setup — and correct the
+	// "commit it" propagation advice below when it applies.
+	const resolvedDestDir = realpathThroughExistingAncestors(destDir);
+	// targetRoot itself need not exist yet (Bun.write below creates it) — walk
+	// its own ancestors the same way rather than assume it's there
+	const resolvedTargetRoot = realpathThroughExistingAncestors(targetRoot);
+	const propagatesViaRepo = isWithinRoot(resolvedDestDir, resolvedTargetRoot);
+	if (!propagatesViaRepo)
+		io.err(
+			`⚠ .claude here resolves outside this repo (${resolvedDestDir}) — the skill will install there and will NOT propagate via this repo's commits`,
+		);
+
 	if (existsSync(destDir)) {
 		if (!statSync(destDir).isDirectory()) {
 			// dest exists but isn't a directory (e.g. a stray file left behind) —
@@ -209,7 +247,9 @@ export async function cmdSkill(rest: string[], io: Io): Promise<number> {
 			"⚠ .claude/ is gitignored here — the skill won't propagate; un-ignore it or teammates never see it",
 		);
 	io.out(
-		`offbook skill install: installed to ${destDir} — commit it so teammates get the skill`,
+		propagatesViaRepo
+			? `offbook skill install: installed to ${destDir} — commit it so teammates get the skill`
+			: `offbook skill install: installed to ${destDir}`,
 	);
 	return 0;
 }
