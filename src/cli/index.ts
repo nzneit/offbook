@@ -5,6 +5,7 @@
 // (contracts §5) — never HTTP. `demo` and the no-server `topics` fallback
 // boot/read the bundled demo spec locally (M0's zero-config discovery floor).
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -640,6 +641,51 @@ function renderSpecs(
 	for (const w of warnings ?? []) io.out(`⚠ ${w}`);
 }
 
+// R-043 — services.yaml edited after `up` (adoption.md §10): compare the
+// current file's hash against the LAST boot line. Skips silently (no warn
+// possible, none owed) when: no run dir was involved (bare --ctrl-port),
+// the last boot was the bundled demo, or no boot line exists (pre-R-043
+// log). Today the edit silently never applies while "specs refreshed"
+// prints success.
+export async function specsStalenessWarning(
+	runDir: string,
+): Promise<string | undefined> {
+	const bootFile = Bun.file(join(runDir, "offbook.boot.json"));
+	if (!(await bootFile.exists())) return undefined;
+	let projectDir: string;
+	try {
+		const boot = JSON.parse(await bootFile.text()) as {
+			projectDir?: string;
+			demo?: boolean;
+		};
+		if (boot.demo === true || boot.projectDir === undefined) return undefined;
+		projectDir = boot.projectDir;
+	} catch {
+		return undefined;
+	}
+	const logText = await Bun.file(logPath(runDir))
+		.text()
+		.catch(() => "");
+	let bootHash: string | undefined;
+	for (const line of logText.split("\n").reverse()) {
+		const m = line.match(/^\[offbook\] \S+ boot: (.*)$/);
+		if (!m) continue;
+		bootHash = m[1].match(/^services\.yaml sha256:([0-9a-f]{64})$/)?.[1];
+		break; // last boot line wins, whatever it recorded
+	}
+	if (bootHash === undefined) return undefined;
+	const current = createHash("sha256")
+		.update(
+			await Bun.file(join(projectDir, "services.yaml"))
+				.text()
+				.catch(() => ""),
+		)
+		.digest("hex");
+	return current === bootHash
+		? undefined
+		: "⚠ services.yaml changed since `offbook up` — restart to apply";
+}
+
 async function cmdSpecs(rest: string[], io: Io): Promise<number> {
 	const update = rest[0] === "update";
 	const { values } = parseFlags(update ? rest.slice(1) : rest, {
@@ -657,6 +703,10 @@ async function cmdSpecs(rest: string[], io: Io): Promise<number> {
 		}
 		io.out(`specs refreshed (${specs.length} service(s))`);
 		renderSpecs(io, specs);
+		if (str(values["ctrl-port"]) === undefined) {
+			const warn = await specsStalenessWarning(runDirOf(values));
+			if (warn !== undefined) io.out(warn);
+		}
 		return 0;
 	}
 	const res = (await a.get("/v1/specs")) as {

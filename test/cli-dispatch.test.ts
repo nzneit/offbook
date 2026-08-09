@@ -6,6 +6,7 @@
 // [itest->R-019]
 // [itest->R-036]
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import {
 	appendFileSync,
 	existsSync,
@@ -18,7 +19,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Io } from "#src/cli/index.ts";
-import { clientsFromLog, renderTopicList, run } from "#src/cli/index.ts";
+import {
+	clientsFromLog,
+	renderTopicList,
+	run,
+	specsStalenessWarning,
+} from "#src/cli/index.ts";
 import { readRunfile, writeRunfile } from "#src/cli/runfile.ts";
 import type { Composed } from "#src/compose/index.ts";
 import { compose } from "#src/compose/index.ts";
@@ -858,6 +864,30 @@ test("up spawns the detached server from a local-git project, status/specs/logs 
 		expect(await run(["specs", "update", "--run-dir", runDir], upd.io)).toBe(0);
 		expect(upd.out.join("\n")).toContain("specs refreshed (1 service(s))");
 
+		// [itest->R-043] edit services.yaml after `up` to test staleness warning
+		const servicesPath = join(projectDir, "services.yaml");
+		const currentServices = await Bun.file(servicesPath).text();
+		writeFileSync(servicesPath, `${currentServices}# edited\n`);
+
+		// specs update with --ctrl-port should skip the warning (it's a server-aware refresh)
+		const updCtrl = io();
+		expect(
+			await run(
+				["specs", "update", "--run-dir", runDir, "--ctrl-port", "19810"],
+				updCtrl.io,
+			),
+		).toBe(0);
+		expect(updCtrl.out.join("\n")).toContain("specs refreshed (1 service(s))");
+		expect(updCtrl.out.join("\n")).not.toContain("changed since");
+
+		// specs update without --ctrl-port should warn (the running server is stale)
+		const updWarn = io();
+		expect(
+			await run(["specs", "update", "--run-dir", runDir], updWarn.io),
+		).toBe(0);
+		expect(updWarn.out.join("\n")).toContain("specs refreshed (1 service(s))");
+		expect(updWarn.out.join("\n")).toContain("changed since");
+
 		// the CI gate over the wire: clean → 0, off-contract publish → 1
 		expect(await run(["check", "--run-dir", runDir], io().io)).toBe(0);
 		await run(
@@ -1294,3 +1324,38 @@ test("up: busy port and failed boot both point at doctor", async () => {
 		rmSync(tmp, { recursive: true, force: true });
 	}
 }, 60_000); // the failed-boot case rides out `up`'s full readiness deadline
+
+// [itest->R-043]
+test("specsStalenessWarning: warns on hash mismatch, skips demo/absent/ctrl-only", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "staleness-"));
+	const iso = "2026-08-08T10:00:00.000Z";
+	// no boot file → skip
+	expect(await specsStalenessWarning(dir)).toBeUndefined();
+	// demo boot → skip
+	writeFileSync(
+		join(dir, "offbook.boot.json"),
+		JSON.stringify({ projectDir: dir, demo: true }),
+	);
+	writeFileSync(
+		join(dir, "offbook.log"),
+		`[offbook] ${iso} boot: bundled demo spec\n`,
+	);
+	expect(await specsStalenessWarning(dir)).toBeUndefined();
+	// project boot, matching hash → no warn
+	const services = "services: {}\n";
+	writeFileSync(join(dir, "services.yaml"), services);
+	writeFileSync(
+		join(dir, "offbook.boot.json"),
+		JSON.stringify({ projectDir: dir }),
+	);
+	const hash = createHash("sha256").update(services).digest("hex");
+	writeFileSync(
+		join(dir, "offbook.log"),
+		`[offbook] ${iso} boot: services.yaml sha256:${hash}\n`,
+	);
+	expect(await specsStalenessWarning(dir)).toBeUndefined();
+	// edited file → warn
+	writeFileSync(join(dir, "services.yaml"), "services: {}\n# edited\n");
+	expect(await specsStalenessWarning(dir)).toContain("restart to apply");
+	rmSync(dir, { recursive: true, force: true });
+});
