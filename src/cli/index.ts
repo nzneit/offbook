@@ -952,7 +952,7 @@ async function cmdCheck(rest: string[], io: Io): Promise<number> {
 
 // --- process management (G14 — runfile, never HTTP) ---
 
-function preflightPort(port: number, flag: string): void {
+function portListenable(port: number): boolean {
 	try {
 		const listener = Bun.listen({
 			hostname: "127.0.0.1",
@@ -960,11 +960,33 @@ function preflightPort(port: number, flag: string): void {
 			socket: { data() {} },
 		});
 		listener.stop(true);
+		return true;
 	} catch {
-		throw new CliError(
-			`port ${port} in use — another broker/server? set ${flag} (P7); \`offbook doctor\` checks all three ports`,
-		);
+		return false;
 	}
+}
+
+// R-043 — evaluate ALL THREE ports before composing the error, and probe a
+// busy ctrl port: "another broker/server?" was a misattribution when the
+// owner is offbook's own demo from another directory (adoption.md §10).
+async function preflightPorts(config: Config): Promise<void> {
+	const candidates = [
+		{ label: "ws", port: config.brokerWsPort, flag: "--ws-port" },
+		{ label: "tcp", port: config.brokerTcpPort, flag: "--tcp-port" },
+		{ label: "ctrl", port: config.controlPlanePort, flag: "--ctrl-port" },
+	];
+	const busy = candidates.filter((c) => !portListenable(c.port));
+	if (busy.length === 0) return;
+	if (
+		busy.some((b) => b.label === "ctrl") &&
+		(await probeOffbook(config.controlPlanePort))
+	)
+		throw new CliError(
+			"an offbook from another directory owns these ports (likely the demo) — run `offbook down` there, or pass --ws-port/--ctrl-port",
+		);
+	throw new CliError(
+		`port(s) in use: ${busy.map((b) => `${b.label} ${b.port}`).join(", ")} — another broker/server? set ${busy.map((b) => b.flag).join("/")} (P7); \`offbook doctor\` checks all three ports`,
+	);
 }
 
 // shared by `up` and `demo --serve` (G14): guards, preflight, boot file,
@@ -996,9 +1018,7 @@ async function launchDetached(
 		io.out(`(reclaiming stale runfile — pid ${existing.run.pid} is gone)`);
 		clearRunfile(runDir);
 	}
-	preflightPort(config.brokerWsPort, "brokerWsPort or --ws-port");
-	preflightPort(config.brokerTcpPort, "brokerTcpPort or --tcp-port");
-	preflightPort(config.controlPlanePort, "controlPlanePort or --ctrl-port");
+	await preflightPorts(config);
 	mkdirSync(runDir, { recursive: true });
 	const bootFile = join(runDir, "offbook.boot.json");
 	await Bun.write(bootFile, JSON.stringify(spec.boot, null, 2));

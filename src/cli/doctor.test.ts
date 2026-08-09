@@ -10,7 +10,7 @@ import { DOCTOR_CHECKS, runDoctor, versionAtLeast } from "./doctor.ts";
 import { run } from "./index.ts";
 import { writeRunfile } from "./runfile.ts";
 
-// ports for this file (repo convention: unique per file): 19130-19133, 12995
+// ports for this file (repo convention: unique per file): 19130-19134, 12995
 
 function ctxWith(over: Partial<DoctorCtx>): DoctorCtx {
 	return {
@@ -338,6 +338,30 @@ test("ports: a busy port fails and names it; free ports pass", async () => {
 		}),
 	);
 	expect(byName(free, "ports").status).toBe("pass");
+});
+
+// [itest->R-043]
+test("ports: a busy ctrl port that answers as offbook attributes it instead of a generic busy detail", async () => {
+	const server = Bun.serve({
+		port: 19134,
+		fetch: () => Response.json({ mode: "passive" }),
+	});
+	try {
+		const attributed = await runDoctor(
+			ctxWith({
+				repoRoot: GOOD_REPO_ROOT,
+				projectDir: projectWith({}),
+				ports: { ws: 19130, tcp: 12995, ctrl: 19134 },
+			}),
+		);
+		const check = byName(attributed, "ports");
+		expect(check.status).toBe("fail");
+		expect(check.detail).toContain(
+			"an offbook from another directory owns these ports",
+		);
+	} finally {
+		server.stop(true);
+	}
 });
 
 test("runfile: absent passes; stale (alive pid, dead port) warns with a `down` hint; live passes as already-up", async () => {

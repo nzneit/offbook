@@ -974,9 +974,36 @@ test("up preflights the ports in the foreground (named fix, no detached EADDRINU
 		),
 	).toBe(1);
 	expect(up.out.join("\n")).toContain("reclaiming stale runfile");
-	expect(up.err.join("\n")).toContain(`port ${CTRL} in use`);
+	expect(up.err.join("\n")).toContain(
+		"an offbook from another directory owns these ports",
+	);
 	expect(up.err.join("\n")).toContain("--ctrl-port");
 	expect(await readRunfile(dir)).toBeUndefined(); // reclaimed; nothing spawned
+});
+
+// [itest->R-043]
+test("up against ports owned by another offbook attributes it instead of 'another broker?'", async () => {
+	const scratch = mkdtempSync(join(tmpdir(), "attr-"));
+	const a = io();
+	expect(
+		await run(
+			[
+				"up",
+				"--run-dir",
+				scratch,
+				"--ws-port",
+				String(WS),
+				"--tcp-port",
+				String(TCP),
+				"--ctrl-port",
+				String(CTRL),
+			],
+			a.io,
+		),
+	).toBe(1);
+	expect(a.err.join("\n")).toContain(
+		"an offbook from another directory owns these ports",
+	);
 });
 
 test("interactive default boots lenient-loud past a bad scenario (autonomous, strict=false); up --strict makes it fatal", async () => {

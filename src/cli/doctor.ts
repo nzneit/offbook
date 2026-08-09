@@ -8,7 +8,7 @@ import { parse as parseYaml } from "yaml";
 import { loadEnvironments, loadServices } from "#src/config/index.ts";
 import { resolveRepoUrl } from "#src/ingestion/index.ts";
 import { gitToplevel } from "./checkout.ts";
-import { resolveRunning } from "./runfile.ts";
+import { probeOffbook, resolveRunning } from "./runfile.ts";
 import { bundledSkillDir, compareSkillTrees } from "./skill.ts";
 
 export type CheckStatus = "pass" | "warn" | "fail";
@@ -327,6 +327,15 @@ const ports: DoctorCheck = {
 		];
 		for (const [label, port] of labeled)
 			if (!(await portFree(port))) busy.push(`${label} ${port}`);
+		if (
+			busy.some((b) => b.startsWith("ctrl")) &&
+			(await probeOffbook(ctx.ports.ctrl))
+		)
+			return {
+				status: "fail",
+				detail: `an offbook from another directory owns these ports (ctrl ${ctx.ports.ctrl} answers as offbook — likely the demo)`,
+				hint: "run `offbook down` in that directory, or pass --ws-port/--ctrl-port to `offbook up`",
+			};
 		return busy.length === 0
 			? {
 					status: "pass",
