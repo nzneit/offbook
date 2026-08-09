@@ -5,7 +5,13 @@
 // error, --dest override + warnings, --dest swallowing a flag as its value.
 // [utest->R-042]
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Io } from "./index.ts";
@@ -126,6 +132,28 @@ test("no positional: outside a git repo errors with a next step; --dest below to
 	const warned = io();
 	expect(await run(["skill", "install", "--dest", ignored], warned.io)).toBe(0);
 	expect(warned.err.join("\n")).toContain("won't propagate");
+});
+
+// [utest->R-042]
+test("--dest naming the toplevel through a symlink: no spurious below-toplevel warning; the genuine below-toplevel case still warns (F13)", async () => {
+	const repo = await tempAppRepo();
+	// `git rev-parse --show-toplevel` returns the physical path; a symlinked
+	// --dest kept the logical path pre-fix, so the two never string-matched
+	// even when --dest names the toplevel exactly (F13)
+	const linkParent = mkdtempSync(join(tmpdir(), "offbook-skill-link-"));
+	const link = join(linkParent, "repo");
+	symlinkSync(repo, link, "dir");
+	const viaSymlink = io();
+	expect(await run(["skill", "install", "--dest", link], viaSymlink.io)).toBe(
+		0,
+	);
+	expect(viaSymlink.err.join("\n")).not.toContain("below the repo toplevel");
+
+	const sub = join(repo, "mock2");
+	mkdirSync(sub, { recursive: true });
+	const below = io();
+	expect(await run(["skill", "install", "--dest", sub], below.io)).toBe(0);
+	expect(below.err.join("\n")).toContain("below the repo toplevel");
 });
 
 test("no positional: installs at the git toplevel resolved from a subdir cwd", async () => {

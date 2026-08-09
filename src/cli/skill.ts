@@ -5,7 +5,7 @@
 // would install where no session looks); --dest is the explicit escape
 // hatch. "Different" = byte-level tree equality, stamp excluded; --force =
 // clean-replace (overlay would orphan old files and jam every compare).
-import { existsSync, rmSync, statSync } from "node:fs";
+import { existsSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 import {
@@ -134,7 +134,11 @@ export async function cmdSkill(rest: string[], io: Io): Promise<number> {
 	if (dest !== undefined) {
 		targetRoot = resolve(dest);
 		const top = await gitToplevel(targetRoot);
-		if (top !== undefined && resolve(top) !== targetRoot)
+		// F13: `git rev-parse --show-toplevel` returns the physical (symlink-
+		// resolved) path while `targetRoot` stays logical — compare realpaths,
+		// not the raw strings, or a repo reached via a symlink spuriously warns
+		// even when --dest names the toplevel exactly.
+		if (top !== undefined && realpathSync(top) !== realpathSync(targetRoot))
 			io.err(
 				"⚠ --dest is below the repo toplevel — a Claude Code session at the repo root won't discover a skill installed here",
 			);
