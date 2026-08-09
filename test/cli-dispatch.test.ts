@@ -1359,3 +1359,40 @@ test("specsStalenessWarning: warns on hash mismatch, skips demo/absent/ctrl-only
 	expect(await specsStalenessWarning(dir)).toContain("restart to apply");
 	rmSync(dir, { recursive: true, force: true });
 });
+
+test("specsStalenessWarning: skips gracefully on no boot line, malformed JSON, or unreadable services", async () => {
+	// case 1: valid project boot, but log has no boot line (only ws-connect) → skip
+	const dir1 = mkdtempSync(join(tmpdir(), "staleness-no-boot-line-"));
+	const iso = "2026-08-08T10:00:00.000Z";
+	writeFileSync(
+		join(dir1, "offbook.boot.json"),
+		JSON.stringify({ projectDir: dir1 }),
+	);
+	writeFileSync(
+		join(dir1, "offbook.log"),
+		`[offbook] ${iso} ws-connect {"clientId":"browser-1"}\n`,
+	);
+	expect(await specsStalenessWarning(dir1)).toBeUndefined();
+	rmSync(dir1, { recursive: true, force: true });
+
+	// case 2: malformed JSON in boot file → skip
+	const dir2 = mkdtempSync(join(tmpdir(), "staleness-bad-json-"));
+	writeFileSync(join(dir2, "offbook.boot.json"), "{bad json");
+	expect(await specsStalenessWarning(dir2)).toBeUndefined();
+	rmSync(dir2, { recursive: true, force: true });
+
+	// case 3: services.yaml missing (deleted) since boot → warns (no skip; missing counts as changed)
+	const dir3 = mkdtempSync(join(tmpdir(), "staleness-missing-services-"));
+	const realContent = "services: {}\n";
+	const realHash = createHash("sha256").update(realContent).digest("hex");
+	writeFileSync(
+		join(dir3, "offbook.boot.json"),
+		JSON.stringify({ projectDir: dir3 }),
+	);
+	writeFileSync(
+		join(dir3, "offbook.log"),
+		`[offbook] ${iso} boot: services.yaml sha256:${realHash}\n`,
+	);
+	expect(await specsStalenessWarning(dir3)).toContain("restart to apply");
+	rmSync(dir3, { recursive: true, force: true });
+});
