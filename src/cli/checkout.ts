@@ -4,6 +4,7 @@
 // for skill install's destination/propagation checks. CLI-local; git runs
 // via Bun.spawn with stderr ignored — a missing git or non-repo degrades to
 // undefined/"unknown", never a crash.
+import { realpathSync } from "node:fs";
 import { join } from "node:path";
 
 export function repoRoot(): string {
@@ -25,7 +26,22 @@ async function git(args: string[], cwd: string): Promise<string | undefined> {
 	}
 }
 
+// F14 — `git rev-parse --show-toplevel` walks up to any enclosing repo, so an
+// offbook checkout unpacked (not cloned) inside a repo of its own would
+// otherwise stamp that outer repo's sha/origin as its provenance. Only trust
+// git state when `root` IS the repo's toplevel, not merely inside one.
+async function isRepoRoot(root: string): Promise<boolean> {
+	const top = await gitToplevel(root);
+	if (top === undefined) return false;
+	try {
+		return realpathSync(top) === realpathSync(root);
+	} catch {
+		return false;
+	}
+}
+
 export async function checkoutCommit(root = repoRoot()): Promise<string> {
+	if (!(await isRepoRoot(root))) return "unknown";
 	const sha = await git(["rev-parse", "--short", "HEAD"], root);
 	if (sha === undefined) return "unknown";
 	const dirty = await git(["status", "--porcelain"], root);
@@ -40,6 +56,7 @@ export async function checkoutCommit(root = repoRoot()): Promise<string> {
 export async function checkoutOrigin(
 	root = repoRoot(),
 ): Promise<string | undefined> {
+	if (!(await isRepoRoot(root))) return undefined;
 	const url = await git(["remote", "get-url", "origin"], root);
 	if (url === undefined) return undefined;
 	try {

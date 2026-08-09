@@ -3,7 +3,7 @@
 // (its dirty state would flake the assertions).
 // [utest->R-042]
 import { expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -90,6 +90,26 @@ test("checkoutOrigin: strips userinfo from a credentialed remote; scp-like remot
 		"git@git.example.com:org/offbook.git",
 	);
 	expect(await checkoutOrigin(scp)).toBe("git@git.example.com:org/offbook.git");
+});
+
+// [utest->R-042]
+test("checkoutCommit/checkoutOrigin: unknown/undefined when the dir is inside a repo but isn't its toplevel (F14)", async () => {
+	const outer = await tempRepo();
+	await sh(
+		outer,
+		"git",
+		"remote",
+		"add",
+		"origin",
+		"https://git.example.com/outer/repo.git",
+	);
+	// an offbook-shaped dir with no .git of its own, unpacked inside the
+	// outer repo's tree — `git rev-parse --show-toplevel` from here walks up
+	// to `outer`, which must NOT be mistaken for this dir's own provenance
+	const offbookShaped = join(outer, "tools", "offbook");
+	mkdirSync(offbookShaped, { recursive: true });
+	expect(await checkoutCommit(offbookShaped)).toBe("unknown");
+	expect(await checkoutOrigin(offbookShaped)).toBeUndefined();
 });
 
 test("gitToplevel resolves from a subdir; gitIgnored honors .gitignore", async () => {
