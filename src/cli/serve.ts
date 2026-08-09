@@ -41,6 +41,19 @@ const log = (line: string) =>
 try {
 	const boot = JSON.parse(await Bun.file(bootPath).text()) as BootFile;
 	const config = loadConfig(boot.config);
+	// F8 — read once, BEFORE boot: the hash below must reflect exactly what
+	// bootProject loaded, not a second read of a file a slow (git-fetching)
+	// boot had time to edit or delete out from under it. `existsSync` mirrors
+	// bootProject's own missing-file check, so a genuinely-absent services.yaml
+	// still surfaces bootProject's friendly "run `offbook init`" fatal error
+	// instead of a raw read failure here.
+	const servicesPath = join(boot.projectDir, "services.yaml");
+	const servicesText =
+		boot.demo === true
+			? undefined
+			: existsSync(servicesPath)
+				? await Bun.file(servicesPath).text()
+				: undefined;
 	const composed =
 		boot.demo === true
 			? await bootDemo({ config, log })
@@ -54,12 +67,15 @@ try {
 	// R-043 — the boot line (adoption.md §10): every startup logs what it
 	// loaded. Double duty: `status` scopes connect counts to lines after the
 	// LAST boot line; `specs update` compares this hash against the current
-	// services.yaml to warn on silent staleness.
+	// services.yaml to warn on silent staleness. F8 — logged synchronously
+	// right after `start()` resolves (no await between) so a client that
+	// reconnects the instant ports open can never land in the log before this
+	// line and be excluded from "this run" (adoption.md §10).
 	if (boot.demo === true) log("boot: bundled demo spec");
 	else
 		log(
 			`boot: services.yaml sha256:${createHash("sha256")
-				.update(await Bun.file(join(boot.projectDir, "services.yaml")).text())
+				.update(servicesText ?? "")
 				.digest("hex")}`,
 		);
 	const ports = {
