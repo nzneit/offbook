@@ -57,5 +57,5 @@ them, and run the named verification after every step.
 - `offbook doctor` warns the installed skill differs from the bundled one:
   run `offbook skill install --force` from the repo root to refresh it.
 - `offbook up` reports ports owned by an offbook in another directory:
-  run `offbook down` in that directory (likely the demo), or pass
-  `--ws-port`/`--ctrl-port`.
+  the error says "an offbook from another directory owns these ports
+  (likely the demo) — run `offbook down` there, or pass --ws-port/--ctrl-port".
