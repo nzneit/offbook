@@ -55,7 +55,10 @@ them, and run the named verification after every step.
 ## Refusals you may hit
 
 - `offbook doctor` warns the installed skill differs from the bundled one:
-  run `offbook skill install --force` from the repo root to refresh it.
+  run `offbook skill install` (no `--force`) from the repo root and show the
+  human the drift listing it prints. Local edits are drift — upstream
+  anything worth keeping, then re-run with `offbook skill install --force`
+  only once the human approves the clean-replace.
 - `offbook up` reports the control port owned by an offbook in another
   directory: the error says "another offbook owns the control port `<n>`;
   also busy: `<other labels>` — `offbook down` in that project's directory
