@@ -4,7 +4,8 @@
 // bare `[word]` names a subcommand iff the two-token form is in VERB_FORMS.
 // [utest->R-042]
 import { expect, test } from "bun:test";
-import { DISPATCH_VERBS, USAGE } from "#src/cli/index.ts";
+import { DISPATCH_VERBS, SPECS_SUBCOMMANDS, USAGE } from "#src/cli/index.ts";
+import { SKILL_SUBCOMMANDS } from "#src/cli/skill.ts";
 import { SUBCOMMAND_FIRST_TOKENS, VERB_FORMS } from "#src/cli/verbs.ts";
 
 const firstTokens = [...new Set(VERB_FORMS.map((f) => f.split(" ")[0]))];
@@ -12,6 +13,28 @@ const usageVerbLines = USAGE.split("\n").filter((l) => /^ {2}\S/.test(l));
 
 test("VERB_FORMS first tokens ≡ dispatch verbs", () => {
 	expect(firstTokens.sort()).toEqual([...DISPATCH_VERBS].sort());
+});
+
+// F17 — two-token VERB_FORMS entries must be real dispatch subcommands, not
+// just docs-to-docs (previously only checked against USAGE, below). Each
+// owning module exports its own real subcommand set (src/cli/verbs.ts stays
+// a leaf and imports neither).
+const OWNING_SUBCOMMANDS: Record<string, readonly string[]> = {
+	specs: SPECS_SUBCOMMANDS,
+	skill: SKILL_SUBCOMMANDS,
+};
+
+test("two-token VERB_FORMS entries are real subcommands of the owning module", () => {
+	for (const form of VERB_FORMS) {
+		const [first, second] = form.split(" ");
+		if (second === undefined) continue;
+		const subs = OWNING_SUBCOMMANDS[first];
+		expect(subs, `no exported subcommand set for '${first}'`).toBeDefined();
+		expect(
+			subs,
+			`'${form}' is not a real dispatch subcommand of '${first}'`,
+		).toContain(second);
+	}
 });
 
 test("every VERB_FORM appears in USAGE", () => {

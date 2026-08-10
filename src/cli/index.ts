@@ -696,6 +696,11 @@ export async function specsStalenessWarning(
 		: "⚠ services.yaml changed since `offbook up` — restart to apply";
 }
 
+// F17 — see src/cli/skill.ts's SKILL_SUBCOMMANDS: the real subcommand this
+// verb dispatches (rest[0] === "update" below), exported for the same
+// reason — pin two-token VERB_FORMS entries against the dispatch, not USAGE.
+export const SPECS_SUBCOMMANDS: readonly string[] = ["update"];
+
 async function cmdSpecs(rest: string[], io: Io): Promise<number> {
 	const update = rest[0] === "update";
 	const { values } = parseFlags(update ? rest.slice(1) : rest, {

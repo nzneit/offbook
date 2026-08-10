@@ -21,6 +21,11 @@ import type { Io } from "./index.ts";
 const SKILL_NAME = "offbook-onboard";
 const STAMP = ".installed-from";
 
+// F17 — the real subcommand this module dispatches (see cmdSkill below),
+// exported so the verb-forms gate can pin two-token VERB_FORMS entries
+// against the actual dispatch rather than docs-to-docs (USAGE alone).
+export const SKILL_SUBCOMMANDS: readonly string[] = ["install"];
+
 export function bundledSkillDir(): string {
 	return join(repoRoot(), "skills", SKILL_NAME);
 }
