@@ -18,6 +18,31 @@ export const runfilePath = (runDir: string): string =>
 	join(runDir, "offbook.run");
 export const logPath = (runDir: string): string => join(runDir, "offbook.log");
 
+// D-030 — offbook.log IS a parse surface (the R-043 status/staleness parsers,
+// demo-app's fingerprint proxy), and a color-forcing parent shell would make
+// Bun ANSI-wrap every console line the detached server writes there. Both
+// server spawn sites (launchDetached, the --watch respawn) pass this env.
+// Deleting FORCE_COLOR is the load-bearing half — Bun gives it precedence
+// over NO_COLOR, so asserting NO_COLOR alone would not stop the wrapping;
+// CLICOLOR_FORCE covers deps honoring the BSD convention. NO_COLOR=1 covers
+// deps honoring the no-color.org convention, but the `debug` family does
+// not: DEBUG_COLORS takes precedence and NO_COLOR is never consulted, and
+// mqtt-packet (a direct aedes dependency, in the server's runtime graph) is
+// debug-instrumented — so DEBUG_COLORS is deleted too. DEBUG itself passes
+// through: a debug-logging run still works, uncolored (debug falls back to
+// isatty(stderr), false for the redirected log). In-process handlers
+// inherit this env by design: their console output lands in the same log.
+export function logSafeEnv(
+	parent: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+	const env = { ...parent };
+	delete env.FORCE_COLOR;
+	delete env.CLICOLOR_FORCE;
+	delete env.DEBUG_COLORS;
+	env.NO_COLOR = "1";
+	return env;
+}
+
 export async function readRunfile(
 	runDir: string,
 ): Promise<Runfile | undefined> {

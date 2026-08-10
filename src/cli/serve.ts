@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { loadConfig } from "#src/config/index.ts";
 import type { Config } from "#src/model/index.ts";
 import { bootDemo, bootProject } from "./boot.ts";
-import { logPath, writeRunfile } from "./runfile.ts";
+import { logPath, logSafeEnv, writeRunfile } from "./runfile.ts";
 
 interface BootFile {
 	projectDir: string;
@@ -116,6 +116,9 @@ try {
 				const child = spawn(process.execPath, [process.argv[1], bootPath], {
 					detached: true,
 					stdio: ["ignore", fd, fd],
+					// D-030 — belt-and-braces: launchDetached already sanitized this
+					// process's env, but the respawn must not depend on that
+					env: logSafeEnv(),
 				});
 				child.unref();
 				if (child.pid !== undefined)

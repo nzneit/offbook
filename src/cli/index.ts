@@ -36,6 +36,7 @@ import { runDoctor } from "./doctor.ts";
 import {
 	clearRunfile,
 	logPath,
+	logSafeEnv,
 	pidAlive,
 	probeOffbook,
 	readRunfile,
@@ -1044,6 +1045,7 @@ async function launchDetached(
 	const child = spawn(process.execPath, [serveEntry, bootFile], {
 		detached: true,
 		stdio: ["ignore", logFd, logFd],
+		env: logSafeEnv(), // D-030 — the log must stay ANSI-clean
 	});
 	closeSync(logFd);
 	child.unref();

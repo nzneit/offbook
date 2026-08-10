@@ -80,6 +80,19 @@ test("demo --serve: detached boot, fingerprint line in offbook.log, down cleans 
 	];
 	const out: string[] = [];
 	const errs: string[] = [];
+	// D-030 — plant a color-forcing shell around the REAL detached spawn: Bun
+	// would otherwise ANSI-wrap every console line the server writes into
+	// offbook.log (ESC[0m ESC[31m … ESC[0m), breaking every parser this test
+	// exercises below. launchDetached must sanitize the child env. The plant
+	// covers both Bun's own FORCE_COLOR wrapping and the debug-package
+	// convention (DEBUG_COLORS beats NO_COLOR; mqtt-packet in aedes's graph
+	// is debug-instrumented).
+	const priorForceColor = process.env.FORCE_COLOR;
+	const priorDebug = process.env.DEBUG;
+	const priorDebugColors = process.env.DEBUG_COLORS;
+	process.env.FORCE_COLOR = "3";
+	process.env.DEBUG = "*";
+	process.env.DEBUG_COLORS = "1";
 	try {
 		const code = await run(["demo", "--serve", ...flags], {
 			out: (l) => out.push(l),
@@ -110,6 +123,11 @@ test("demo --serve: detached boot, fingerprint line in offbook.log, down cleans 
 			if (logged.includes("ws-connect ")) break;
 			await new Promise((r) => setTimeout(r, 100));
 		}
+		// [itest->R-043] D-030: the planted FORCE_COLOR above must not reach the
+		// log as ANSI — the status/staleness parsers and the fingerprint weld
+		// read these raw bytes
+		expect(logged).not.toContain(String.fromCharCode(27)); // ESC, 0x1b
+
 		const line = logged
 			.split("\n")
 			.find((l) => l.includes("ws-connect ") && l.includes("demo-serve-probe"));
@@ -155,6 +173,12 @@ test("demo --serve: detached boot, fingerprint line in offbook.log, down cleans 
 			}),
 		).toBe(0);
 	} finally {
+		if (priorForceColor === undefined) delete process.env.FORCE_COLOR;
+		else process.env.FORCE_COLOR = priorForceColor;
+		if (priorDebug === undefined) delete process.env.DEBUG;
+		else process.env.DEBUG = priorDebug;
+		if (priorDebugColors === undefined) delete process.env.DEBUG_COLORS;
+		else process.env.DEBUG_COLORS = priorDebugColors;
 		const leftover = await readRunfile(runDir);
 		if (leftover) {
 			try {
