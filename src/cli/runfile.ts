@@ -24,8 +24,7 @@ export const logPath = (runDir: string): string => join(runDir, "offbook.log");
 // server spawn sites (launchDetached, the --watch respawn) pass this env.
 // Deleting FORCE_COLOR is the load-bearing half — Bun gives it precedence
 // over NO_COLOR, so asserting NO_COLOR alone would not stop the wrapping;
-// CLICOLOR_FORCE covers deps honoring the BSD convention, and NO_COLOR=1
-// covers deps that colorize non-TTY output by default. NO_COLOR=1 covers
+// CLICOLOR_FORCE covers deps honoring the BSD convention. NO_COLOR=1 covers
 // deps honoring the no-color.org convention, but the `debug` family does
 // not: DEBUG_COLORS takes precedence and NO_COLOR is never consulted, and
 // mqtt-packet (a direct aedes dependency, in the server's runtime graph) is
