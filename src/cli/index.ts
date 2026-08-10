@@ -653,10 +653,10 @@ function renderSpecs(
 
 // R-043 — services.yaml edited after `up` (adoption.md §10): compare the
 // current file's hash against the LAST boot line. Skips silently (no warn
-// possible, none owed) when: no run dir was involved (bare --ctrl-port),
-// the last boot was the bundled demo, or no boot line exists (pre-R-043
-// log). Today the edit silently never applies while "specs refreshed"
-// prints success.
+// possible, none owed) when: --ctrl-port is passed (the target server's run
+// dir correspondence is unverified), the last boot was the bundled demo, or
+// no boot line exists (pre-R-043 log). Today the edit silently never applies
+// while "specs refreshed" prints success.
 export async function specsStalenessWarning(
 	runDir: string,
 ): Promise<string | undefined> {
