@@ -328,6 +328,17 @@ test("checkSkillLinks: intra-skill only", () => {
 	expect(checkSkillLinks(at("[web](https://example.com)"))).toEqual([]);
 });
 
+// F15 — the resolution clause (existsSync) must actually be exercised: a
+// real intra-skill file resolves clean, a missing one is flagged exactly
+// once. Both cases resolve relative to SKILL.md's own directory.
+test("checkSkillLinks: exercises real link resolution (pass and fail)", () => {
+	const at = (text: string) => [{ path: "skills/offbook-onboard/SKILL.md", text }];
+	expect(checkSkillLinks(at("[me](SKILL.md)"))).toEqual([]);
+	const errs = checkSkillLinks(at("[gone](missing.md)"));
+	expect(errs).toHaveLength(1);
+	expect(errs[0]).toContain("broken link");
+});
+
 test("checkSkillFrontmatter: name must match the install dir", () => {
 	expect(checkSkillFrontmatter("---\nname: offbook-onboard\ndescription: x\n---\nbody")).toEqual([]);
 	expect(checkSkillFrontmatter("---\nname: onboard\ndescription: x\n---\n")).toHaveLength(1);
