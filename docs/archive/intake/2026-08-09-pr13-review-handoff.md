@@ -1,5 +1,5 @@
 # 2026-08-09: PR 13 review fix handoff (intake)
-**Status**: open
+**Status**: resolved (D-029, 2026-08-10)
 **Owner**: whichever agent picks up the fix pass on `embedding-onboarding` (PR 13)
 
 **Companion to:** `docs/specs/adoption.md` §8–§10 (canonical for the embedding surface; where an item says "fix the spec", the shipped behavior was judged correct and the spec text is the odd one out), `REQUIREMENTS.md` (R-041–R-043), `DECISIONS.md` (D-028), `skills/offbook-onboard/SKILL.md` (derived: contracts > guides > skill).
