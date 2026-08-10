@@ -527,6 +527,38 @@ test("doctor skill check: dest is a file (degenerate install) warns instead of c
 	expect(report.ok).toBe(true); // warn never fails doctor
 });
 
+// [utest->R-042]
+test("doctor skill check: a non-directory .claude ancestor warns (names the blocking path), never crashes runDoctor (follow-up, F2's genre)", async () => {
+	const repo = mkdtempSync(join(tmpdir(), "doctor-skill-ancestor-"));
+	const git = async (...args: string[]) => {
+		const p = Bun.spawn(["git", ...args], {
+			cwd: repo,
+			stdout: "ignore",
+			stderr: "ignore",
+			env: {
+				...process.env,
+				GIT_AUTHOR_NAME: "t",
+				GIT_AUTHOR_EMAIL: "t@t",
+				GIT_COMMITTER_NAME: "t",
+				GIT_COMMITTER_EMAIL: "t@t",
+			},
+		});
+		expect(await p.exited).toBe(0);
+	};
+	await git("init", "-q", "-b", "main");
+	const claudePath = join(repo, ".claude");
+	writeFileSync(claudePath, "not a directory\n");
+
+	const report = await runDoctor(
+		ctxWith({ repoRoot: GOOD_REPO_ROOT, projectDir: repo }),
+	);
+	expect(report.checks).toHaveLength(8);
+	const skill = byName(report, "skill");
+	expect(skill.status).toBe("warn");
+	expect(skill.detail).toContain(claudePath);
+	expect(report.ok).toBe(true); // warn never fails doctor
+});
+
 test("`offbook doctor` verb: --json shape, exit codes, USAGE listing", async () => {
 	const outLines: string[] = [];
 	const io = { out: (l: string) => outLines.push(l), err: () => {} };

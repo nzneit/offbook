@@ -112,6 +112,48 @@ test("degenerate dest (a file, not a directory): refuses without --force, cleans
 });
 
 // [utest->R-042]
+test("a non-directory .claude ancestor is refused in both modes (follow-up, F2's genre): --force does not delete a shared Claude Code dir", async () => {
+	const repo = await tempAppRepo();
+	const claudePath = join(repo, ".claude");
+	writeFileSync(claudePath, "not a directory\n");
+
+	const refused = io();
+	expect(await run(["skill", "install", "--dest", repo], refused.io)).toBe(1);
+	expect(refused.err.join("\n")).toContain(claudePath);
+
+	const forced = io();
+	expect(
+		await run(["skill", "install", "--dest", repo, "--force"], forced.io),
+	).toBe(1);
+	expect(forced.err.join("\n")).toContain(claudePath);
+	expect(forced.err.join("\n")).toContain("is not offbook's to replace");
+
+	// untouched — refusal happens before any filesystem mutation
+	expect(await Bun.file(claudePath).text()).toBe("not a directory\n");
+});
+
+// [utest->R-042]
+test("a non-directory .claude/skills ancestor (the second ancestor) is likewise refused in both modes", async () => {
+	const repo = await tempAppRepo();
+	mkdirSync(join(repo, ".claude"));
+	const skillsPath = join(repo, ".claude", "skills");
+	writeFileSync(skillsPath, "not a directory\n");
+
+	const refused = io();
+	expect(await run(["skill", "install", "--dest", repo], refused.io)).toBe(1);
+	expect(refused.err.join("\n")).toContain(skillsPath);
+
+	const forced = io();
+	expect(
+		await run(["skill", "install", "--dest", repo, "--force"], forced.io),
+	).toBe(1);
+	expect(forced.err.join("\n")).toContain(skillsPath);
+	expect(forced.err.join("\n")).toContain("is not offbook's to replace");
+
+	expect(await Bun.file(skillsPath).text()).toBe("not a directory\n");
+});
+
+// [utest->R-042]
 test("--dest to a plain (non-repo) dir warns and proceeds, unlike the no-dest path (F19)", async () => {
 	const plain = mkdtempSync(join(tmpdir(), "offbook-skill-plain-"));
 	const a = io();

@@ -9,7 +9,11 @@ import { loadEnvironments, loadServices } from "#src/config/index.ts";
 import { resolveRepoUrl } from "#src/ingestion/index.ts";
 import { gitToplevel } from "./checkout.ts";
 import { probeOffbook, resolveRunning } from "./runfile.ts";
-import { bundledSkillDir, compareSkillTrees } from "./skill.ts";
+import {
+	blockingAncestor,
+	bundledSkillDir,
+	compareSkillTrees,
+} from "./skill.ts";
 
 export type CheckStatus = "pass" | "warn" | "fail";
 
@@ -384,6 +388,19 @@ const skillCheck: DoctorCheck = {
 				detail: "not in a git repo (no skill to check)",
 			};
 		const installed = join(top, ".claude", "skills", "offbook-onboard");
+		// F-followup (2026-08-10) — a `.claude`/`.claude/skills` ancestor that's
+		// a regular file makes existsSync(installed) false too (an ancestor
+		// component isn't a directory), so the not-installed pass below used to
+		// fire and hide that install is impossible. Warn-never-fail still
+		// applies; unlike the other warn states here, --force can't recover
+		// this one (skill.ts's blockingAncestor guard refuses it in both
+		// modes — `.claude` is not offbook's to replace).
+		const blocking = blockingAncestor(installed, top);
+		if (blocking !== undefined)
+			return {
+				status: "warn",
+				detail: `${blocking} exists and is not a directory — \`offbook skill install\` cannot install here (move or remove it yourself; --force does not apply)`,
+			};
 		if (!existsSync(installed))
 			return {
 				status: "pass",

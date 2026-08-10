@@ -63,6 +63,26 @@ function isWithinRoot(child: string, root: string): boolean {
 	return child === root || child.startsWith(root + sep);
 }
 
+// F-followup (2026-08-10, F2's genre) — a `.claude` or `.claude/skills`
+// ancestor of `dest` that exists as a regular FILE, not a directory:
+// `existsSync(dest)` is false (an ancestor component isn't a directory), so
+// the dest-itself guard below never fires and `copySkill` crashes mid-write
+// with a raw ENOTDIR. Walk the ancestors strictly between `root` and `dest`
+// (top-down) and report the first one that exists but isn't a directory, so
+// the caller can refuse before ever touching the filesystem.
+export function blockingAncestor(
+	dest: string,
+	root: string,
+): string | undefined {
+	const ancestors: string[] = [];
+	let p = dirname(dest);
+	while (p !== root && p !== dirname(p)) {
+		ancestors.unshift(p);
+		p = dirname(p);
+	}
+	return ancestors.find((a) => existsSync(a) && !statSync(a).isDirectory());
+}
+
 async function listFiles(dir: string): Promise<string[]> {
 	return (
 		await Array.fromAsync(new Bun.Glob("**/*").scan({ cwd: dir, dot: true }))
@@ -188,6 +208,20 @@ export async function cmdSkill(rest: string[], io: Io): Promise<number> {
 	if (!existsSync(srcDir))
 		throw new CliError(
 			`skill install: bundled skill missing at ${srcDir} — the offbook checkout looks incomplete`,
+		);
+
+	// F-followup (2026-08-10) — refuse-always: a `.claude`/`.claude/skills`
+	// ancestor of destDir that's a regular file crashes copySkill with a raw
+	// ENOTDIR in both modes (the dest-itself guard below never fires, since
+	// existsSync(destDir) is false when an ancestor isn't a directory).
+	// Unlike the offbook-owned skill leaf (which F2's guard below DOES clean-
+	// replace with --force), `.claude` is Claude Code's own shared config
+	// dir — a file there is a user artifact offbook refuses to destroy, so
+	// --force does NOT apply here, in either mode.
+	const blocking = blockingAncestor(destDir, targetRoot);
+	if (blocking !== undefined)
+		throw new CliError(
+			`skill install: ${blocking} exists and is not a directory — move or remove it yourself before installing; --force does not apply: ${blocking} is not offbook's to replace`,
 		);
 
 	// F9 — `.claude` (or an ancestor of it) may itself be a symlink, e.g. a
