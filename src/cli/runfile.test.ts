@@ -4,9 +4,11 @@
 // (e.g. accepting any 200 response) would make offbook falsely accuse an
 // unrelated dev server of "owning" the port — the exact lie R-043 exists to
 // prevent — so the shape check and the timeout bound are pinned directly.
+// Also logSafeEnv (D-030): the env guard both server spawn sites use to keep
+// offbook.log free of ANSI, which the R-043 parsers read as raw bytes.
 // [utest->R-043]
 import { expect, test } from "bun:test";
-import { probeOffbook } from "./runfile.ts";
+import { logSafeEnv, probeOffbook } from "./runfile.ts";
 
 // ports for this file (repo convention: unique per file): 19960-19964
 
@@ -64,4 +66,34 @@ test("probeOffbook: a {mode: autonomous} responder is also attributed as live", 
 
 test("probeOffbook: nothing listening (connection refused) is not attributed as offbook", async () => {
 	expect(await probeOffbook(19964)).toBe(false);
+});
+
+test("logSafeEnv: strips the color-forcing vars, asserts NO_COLOR, passes the rest through", () => {
+	const parent = {
+		FORCE_COLOR: "3",
+		CLICOLOR_FORCE: "1",
+		PATH: "/usr/bin",
+		TERM: "xterm-256color",
+	};
+	const env = logSafeEnv(parent);
+	// deleting FORCE_COLOR is the load-bearing half: Bun gives it precedence
+	// over NO_COLOR, so NO_COLOR=1 alone would not stop the ANSI wrapping
+	expect("FORCE_COLOR" in env).toBe(false);
+	expect("CLICOLOR_FORCE" in env).toBe(false);
+	expect(env.NO_COLOR).toBe("1");
+	expect(env.PATH).toBe("/usr/bin");
+	expect(env.TERM).toBe("xterm-256color");
+});
+
+test("logSafeEnv: never mutates the parent env it copies from", () => {
+	const parent = { FORCE_COLOR: "3", HOME: "/home/x" };
+	logSafeEnv(parent);
+	expect(parent).toEqual({ FORCE_COLOR: "3", HOME: "/home/x" });
+});
+
+test("logSafeEnv: a clean parent gains only NO_COLOR", () => {
+	expect(logSafeEnv({ PATH: "/usr/bin" })).toEqual({
+		PATH: "/usr/bin",
+		NO_COLOR: "1",
+	});
 });
