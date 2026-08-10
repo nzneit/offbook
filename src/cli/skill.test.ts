@@ -111,6 +111,19 @@ test("degenerate dest (a file, not a directory): refuses without --force, cleans
 	expect(existsSync(join(DEST(repo), "SKILL.md"))).toBe(true);
 });
 
+// [utest->R-042]
+test("--dest to a plain (non-repo) dir warns and proceeds, unlike the no-dest path (F19)", async () => {
+	const plain = mkdtempSync(join(tmpdir(), "offbook-skill-plain-"));
+	const a = io();
+	expect(await run(["skill", "install", "--dest", plain], a.io)).toBe(0);
+	expect(a.err.join("\n")).toContain(
+		"not inside a git repo — the skill cannot propagate",
+	);
+	expect(
+		existsSync(join(plain, ".claude", "skills", "offbook-onboard", "SKILL.md")),
+	).toBe(true);
+});
+
 test("no positional: outside a git repo errors with a next step; --dest below toplevel and gitignored targets warn", async () => {
 	const noRepo = mkdtempSync(join(tmpdir(), "offbook-norepo-"));
 	const prev = process.cwd();
