@@ -72,6 +72,8 @@ test("logSafeEnv: strips the color-forcing vars, asserts NO_COLOR, passes the re
 	const parent = {
 		FORCE_COLOR: "3",
 		CLICOLOR_FORCE: "1",
+		DEBUG_COLORS: "1",
+		DEBUG: "*",
 		PATH: "/usr/bin",
 		TERM: "xterm-256color",
 	};
@@ -80,9 +82,13 @@ test("logSafeEnv: strips the color-forcing vars, asserts NO_COLOR, passes the re
 	// over NO_COLOR, so NO_COLOR=1 alone would not stop the ANSI wrapping
 	expect("FORCE_COLOR" in env).toBe(false);
 	expect("CLICOLOR_FORCE" in env).toBe(false);
+	expect("DEBUG_COLORS" in env).toBe(false);
 	expect(env.NO_COLOR).toBe("1");
 	expect(env.PATH).toBe("/usr/bin");
 	expect(env.TERM).toBe("xterm-256color");
+	// DEBUG itself is functional (which lines get logged), not a color
+	// switch — it must pass through so a debug-logging run keeps working
+	expect(env.DEBUG).toBe("*");
 });
 
 test("logSafeEnv: never mutates the parent env it copies from", () => {
@@ -96,4 +102,13 @@ test("logSafeEnv: a clean parent gains only NO_COLOR", () => {
 		PATH: "/usr/bin",
 		NO_COLOR: "1",
 	});
+});
+
+test("both server spawn sites pass logSafeEnv — inheritance masks a dropped guard, so pin the source (D-030)", async () => {
+	for (const file of ["index.ts", "serve.ts"]) {
+		const src = await Bun.file(new URL(file, import.meta.url)).text();
+		const spawns = src.split("spawn(process.execPath").length - 1;
+		expect(spawns).toBeGreaterThan(0);
+		expect(src.split("env: logSafeEnv()").length - 1).toBe(spawns);
+	}
 });
