@@ -120,6 +120,34 @@ test("demo --serve: detached boot, fingerprint line in offbook.log, down cleans 
 			parseFingerprintLines(logged, "demo-serve-probe")?.connect,
 		).toBeDefined();
 
+		// [itest->R-043]
+		expect(logged).toMatch(/\] .*boot: bundled demo spec/);
+
+		// [itest->R-043] F7: nonzero clients line + status --json, end-to-end
+		const stOut: string[] = [];
+		expect(
+			await run(["status", "--run-dir", runDir], {
+				out: (l) => stOut.push(l),
+				err: () => {},
+			}),
+		).toBe(0);
+		expect(stOut.join("\n")).toContain(
+			"clients: 1 connect(s) this run · last demo-serve-probe at ",
+		);
+
+		const stJsonOut: string[] = [];
+		expect(
+			await run(["status", "--run-dir", runDir, "--json"], {
+				out: (l) => stJsonOut.push(l),
+				err: () => {},
+			}),
+		).toBe(0);
+		const stJson = JSON.parse(stJsonOut.join("\n")) as {
+			clients: { connects: number; last?: { clientId: string; at: string } };
+		};
+		expect(stJson.clients.connects).toBe(1);
+		expect(typeof stJson.clients.last?.clientId).toBe("string");
+
 		expect(
 			await run(["down", "--run-dir", runDir], {
 				out: () => {},

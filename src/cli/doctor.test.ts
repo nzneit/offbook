@@ -2,7 +2,7 @@
 // names a next step (docs/specs/adoption.md §3).
 // [utest->R-035]
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { DoctorCtx, DoctorReport } from "./doctor.ts";
@@ -10,7 +10,7 @@ import { DOCTOR_CHECKS, runDoctor, versionAtLeast } from "./doctor.ts";
 import { run } from "./index.ts";
 import { writeRunfile } from "./runfile.ts";
 
-// ports for this file (repo convention: unique per file): 19130-19133, 12995
+// ports for this file (repo convention: unique per file): 19130-19135, 12995
 
 function ctxWith(over: Partial<DoctorCtx>): DoctorCtx {
 	return {
@@ -340,6 +340,57 @@ test("ports: a busy port fails and names it; free ports pass", async () => {
 	expect(byName(free, "ports").status).toBe("pass");
 });
 
+// [itest->R-043]
+test("ports: a busy ctrl port that answers as offbook attributes it instead of a generic busy detail", async () => {
+	const server = Bun.serve({
+		port: 19134,
+		fetch: () => Response.json({ mode: "passive" }),
+	});
+	try {
+		const attributed = await runDoctor(
+			ctxWith({
+				repoRoot: GOOD_REPO_ROOT,
+				projectDir: projectWith({}),
+				ports: { ws: 19130, tcp: 12995, ctrl: 19134 },
+			}),
+		);
+		const check = byName(attributed, "ports");
+		expect(check.status).toBe("fail");
+		expect(check.detail).toContain("another offbook owns the control port");
+		expect(check.detail).not.toContain("owns these ports");
+		expect(check.detail).not.toContain("likely the demo");
+	} finally {
+		server.stop(true);
+	}
+});
+
+// F5 — the branch that must NOT attribute: a foreign (non-offbook) listener
+// on the ctrl port fails probeOffbook's mode-shape check, so doctor must
+// fall back to the generic busy detail, not claim another offbook owns it.
+// [itest->R-043]
+test("ports: a busy ctrl port held by a foreign listener falls back to the generic busy detail", async () => {
+	const server = Bun.serve({
+		port: 19135,
+		fetch: () => Response.json({ ok: true }), // no `mode` field: not offbook
+	});
+	try {
+		const foreign = await runDoctor(
+			ctxWith({
+				repoRoot: GOOD_REPO_ROOT,
+				projectDir: projectWith({}),
+				ports: { ws: 19130, tcp: 12995, ctrl: 19135 },
+			}),
+		);
+		const check = byName(foreign, "ports");
+		expect(check.status).toBe("fail");
+		expect(check.detail).toBe("port(s) busy: ctrl 19135");
+		expect(check.detail).not.toContain("another offbook owns");
+		expect(check.detail).not.toContain("another directory");
+	} finally {
+		server.stop(true);
+	}
+});
+
 test("runfile: absent passes; stale (alive pid, dead port) warns with a `down` hint; live passes as already-up", async () => {
 	const none = await runDoctor(
 		ctxWith({ repoRoot: GOOD_REPO_ROOT, projectDir: projectWith({}) }),
@@ -393,6 +444,121 @@ test("runfile: absent passes; stale (alive pid, dead port) warns with a `down` h
 	}
 });
 
+// [utest->R-042]
+test("doctor skill check: non-repo pass, absent pass, identical pass, edited warn", async () => {
+	const noRepo = mkdtempSync(join(tmpdir(), "doctor-skill-"));
+	// biome-ignore lint/style/noNonNullAssertion: exact pattern from the brief
+	const skillOnly = DOCTOR_CHECKS.find((c) => c.name === "skill")!;
+	const r1 = await runDoctor(ctxWith({ projectDir: noRepo }), [skillOnly]);
+	expect(r1.checks[0]).toMatchObject({ status: "pass" });
+
+	const repo = mkdtempSync(join(tmpdir(), "doctor-skill-repo-"));
+	const git = async (...args: string[]) => {
+		const p = Bun.spawn(["git", ...args], {
+			cwd: repo,
+			stdout: "ignore",
+			stderr: "ignore",
+			env: {
+				...process.env,
+				GIT_AUTHOR_NAME: "t",
+				GIT_AUTHOR_EMAIL: "t@t",
+				GIT_COMMITTER_NAME: "t",
+				GIT_COMMITTER_EMAIL: "t@t",
+			},
+		});
+		expect(await p.exited).toBe(0);
+	};
+	await git("init", "-q", "-b", "main");
+	const r2 = await runDoctor(ctxWith({ projectDir: repo }), [skillOnly]);
+	expect(r2.checks[0].detail).toContain("not installed");
+	expect(r2.checks[0].status).toBe("pass"); // F16: not-installed is pass, never fail
+
+	const iox = { out: () => {}, err: () => {} };
+	expect(await run(["skill", "install", "--dest", repo], iox)).toBe(0);
+	const r3 = await runDoctor(ctxWith({ projectDir: repo }), [skillOnly]);
+	expect(r3.checks[0]).toMatchObject({ status: "pass" });
+
+	writeFileSync(
+		join(repo, ".claude/skills/offbook-onboard/SKILL.md"),
+		"edited\n",
+	);
+	// examine from a SUBDIRECTORY, not the toplevel itself — otherwise the
+	// hint's `${top}` is indistinguishable from a `${ctx.projectDir}` bug
+	const sub = join(repo, "app");
+	mkdirSync(sub);
+	const resolvedTop = realpathSync(repo); // beware /tmp symlinks
+	const r4 = await runDoctor(ctxWith({ projectDir: sub }), [skillOnly]);
+	expect(r4.checks[0].status).toBe("warn");
+	expect(r4.checks[0].hint).toContain("offbook skill install --force");
+	expect(r4.checks[0].hint).toContain(resolvedTop);
+	expect(r4.checks[0].hint).not.toContain(join(resolvedTop, "app"));
+	expect(r4.ok).toBe(true); // warn never fails doctor
+});
+
+// [utest->R-042]
+test("doctor skill check: dest is a file (degenerate install) warns instead of crashing runDoctor", async () => {
+	const repo = mkdtempSync(join(tmpdir(), "doctor-skill-degenerate-"));
+	const git = async (...args: string[]) => {
+		const p = Bun.spawn(["git", ...args], {
+			cwd: repo,
+			stdout: "ignore",
+			stderr: "ignore",
+			env: {
+				...process.env,
+				GIT_AUTHOR_NAME: "t",
+				GIT_AUTHOR_EMAIL: "t@t",
+				GIT_COMMITTER_NAME: "t",
+				GIT_COMMITTER_EMAIL: "t@t",
+			},
+		});
+		expect(await p.exited).toBe(0);
+	};
+	await git("init", "-q", "-b", "main");
+	mkdirSync(join(repo, ".claude", "skills"), { recursive: true });
+	writeFileSync(join(repo, ".claude", "skills", "offbook-onboard"), "x\n");
+	const report = await runDoctor(
+		ctxWith({ repoRoot: GOOD_REPO_ROOT, projectDir: repo }),
+	);
+	expect(report.checks).toHaveLength(8);
+	const skill = byName(report, "skill");
+	expect(skill.status).toBe("warn");
+	expect(skill.detail).toContain("unreadable/degenerate");
+	expect(skill.detail).toContain("--force");
+	expect(report.ok).toBe(true); // warn never fails doctor
+});
+
+// [utest->R-042]
+test("doctor skill check: a non-directory .claude ancestor warns (names the blocking path), never crashes runDoctor (follow-up, F2's genre)", async () => {
+	const repo = mkdtempSync(join(tmpdir(), "doctor-skill-ancestor-"));
+	const git = async (...args: string[]) => {
+		const p = Bun.spawn(["git", ...args], {
+			cwd: repo,
+			stdout: "ignore",
+			stderr: "ignore",
+			env: {
+				...process.env,
+				GIT_AUTHOR_NAME: "t",
+				GIT_AUTHOR_EMAIL: "t@t",
+				GIT_COMMITTER_NAME: "t",
+				GIT_COMMITTER_EMAIL: "t@t",
+			},
+		});
+		expect(await p.exited).toBe(0);
+	};
+	await git("init", "-q", "-b", "main");
+	const claudePath = join(repo, ".claude");
+	writeFileSync(claudePath, "not a directory\n");
+
+	const report = await runDoctor(
+		ctxWith({ repoRoot: GOOD_REPO_ROOT, projectDir: repo }),
+	);
+	expect(report.checks).toHaveLength(8);
+	const skill = byName(report, "skill");
+	expect(skill.status).toBe("warn");
+	expect(skill.detail).toContain(claudePath);
+	expect(report.ok).toBe(true); // warn never fails doctor
+});
+
 test("`offbook doctor` verb: --json shape, exit codes, USAGE listing", async () => {
 	const outLines: string[] = [];
 	const io = { out: (l: string) => outLines.push(l), err: () => {} };
@@ -413,6 +579,7 @@ test("`offbook doctor` verb: --json shape, exit codes, USAGE listing", async () 
 		"scenarios",
 		"ports",
 		"runfile",
+		"skill",
 	]);
 	expect(report.ok).toBe(true);
 

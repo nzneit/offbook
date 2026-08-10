@@ -5,6 +5,7 @@
 // (contracts §5) — never HTTP. `demo` and the no-server `topics` fallback
 // boot/read the bundled demo spec locally (M0's zero-config discovery floor).
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +28,7 @@ import type {
 } from "#src/model/index.ts";
 import { DEFAULT_CONFIG } from "#src/model/index.ts";
 import { buildRegistry } from "#src/registry/index.ts";
+import { checkoutCommit, checkoutOrigin, repoRoot } from "./checkout.ts";
 import type { Api } from "./client.ts";
 import { api, CliError, resolveCtrlPort } from "./client.ts";
 import type { CheckStatus, DoctorCtx } from "./doctor.ts";
@@ -40,6 +42,7 @@ import {
 	resolveRunning,
 	writeRunfile,
 } from "./runfile.ts";
+import { cmdSkill } from "./skill.ts";
 
 const DEMO_SPEC = `${import.meta.dir}/../demo/thermostat.yaml`;
 
@@ -116,6 +119,45 @@ const glyph = (severity: string): string =>
 	severity === "error" ? "✗" : severity === "warning" ? "⚠" : "ℹ";
 
 const shortHash = (h: string): string => h.replace(/^sha256:/, "").slice(0, 8);
+
+// shared by clientsFromLog (finds the last boot line) and
+// specsStalenessWarning (reads what it recorded) — one offbook.log boot-line
+// shape, matched once.
+const BOOT_LINE = /^\[offbook\] \S+ boot: (.*)$/;
+
+// R-043 — connects observed THIS RUN (adoption.md §10): the log appends
+// across runs, so "this run" = fingerprint lines after the LAST boot line
+// (under --watch each respawn writes a new boot line — the count restarts
+// per respawn, which is the acceptance-test semantics). Connects observed,
+// never a live count: that is what the log truthfully knows.
+export function clientsFromLog(logText: string): {
+	connects: number;
+	last?: { clientId: string; at: string };
+} {
+	const lines = logText.split("\n");
+	let start = 0;
+	for (let i = lines.length - 1; i >= 0; i--)
+		if (BOOT_LINE.test(lines[i])) {
+			start = i + 1;
+			break;
+		}
+	let connects = 0;
+	let last: { clientId: string; at: string } | undefined;
+	for (const line of lines.slice(start)) {
+		const m = line.match(/^\[offbook\] (\S+) (?:ws|tcp)-connect (\{.*\})$/);
+		if (!m) continue;
+		try {
+			const fields = JSON.parse(m[2]) as { clientId?: unknown };
+			if (typeof fields.clientId !== "string") continue;
+			connects++;
+			const clientId = fields.clientId.replace(/\p{Cc}/gu, "?");
+			last = { clientId, at: m[1] };
+		} catch {
+			// malformed fingerprint line: skip, never crash status (R-043)
+		}
+	}
+	return { connects, last };
+}
 
 // P2: spec age shows NEUTRALLY (no stale threshold) — the dev weighs it.
 function specAge(fetchedAt: string, now = Date.now()): string {
@@ -287,6 +329,10 @@ async function cmdTopics(rest: string[], io: Io): Promise<number> {
 			topics = ((await a.get(`/v1/topics${query}`)) as { topics: TopicInfo[] })
 				.topics;
 		} else {
+			if (values.json === true)
+				throw new CliError(
+					"no running offbook in this run-dir — run `offbook up` here, or pass --ctrl-port; the bundled-demo fallback is human-only",
+				);
 			topics = (await demoTopicInfo()).filter(
 				(t) => direction === undefined || t.direction === direction,
 			);
@@ -605,6 +651,56 @@ function renderSpecs(
 	for (const w of warnings ?? []) io.out(`⚠ ${w}`);
 }
 
+// R-043 — services.yaml edited after `up` (adoption.md §10): compare the
+// current file's hash against the LAST boot line. Skips silently (no warn
+// possible, none owed) when: --ctrl-port is passed (the target server's run
+// dir correspondence is unverified), the last boot was the bundled demo, or
+// no boot line exists (pre-R-043 log). Today the edit silently never applies
+// while "specs refreshed" prints success.
+export async function specsStalenessWarning(
+	runDir: string,
+): Promise<string | undefined> {
+	const bootFile = Bun.file(join(runDir, "offbook.boot.json"));
+	if (!(await bootFile.exists())) return undefined;
+	let projectDir: string;
+	try {
+		const boot = JSON.parse(await bootFile.text()) as {
+			projectDir?: string;
+			demo?: boolean;
+		};
+		if (boot.demo === true || boot.projectDir === undefined) return undefined;
+		projectDir = boot.projectDir;
+	} catch {
+		return undefined;
+	}
+	const logText = await Bun.file(logPath(runDir))
+		.text()
+		.catch(() => "");
+	let bootHash: string | undefined;
+	for (const line of logText.split("\n").reverse()) {
+		const m = line.match(BOOT_LINE);
+		if (!m) continue;
+		bootHash = m[1].match(/^services\.yaml sha256:([0-9a-f]{64})$/)?.[1];
+		break; // last boot line wins, whatever it recorded
+	}
+	if (bootHash === undefined) return undefined;
+	const current = createHash("sha256")
+		.update(
+			await Bun.file(join(projectDir, "services.yaml"))
+				.text()
+				.catch(() => ""),
+		)
+		.digest("hex");
+	return current === bootHash
+		? undefined
+		: "⚠ services.yaml changed since `offbook up` — restart to apply";
+}
+
+// F17 — see src/cli/skill.ts's SKILL_SUBCOMMANDS: the real subcommand this
+// verb dispatches (rest[0] === "update" below), exported for the same
+// reason — pin two-token VERB_FORMS entries against the dispatch, not USAGE.
+export const SPECS_SUBCOMMANDS: readonly string[] = ["update"];
+
 async function cmdSpecs(rest: string[], io: Io): Promise<number> {
 	const update = rest[0] === "update";
 	const { values } = parseFlags(update ? rest.slice(1) : rest, {
@@ -622,6 +718,10 @@ async function cmdSpecs(rest: string[], io: Io): Promise<number> {
 		}
 		io.out(`specs refreshed (${specs.length} service(s))`);
 		renderSpecs(io, specs);
+		if (str(values["ctrl-port"]) === undefined) {
+			const warn = await specsStalenessWarning(runDirOf(values));
+			if (warn !== undefined) io.out(warn);
+		}
 		return 0;
 	}
 	const res = (await a.get("/v1/specs")) as {
@@ -863,7 +963,7 @@ async function cmdCheck(rest: string[], io: Io): Promise<number> {
 
 // --- process management (G14 — runfile, never HTTP) ---
 
-function preflightPort(port: number, flag: string): void {
+function portListenable(port: number): boolean {
 	try {
 		const listener = Bun.listen({
 			hostname: "127.0.0.1",
@@ -871,11 +971,39 @@ function preflightPort(port: number, flag: string): void {
 			socket: { data() {} },
 		});
 		listener.stop(true);
+		return true;
 	} catch {
+		return false;
+	}
+}
+
+// R-043 — evaluate ALL THREE ports before composing the error, and probe a
+// busy ctrl port: "another broker/server?" was a misattribution when the
+// owner is offbook's own demo from another directory (adoption.md §10).
+async function preflightPorts(config: Config): Promise<void> {
+	const candidates = [
+		{ label: "ws", port: config.brokerWsPort, flag: "--ws-port" },
+		{ label: "tcp", port: config.brokerTcpPort, flag: "--tcp-port" },
+		{ label: "ctrl", port: config.controlPlanePort, flag: "--ctrl-port" },
+	];
+	const busy = candidates.filter((c) => !portListenable(c.port));
+	if (busy.length === 0) return;
+	if (
+		busy.some((b) => b.label === "ctrl") &&
+		(await probeOffbook(config.controlPlanePort))
+	) {
+		const others = busy.filter((b) => b.label !== "ctrl");
+		const alsoBusy =
+			others.length > 0
+				? `; also busy: ${others.map((b) => `${b.label} ${b.port}`).join(", ")}`
+				: "";
 		throw new CliError(
-			`port ${port} in use — another broker/server? set ${flag} (P7); \`offbook doctor\` checks all three ports`,
+			`another offbook owns the control port ${config.controlPlanePort}${alsoBusy} — \`offbook down\` in that project's directory frees the control port; check the others separately if they persist`,
 		);
 	}
+	throw new CliError(
+		`port(s) in use: ${busy.map((b) => `${b.label} ${b.port}`).join(", ")} — another broker/server? set ${busy.map((b) => b.flag).join("/")} (P7); \`offbook doctor\` checks all three ports`,
+	);
 }
 
 // shared by `up` and `demo --serve` (G14): guards, preflight, boot file,
@@ -907,9 +1035,7 @@ async function launchDetached(
 		io.out(`(reclaiming stale runfile — pid ${existing.run.pid} is gone)`);
 		clearRunfile(runDir);
 	}
-	preflightPort(config.brokerWsPort, "brokerWsPort or --ws-port");
-	preflightPort(config.brokerTcpPort, "brokerTcpPort or --tcp-port");
-	preflightPort(config.controlPlanePort, "controlPlanePort or --ctrl-port");
+	await preflightPorts(config);
 	mkdirSync(runDir, { recursive: true });
 	const bootFile = join(runDir, "offbook.boot.json");
 	await Bun.write(bootFile, JSON.stringify(spec.boot, null, 2));
@@ -1134,6 +1260,11 @@ async function cmdStatus(rest: string[], io: Io): Promise<number> {
 	}
 	const run = resolved.run;
 	const a = api(run.controlPlanePort);
+	const clients = clientsFromLog(
+		await Bun.file(logPath(runDir))
+			.text()
+			.catch(() => ""),
+	);
 	const [modeRes, specsRes, valRes, diagRes] = (await Promise.all([
 		a.get("/v1/mode"),
 		a.get("/v1/specs"),
@@ -1154,6 +1285,7 @@ async function cmdStatus(rest: string[], io: Io): Promise<number> {
 					specs: specsRes.specs,
 					validation: valRes.summary,
 					diagnostics: diagRes.summary,
+					clients,
 				},
 				null,
 				2,
@@ -1169,6 +1301,11 @@ async function cmdStatus(rest: string[], io: Io): Promise<number> {
 	);
 	io.out(
 		`  point your MQTT client at ws://localhost:${run.brokerWsPort} (MQTT 3.1.1)`,
+	);
+	io.out(
+		clients.connects === 0
+			? `  clients: no connects observed this run — is your app pointed at ws://localhost:${run.brokerWsPort}?`
+			: `  clients: ${clients.connects} connect(s) this run · last ${clients.last?.clientId} at ${clients.last?.at}`,
 	);
 	if (specsRes.specs.length === 0) io.out("  specs: (none)");
 	for (const s of specsRes.specs) {
@@ -1211,24 +1348,58 @@ async function cmdLogs(rest: string[], io: Io): Promise<number> {
 
 // --- init scaffold (R-025 refines; local file work only) ---
 
+// R-041 — reference-quality scaffolds (adoption.md §8). Fence convention:
+// exactly ONE canonical worked example per template between the marker
+// lines, commented at code depth ("# "); alternatives and prose sit at
+// prose depth ("## ") outside the fence, so test/init-templates.test.ts's
+// extraction (strip one "# " per line, parse STANDALONE) is mechanical.
+// gitHost stays a COMMENTED example, never an active placeholder (contracts
+// §6, the EI1 amendment): unset must remain the true config state so a
+// slug-form repo hits the clean G20 error, not a fetch against garbage.
 const INIT_SERVICES = `# offbook — where each service's AsyncAPI spec lives (services.yaml).
-# gitHost: https://git.example.com   # base URL for org/name repo slugs
+# Validate as you edit: \`offbook doctor\` checks this file locally (no
+# network) and confirms each repo resolves (the specs-reachable check).
+#
+# gitHost: https://git.example.com
+##  ^ uncomment and set: the base URL slug-form repos resolve against.
+##  NO built-in default — a slug-form repo with no gitHost is a config
+##  error. Full-URL and absolute-path repos need no gitHost.
 services: {}
+# --- example ---
 # services:
 #   my-service:
-#     repo: org/my-service     # slug (resolved against gitHost), full URL, or absolute path
+#     repo: org/my-service
 #     specPath: asyncapi.yaml
 #     branch: main
+# --- end example ---
+## repo (required) — three accepted forms:
+##   slug:           org/my-service        (resolved against gitHost)
+##   full URL:       https://git.example.com/org/my-service.git
+##   absolute path:  /home/you/checkouts/my-service
+## specPath (required) — path to the AsyncAPI doc inside the repo.
+## branch (optional) — defaults to main.
+## Per-service extras: gitHost (overrides the global), qosDefault (0|1|2),
+## retainDefault, topicOverrides — docs/guides/wiring-your-service.md.
 `;
 
-const INIT_ENVIRONMENTS = `# offbook — requested spec versions per environment.
-# v1 records these but fetches branch tips (resolution-mode: branch).
+const INIT_ENVIRONMENTS = `# offbook — requested spec versions per environment (environments.yaml).
+# What it is for: records WHICH spec version each environment wants, so
+# provenance lands in specs.lock. v1 always fetches branch tips regardless
+# (resolution-mode: branch) — you rarely touch this file until pinned
+# resolution ships. Validate with \`offbook doctor\`.
 environments:
   default: {}
+# --- example ---
+# environments:
+#   staging:
+#     my-service: "1.4.2"
+# --- end example ---
 `;
 
 const INIT_SCENARIO = `# offbook L2 scenarios — declarative reactive/triggered emissions.
-# Example (uncomment and adapt to your spec's topics):
+# \`offbook doctor\` shape-checks scenarios/*.yaml; a running server reports
+# full binding diagnostics (\`offbook diagnostics\`).
+# --- example ---
 # - name: accept-set
 #   when:
 #     topic: command/{deviceId}/set
@@ -1237,7 +1408,46 @@ const INIT_SCENARIO = `# offbook L2 scenarios — declarative reactive/triggered
 #         topic: state/{{deviceId}}
 #         payload: { deviceId: "{{deviceId}}", status: accepted }
 #         delay: 50-80ms
+# --- end example ---
+## Adapt the topics to your spec (\`offbook topics\` lists them); recipes:
+## docs/guides/scenario-cookbook.md
 `;
+
+// R-041 — the one committed artifact that names the next step for a
+// teammate WITHOUT an agent (fresh app-repo clone: mock/, scripts, and
+// skill present, `offbook: command not found`). The clone URL is OBSERVED
+// from the running tool's own checkout — never the app repo's remote, and
+// never invented (the <internal-git> rule).
+function initReadme(originUrl: string | undefined): string {
+	const cloneLine =
+		originUrl !== undefined
+			? `git clone ${originUrl} offbook`
+			: "git clone <ask a teammate for the offbook clone URL> offbook";
+	return `# offbook mock project
+
+This directory mocks this app's MQTT-over-WebSockets backend from its
+AsyncAPI specs (services.yaml points at them). The app connects to
+\`ws://localhost:9001\` exactly as it would to the real backend.
+
+## Install offbook (once per machine)
+
+\`\`\`sh
+${cloneLine}
+cd offbook && bun install && bun link
+\`\`\`
+
+## Use
+
+\`\`\`sh
+offbook doctor   # start here — validates this project + your environment
+offbook up       # serve the mock
+offbook down
+\`\`\`
+
+Guides live in the offbook checkout under docs/guides/ (getting-started,
+wiring-your-service, scenario-cookbook, daily-loop).
+`;
+}
 
 async function cmdInit(rest: string[], io: Io): Promise<number> {
 	const { positionals } = parseFlags(rest, {});
@@ -1258,6 +1468,10 @@ async function cmdInit(rest: string[], io: Io): Promise<number> {
 	};
 	await writeIfAbsent("services.yaml", INIT_SERVICES);
 	await writeIfAbsent("environments.yaml", INIT_ENVIRONMENTS);
+	await writeIfAbsent(
+		"README.md",
+		initReadme(await checkoutOrigin(repoRoot())),
+	);
 	mkdirSync(join(dir, "scenarios"), { recursive: true });
 	await writeIfAbsent("scenarios/00-example.yaml", INIT_SCENARIO);
 	mkdirSync(join(dir, "handlers"), { recursive: true });
@@ -1268,7 +1482,7 @@ async function cmdInit(rest: string[], io: Io): Promise<number> {
 		`offbook init — scaffolded ${created.join(", ")}, scenarios/, handlers/`,
 	);
 	io.out(
-		"next: set gitHost + your services in services.yaml, then `offbook up`",
+		"next: set gitHost + your services in services.yaml (validate with `offbook doctor` as you edit), then `offbook up`",
 	);
 	return 0;
 }
@@ -1319,10 +1533,11 @@ async function cmdDoctor(rest: string[], io: Io): Promise<number> {
 
 // --- dispatch ---
 
-const USAGE = `usage: offbook <command>
+export const USAGE = `usage: offbook <command>
 
   init [dir]                 scaffold services.yaml, environments.yaml, scenarios/, handlers/
   doctor [dir] [--offline] [--json] [--run-dir <dir>]  preflight: runtime, deps, config, spec reachability, ports
+  skill install [--dest <dir>] [--force]  install the onboarding skill into this repo's .claude/skills/
   demo [--serve]             bundled demo spec — one-shot catch, or --serve to keep serving
   up [--ci] [--strict] [--watch] [--seed n] [--ws-port n] [--tcp-port n] [--ctrl-port n] [--env e]
   down                       stop the running server (idempotent)
@@ -1341,7 +1556,7 @@ const USAGE = `usage: offbook <command>
   diagnostics [--watch] [--json]  scenario/spec load issues
   specs [update]             spec provenance; update re-resolves + hot-swaps
 
-client verbs accept --run-dir <dir> (default .offbook) and --ctrl-port <n>`;
+client verbs accept --run-dir <dir> (default .offbook) and --ctrl-port <n>; \`offbook --version\` prints the tool's version + source commit`;
 
 const VERBS: Record<string, (rest: string[], io: Io) => Promise<number>> = {
 	topics: cmdTopics,
@@ -1361,11 +1576,29 @@ const VERBS: Record<string, (rest: string[], io: Io) => Promise<number>> = {
 	logs: cmdLogs,
 	init: cmdInit,
 	doctor: cmdDoctor,
+	skill: cmdSkill,
 };
+
+// R-042 — the dispatch truth the VERB_FORMS coherence test pins (`demo` is
+// dispatched outside the table, in run()).
+export const DISPATCH_VERBS: readonly string[] = [
+	...Object.keys(VERBS),
+	"demo",
+];
 
 export async function run(argv: string[], io: Io = consoleIo): Promise<number> {
 	const [cmd, ...rest] = argv;
 	try {
+		if (cmd === "--version" || cmd === "-v") {
+			const root = repoRoot();
+			const pkg = JSON.parse(
+				await Bun.file(join(root, "package.json")).text(),
+			) as { version?: string };
+			io.out(
+				`offbook ${pkg.version ?? "0.0.0"} (${await checkoutCommit(root)})`,
+			);
+			return 0;
+		}
 		if (cmd === "demo") {
 			if (rest.includes("--serve")) return await cmdDemoServe(rest, io);
 			const { output } = await runDemo();

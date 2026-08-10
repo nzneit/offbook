@@ -1,0 +1,294 @@
+// R-042 — `offbook skill install` (adoption.md §9): copy the bundled skill
+// into the app repo's .claude/skills/offbook-onboard/. No positional — the
+// destination is the git toplevel from cwd (fork f: a [dir] positional
+// means "project dir" on init/doctor, and `skill install mock/` by analogy
+// would install where no session looks); --dest is the explicit escape
+// hatch. "Different" = byte-level tree equality, stamp excluded; --force =
+// clean-replace (overlay would orphan old files and jam every compare).
+import { existsSync, realpathSync, rmSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, dirname, join, resolve, sep } from "node:path";
+import {
+	checkoutCommit,
+	checkoutOrigin,
+	gitIgnored,
+	gitToplevel,
+	repoRoot,
+} from "./checkout.ts";
+import { CliError } from "./client.ts";
+import type { Io } from "./index.ts";
+
+const SKILL_NAME = "offbook-onboard";
+const STAMP = ".installed-from";
+
+// F17 — the real subcommand this module dispatches (see cmdSkill below),
+// exported so the verb-forms gate can pin two-token VERB_FORMS entries
+// against the actual dispatch rather than docs-to-docs (USAGE alone).
+export const SKILL_SUBCOMMANDS: readonly string[] = ["install"];
+
+export function bundledSkillDir(): string {
+	return join(repoRoot(), "skills", SKILL_NAME);
+}
+
+// F11 — the stamp's sourcePath is only meaningful on the installing machine;
+// relativizing a homedir prefix to `~` keeps a committed username/home-layout
+// detail out of teammates' clones. Best effort: an exact prefix match on
+// `homedir()`, nothing fancier (no envvar expansion, no case-folding).
+function relativizeHome(path: string): string {
+	const home = homedir();
+	if (path === home) return "~";
+	return path.startsWith(home + sep) ? `~${path.slice(home.length)}` : path;
+}
+
+function deepestExistingAncestor(path: string): string {
+	let p = path;
+	while (!existsSync(p)) {
+		const parent = dirname(p);
+		if (parent === p) return p; // reached the filesystem root
+		p = parent;
+	}
+	return p;
+}
+
+// F9 — resolve as much of `path` as exists on disk (following any symlinks
+// along the way, e.g. a dotfiles-managed `.claude`), then re-attach the
+// not-yet-created remainder literally: the location the install will
+// actually land at once the missing components are created.
+function realpathThroughExistingAncestors(path: string): string {
+	const existing = deepestExistingAncestor(path);
+	return realpathSync(existing) + path.slice(existing.length);
+}
+
+function isWithinRoot(child: string, root: string): boolean {
+	return child === root || child.startsWith(root + sep);
+}
+
+// F-followup (2026-08-10, F2's genre) — a `.claude` or `.claude/skills`
+// ancestor of `dest` that exists as a regular FILE, not a directory:
+// `existsSync(dest)` is false (an ancestor component isn't a directory), so
+// the dest-itself guard below never fires and `copySkill` crashes mid-write
+// with a raw ENOTDIR. Walk the ancestors strictly between `root` and `dest`
+// (top-down) and report the first one that exists but isn't a directory, so
+// the caller can refuse before ever touching the filesystem.
+export function blockingAncestor(
+	dest: string,
+	root: string,
+): string | undefined {
+	const ancestors: string[] = [];
+	let p = dirname(dest);
+	while (p !== root && p !== dirname(p)) {
+		ancestors.unshift(p);
+		p = dirname(p);
+	}
+	return ancestors.find((a) => existsSync(a) && !statSync(a).isDirectory());
+}
+
+async function listFiles(dir: string): Promise<string[]> {
+	return (
+		await Array.fromAsync(new Bun.Glob("**/*").scan({ cwd: dir, dot: true }))
+	)
+		.filter((f) => basename(f) !== STAMP)
+		.sort();
+}
+
+export async function compareSkillTrees(
+	srcDir: string,
+	destDir: string,
+): Promise<{
+	identical: boolean;
+	changed: string[];
+	added: string[];
+	removed: string[];
+}> {
+	const src = await listFiles(srcDir);
+	const dest = await listFiles(destDir);
+	const srcSet = new Set(src);
+	const destSet = new Set(dest);
+	const added = dest.filter((f) => !srcSet.has(f)); // present only in the install
+	const removed = src.filter((f) => !destSet.has(f));
+	const changed: string[] = [];
+	for (const f of src.filter((x) => destSet.has(x))) {
+		const [a, b] = await Promise.all([
+			Bun.file(join(srcDir, f)).arrayBuffer(),
+			Bun.file(join(destDir, f)).arrayBuffer(),
+		]);
+		if (Buffer.compare(Buffer.from(a), Buffer.from(b)) !== 0) changed.push(f);
+	}
+	return {
+		identical: added.length + removed.length + changed.length === 0,
+		changed,
+		added,
+		removed,
+	};
+}
+
+async function copySkill(srcDir: string, destDir: string): Promise<void> {
+	for (const f of await listFiles(srcDir))
+		await Bun.write(join(destDir, f), Bun.file(join(srcDir, f)));
+	await Bun.write(
+		join(destDir, STAMP),
+		`${JSON.stringify(
+			{
+				version:
+					(
+						JSON.parse(
+							await Bun.file(join(repoRoot(), "package.json")).text(),
+						) as {
+							version?: string;
+						}
+					).version ?? "0.0.0",
+				commit: await checkoutCommit(),
+				installedAt: new Date().toISOString(),
+				// best effort: only meaningful on the installing machine; a homedir
+				// prefix is relativized to `~` so the stamp doesn't commit one
+				// dev's username/home layout into every teammate's clone (F11)
+				sourcePath: relativizeHome(repoRoot()),
+				// observed at install time, never authored (adoption.md §9); omitted
+				// when the checkout has no remote — the skill's locator wording then
+				// falls back to "ask a teammate"
+				...(await checkoutOrigin().then((o) =>
+					o === undefined ? {} : { originUrl: o },
+				)),
+			},
+			null,
+			2,
+		)}\n`,
+	);
+}
+
+export async function cmdSkill(rest: string[], io: Io): Promise<number> {
+	const [sub, ...flags] = rest;
+	if (sub !== "install") {
+		io.err(
+			"usage: offbook skill install [--dest <dir>] [--force] — install the onboarding skill into this repo's .claude/skills/",
+		);
+		return 1;
+	}
+	let dest: string | undefined;
+	let force = false;
+	for (let i = 0; i < flags.length; i++) {
+		if (flags[i] === "--force") force = true;
+		else if (flags[i] === "--dest") {
+			const value = flags[++i];
+			// missing OR another flag swallowed as the path (e.g. `--dest --force`
+			// would silently install into a dir literally named "--force")
+			if (value === undefined || value.startsWith("-"))
+				throw new CliError("skill install: --dest needs a directory");
+			dest = value;
+		} else throw new CliError(`skill install: unknown flag '${flags[i]}'`);
+	}
+
+	let targetRoot: string;
+	if (dest !== undefined) {
+		targetRoot = resolve(dest);
+		const top = await gitToplevel(targetRoot);
+		// F13: `git rev-parse --show-toplevel` returns the physical (symlink-
+		// resolved) path while `targetRoot` stays logical — compare realpaths,
+		// not the raw strings, or a repo reached via a symlink spuriously warns
+		// even when --dest names the toplevel exactly.
+		if (top !== undefined && realpathSync(top) !== realpathSync(targetRoot))
+			io.err(
+				"⚠ --dest is below the repo toplevel — a Claude Code session at the repo root won't discover a skill installed here",
+			);
+		if (top === undefined)
+			io.err(
+				"⚠ --dest is not inside a git repo — the skill cannot propagate to teammates from here",
+			);
+	} else {
+		const top = await gitToplevel(process.cwd());
+		if (top === undefined)
+			throw new CliError(
+				"skill install: not inside a git repository — cd into your app repo (or pass --dest <dir>)",
+			);
+		targetRoot = top;
+	}
+
+	const destDir = join(targetRoot, ".claude", "skills", SKILL_NAME);
+	const srcDir = bundledSkillDir();
+	if (!existsSync(srcDir))
+		throw new CliError(
+			`skill install: bundled skill missing at ${srcDir} — the offbook checkout looks incomplete`,
+		);
+
+	// F-followup (2026-08-10) — refuse-always: a `.claude`/`.claude/skills`
+	// ancestor of destDir that's a regular file crashes copySkill with a raw
+	// ENOTDIR in both modes (the dest-itself guard below never fires, since
+	// existsSync(destDir) is false when an ancestor isn't a directory).
+	// Unlike the offbook-owned skill leaf (which F2's guard below DOES clean-
+	// replace with --force), `.claude` is Claude Code's own shared config
+	// dir — a file there is a user artifact offbook refuses to destroy, so
+	// --force does NOT apply here, in either mode.
+	const blocking = blockingAncestor(destDir, targetRoot);
+	if (blocking !== undefined)
+		throw new CliError(
+			`skill install: ${blocking} exists and is not a directory — move or remove it yourself before installing; --force does not apply: ${blocking} is not offbook's to replace`,
+		);
+
+	// F9 — `.claude` (or an ancestor of it) may itself be a symlink, e.g. a
+	// dotfiles-managed `.claude` symlinked to `~/dotfiles/claude/`: rmSync and
+	// the write both follow it, landing outside the repo. Warn, don't refuse
+	// — a symlinked `.claude` is a legitimate setup — and correct the
+	// "commit it" propagation advice below when it applies.
+	const resolvedDestDir = realpathThroughExistingAncestors(destDir);
+	// targetRoot itself need not exist yet (Bun.write below creates it) — walk
+	// its own ancestors the same way rather than assume it's there
+	const resolvedTargetRoot = realpathThroughExistingAncestors(targetRoot);
+	const propagatesViaRepo = isWithinRoot(resolvedDestDir, resolvedTargetRoot);
+	if (!propagatesViaRepo)
+		io.err(
+			`⚠ .claude here resolves outside this repo (${resolvedDestDir}) — the skill will install there and will NOT propagate via this repo's commits`,
+		);
+
+	if (existsSync(destDir)) {
+		if (!statSync(destDir).isDirectory()) {
+			// dest exists but isn't a directory (e.g. a stray file left behind) —
+			// nothing to compare; --force is the only offbook-native way out
+			if (!force)
+				throw new CliError(
+					`skill install: ${destDir} exists and is not a directory — \`offbook skill install --force\` replaces it`,
+				);
+			rmSync(destDir, { recursive: true, force: true }); // clean-replace, never overlay
+		} else {
+			let diff: Awaited<ReturnType<typeof compareSkillTrees>> | undefined;
+			try {
+				diff = await compareSkillTrees(srcDir, destDir);
+			} catch {
+				diff = undefined; // an unreadable entry: can't certify identity either way
+			}
+			if (diff?.identical) {
+				io.out(`offbook skill install: already up to date (${destDir})`);
+				return 0;
+			}
+			if (!force) {
+				if (diff === undefined)
+					io.err(
+						`offbook skill install: ${destDir} is unreadable/degenerate — \`offbook skill install --force\` replaces it`,
+					);
+				else {
+					io.err(
+						`offbook skill install: ${destDir} differs from the bundled skill:`,
+					);
+					for (const f of diff.changed) io.err(`  changed: ${f}`);
+					for (const f of diff.added) io.err(`  only in install: ${f}`);
+					for (const f of diff.removed) io.err(`  missing from install: ${f}`);
+				}
+				io.err(
+					"local edits are drift — upstream them, or `--force` to clean-replace",
+				);
+				return 1;
+			}
+			rmSync(destDir, { recursive: true, force: true }); // clean-replace, never overlay
+		}
+	}
+	await copySkill(srcDir, destDir);
+	if (await gitIgnored(destDir, targetRoot))
+		io.err(
+			"⚠ .claude/ is gitignored here — the skill won't propagate; un-ignore it or teammates never see it",
+		);
+	io.out(
+		propagatesViaRepo
+			? `offbook skill install: installed to ${destDir} — commit it so teammates get the skill`
+			: `offbook skill install: installed to ${destDir}`,
+	);
+	return 0;
+}

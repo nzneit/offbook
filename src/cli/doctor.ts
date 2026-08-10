@@ -7,7 +7,13 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { loadEnvironments, loadServices } from "#src/config/index.ts";
 import { resolveRepoUrl } from "#src/ingestion/index.ts";
-import { resolveRunning } from "./runfile.ts";
+import { gitToplevel } from "./checkout.ts";
+import { probeOffbook, resolveRunning } from "./runfile.ts";
+import {
+	blockingAncestor,
+	bundledSkillDir,
+	compareSkillTrees,
+} from "./skill.ts";
 
 export type CheckStatus = "pass" | "warn" | "fail";
 
@@ -293,7 +299,7 @@ async function portFree(port: number): Promise<boolean> {
 		// 127.0.0.1, not "localhost": on a dual-stack host, hostname resolution
 		// can hand back a DIFFERENT loopback address than an existing bind, so a
 		// second Bun.listen("localhost") silently succeeds on ::1 vs 127.0.0.1
-		// (matches `preflightPort`'s address for the same reason).
+		// (matches `portListenable`/`preflightPorts`' address for the same reason).
 		const listener = Bun.listen({
 			hostname: "127.0.0.1",
 			port,
@@ -325,6 +331,19 @@ const ports: DoctorCheck = {
 		];
 		for (const [label, port] of labeled)
 			if (!(await portFree(port))) busy.push(`${label} ${port}`);
+		if (
+			busy.some((b) => b.startsWith("ctrl")) &&
+			(await probeOffbook(ctx.ports.ctrl))
+		) {
+			const others = busy.filter((b) => !b.startsWith("ctrl"));
+			const alsoBusy =
+				others.length > 0 ? `; also busy: ${others.join(", ")}` : "";
+			return {
+				status: "fail",
+				detail: `another offbook owns the control port ${ctx.ports.ctrl}${alsoBusy}`,
+				hint: "`offbook down` in that project's directory frees the control port; check the others separately if they persist",
+			};
+		}
 		return busy.length === 0
 			? {
 					status: "pass",
@@ -354,6 +373,73 @@ const runfileCheck: DoctorCheck = {
 	},
 };
 
+// R-042 — check 8 (adoption.md §3): the installed skill copy vs the running
+// tool's bundled skill. Warn-never-fail: a stale skill doesn't break the
+// tool. Resolved from the EXAMINED dir's toplevel; the hint names the path
+// because `skill install --force` resolves from CWD, which can differ when
+// `doctor <elsewhere>` examines another repo.
+const skillCheck: DoctorCheck = {
+	name: "skill",
+	async run(ctx) {
+		const top = await gitToplevel(ctx.projectDir);
+		if (top === undefined)
+			return {
+				status: "pass",
+				detail: "not in a git repo (no skill to check)",
+			};
+		const installed = join(top, ".claude", "skills", "offbook-onboard");
+		// F-followup (2026-08-10) — a `.claude`/`.claude/skills` ancestor that's
+		// a regular file makes existsSync(installed) false too (an ancestor
+		// component isn't a directory), so the not-installed pass below used to
+		// fire and hide that install is impossible. Warn-never-fail still
+		// applies; unlike the other warn states here, --force can't recover
+		// this one (skill.ts's blockingAncestor guard refuses it in both
+		// modes — `.claude` is not offbook's to replace).
+		const blocking = blockingAncestor(installed, top);
+		if (blocking !== undefined)
+			return {
+				status: "warn",
+				detail: `${blocking} exists and is not a directory — \`offbook skill install\` cannot install here (move or remove it yourself; --force does not apply)`,
+			};
+		if (!existsSync(installed))
+			return {
+				status: "pass",
+				detail:
+					"onboarding skill not installed (optional — `offbook skill install` adds it)",
+			};
+		const src = bundledSkillDir();
+		if (!existsSync(src))
+			return {
+				status: "warn",
+				detail: `bundled skill missing from the offbook checkout (${src}) — incomplete checkout?`,
+			};
+		let diff: Awaited<ReturnType<typeof compareSkillTrees>>;
+		try {
+			diff = await compareSkillTrees(src, installed);
+		} catch {
+			// degenerate install (dest is a file, or an unreadable entry inside
+			// it): warn-never-fail still applies — `--force` is the recovery
+			return {
+				status: "warn",
+				detail: `installed skill unreadable/degenerate at ${installed} — \`offbook skill install --force\` replaces it`,
+			};
+		}
+		return diff.identical
+			? {
+					status: "pass",
+					detail: `installed skill matches the bundled one (${installed})`,
+				}
+			: {
+					status: "warn",
+					detail: `installed skill at ${installed} differs from the bundled one (${[...diff.changed, ...diff.added, ...diff.removed].length} file(s))`,
+					// the hint NAMES the resolved toplevel (adoption.md §3): `skill
+					// install --force` resolves from CWD, which can differ from the
+					// examined dir's repo
+					hint: `stale/edited skill — \`offbook skill install --force\` from ${top} refreshes it`,
+				};
+	},
+};
+
 export const DOCTOR_CHECKS: DoctorCheck[] = [
 	runtime,
 	deps,
@@ -362,6 +448,7 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
 	scenarios,
 	ports,
 	runfileCheck,
+	skillCheck,
 ];
 
 export async function runDoctor(

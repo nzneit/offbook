@@ -6,6 +6,7 @@
 // [itest->R-019]
 // [itest->R-036]
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import {
 	appendFileSync,
 	existsSync,
@@ -18,7 +19,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Io } from "#src/cli/index.ts";
-import { renderTopicList, run } from "#src/cli/index.ts";
+import {
+	clientsFromLog,
+	renderTopicList,
+	run,
+	specsStalenessWarning,
+} from "#src/cli/index.ts";
 import { readRunfile, writeRunfile } from "#src/cli/runfile.ts";
 import type { Composed } from "#src/compose/index.ts";
 import { compose } from "#src/compose/index.ts";
@@ -32,6 +38,8 @@ import {
 } from "./project-fixture.ts";
 
 // 19xxx/129xx: distinct from control-plane (18xxx), ci-settlement (16xxx), m0
+// (this file's other literal ports: 19010-19040/12910-12940, 19045/12945/19845
+// — see each test; kept out of named consts since they're single-use)
 const WS = 19001;
 const TCP = 12901;
 const CTRL = 19801;
@@ -672,6 +680,21 @@ test("topics falls back to the bundled demo spec when nothing is running (M0 dis
 	expect(t.err).toEqual([]);
 });
 
+// [itest->R-043]
+test("topics --json with no live server refuses (exit 1, run-dir-qualified); human fallback stays", async () => {
+	const empty = mkdtempSync(join(tmpdir(), "no-server-"));
+	const refused = io();
+	expect(await run(["topics", "--json", "--run-dir", empty], refused.io)).toBe(
+		1,
+	);
+	expect(refused.err.join("\n")).toContain(
+		"bundled-demo fallback is human-only",
+	);
+	const human = io();
+	expect(await run(["topics", "--run-dir", empty], human.io)).toBe(0);
+	expect(human.out[0]).toContain("showing the bundled demo spec"); // pinned note survives
+});
+
 test("down is idempotent on a dead/absent runfile; status exits nonzero when down; logs reads the log file", async () => {
 	const deadPid = Bun.spawnSync(["true"]).pid ?? 4_193_998;
 	const dir = join(base, "run-down");
@@ -763,6 +786,61 @@ test("mergeRegistries: one registry over all services — most-specific wins acr
 	expect(merged.matchesFilter("state/+", "state/main")).toBe(true);
 });
 
+// [itest->R-043]
+test("clientsFromLog: counts only post-last-boot-line connects, skips malformed", () => {
+	const iso = "2026-08-08T10:00:00.000Z";
+	const lines = [
+		`[offbook] ${iso} boot: services.yaml sha256:${"a".repeat(64)}`,
+		`[offbook] ${iso} ws-connect {"clientId":"stale-run"}`,
+		`[offbook] ${iso} boot: services.yaml sha256:${"b".repeat(64)}`,
+		`[offbook] ${iso} ws-connect {"clientId":"web-1","protocolLevel":4}`,
+		`[offbook] ${iso} ws-connect not-json`,
+		`[offbook] ${iso} mqtt-subscribe {"clientId":"web-1","topic":"state/x"}`,
+		`[offbook] ${iso} tcp-connect {"clientId":"cli-2"}`,
+	].join("\n");
+	const r = clientsFromLog(lines);
+	expect(r.connects).toBe(2); // stale-run excluded (before the last boot line)
+	expect(r.last).toEqual({ clientId: "cli-2", at: iso });
+	expect(clientsFromLog("")).toEqual({ connects: 0 });
+
+	// boot line is the last line (no connects after)
+	expect(
+		clientsFromLog(
+			`[offbook] ${iso} boot: services.yaml sha256:${"c".repeat(64)}`,
+		),
+	).toEqual({ connects: 0 });
+
+	// torn JSON case: matches regex but fails JSON.parse, mixed with valid connects
+	const withTorn = [
+		`[offbook] ${iso} boot: services.yaml sha256:${"d".repeat(64)}`,
+		`[offbook] ${iso} ws-connect {"clientId":"valid-1"}`,
+		`[offbook] ${iso} ws-connect {bad: json}`,
+		`[offbook] ${iso} tcp-connect {"clientId":"valid-2"}`,
+	].join("\n");
+	const rTorn = clientsFromLog(withTorn);
+	expect(rTorn.connects).toBe(2); // torn line skipped
+	expect(rTorn.last).toEqual({ clientId: "valid-2", at: iso });
+});
+
+// [itest->R-043]
+test("clientsFromLog: sanitizes control characters restored by JSON.parse (F4)", () => {
+	const iso = "2026-08-08T10:00:00.000Z";
+	const esc = String.fromCharCode(27);
+	const raw = JSON.stringify({ clientId: `web-${esc}[31mhostile` });
+	const lines = [
+		`[offbook] ${iso} boot: services.yaml sha256:${"e".repeat(64)}`,
+		`[offbook] ${iso} ws-connect ${raw}`,
+	].join("\n");
+	const r = clientsFromLog(lines);
+	expect(r.connects).toBe(1);
+	const clientId = r.last?.clientId ?? "";
+	expect(clientId.includes(esc)).toBe(false);
+	for (let i = 0; i < clientId.length; i++) {
+		const code = clientId.charCodeAt(i);
+		expect(code < 32 || code === 127).toBe(false);
+	}
+});
+
 // --- suite B: the real up → status → specs → check → down process cycle ---
 
 test("up spawns the detached server from a local-git project, status/specs/logs read it, down stops it", async () => {
@@ -791,6 +869,12 @@ test("up spawns the detached server from a local-git project, status/specs/logs 
 		expect(upText).toContain("mode passive · seed 7 (--ci profile)"); // --ci co-sets
 		expect(existsSync(join(projectDir, "specs.lock"))).toBe(true);
 
+		// [itest->R-043]
+		const logText = await Bun.file(
+			join(projectDir, ".offbook", "offbook.log"),
+		).text();
+		expect(logText).toMatch(/\] .*boot: services\.yaml sha256:[0-9a-f]{64}$/m);
+
 		// a second up refuses the live double-start (P7)
 		const dup = io();
 		expect(await run(["up", ...flags], dup.io)).toBe(1);
@@ -805,6 +889,7 @@ test("up spawns the detached server from a local-git project, status/specs/logs 
 			/spec thermostat: main@.*asyncapi\.yaml @ [0-9a-f]{8}/,
 		);
 		expect(stText).toMatch(/fetched .* \(\d+[smhd] ago\)/); // neutral spec age (P2)
+		expect(stText).toContain("no connects observed this run"); // zero-connects branch
 
 		const sp = io();
 		expect(await run(["specs", "--run-dir", runDir], sp.io)).toBe(0);
@@ -814,6 +899,30 @@ test("up spawns the detached server from a local-git project, status/specs/logs 
 		const upd = io();
 		expect(await run(["specs", "update", "--run-dir", runDir], upd.io)).toBe(0);
 		expect(upd.out.join("\n")).toContain("specs refreshed (1 service(s))");
+
+		// [itest->R-043] edit services.yaml after `up` to test staleness warning
+		const servicesPath = join(projectDir, "services.yaml");
+		const currentServices = await Bun.file(servicesPath).text();
+		writeFileSync(servicesPath, `${currentServices}# edited\n`);
+
+		// specs update with --ctrl-port should skip the warning (it's a server-aware refresh)
+		const updCtrl = io();
+		expect(
+			await run(
+				["specs", "update", "--run-dir", runDir, "--ctrl-port", "19810"],
+				updCtrl.io,
+			),
+		).toBe(0);
+		expect(updCtrl.out.join("\n")).toContain("specs refreshed (1 service(s))");
+		expect(updCtrl.out.join("\n")).not.toContain("changed since");
+
+		// specs update without --ctrl-port should warn (the running server is stale)
+		const updWarn = io();
+		expect(
+			await run(["specs", "update", "--run-dir", runDir], updWarn.io),
+		).toBe(0);
+		expect(updWarn.out.join("\n")).toContain("specs refreshed (1 service(s))");
+		expect(updWarn.out.join("\n")).toContain("changed since");
 
 		// the CI gate over the wire: clean → 0, off-contract publish → 1
 		expect(await run(["check", "--run-dir", runDir], io().io)).toBe(0);
@@ -886,9 +995,77 @@ test("up preflights the ports in the foreground (named fix, no detached EADDRINU
 		),
 	).toBe(1);
 	expect(up.out.join("\n")).toContain("reclaiming stale runfile");
-	expect(up.err.join("\n")).toContain(`port ${CTRL} in use`);
-	expect(up.err.join("\n")).toContain("--ctrl-port");
+	expect(up.err.join("\n")).toContain("another offbook owns the control port");
+	expect(up.err.join("\n")).toContain(String(CTRL));
+	expect(up.err.join("\n")).not.toContain("owns these ports");
+	expect(up.err.join("\n")).not.toContain("likely the demo");
 	expect(await readRunfile(dir)).toBeUndefined(); // reclaimed; nothing spawned
+});
+
+// [itest->R-043]
+test("up against ports owned by another offbook attributes it instead of 'another broker?'", async () => {
+	const scratch = mkdtempSync(join(tmpdir(), "attr-"));
+	const a = io();
+	expect(
+		await run(
+			[
+				"up",
+				"--run-dir",
+				scratch,
+				"--ws-port",
+				String(WS),
+				"--tcp-port",
+				String(TCP),
+				"--ctrl-port",
+				String(CTRL),
+			],
+			a.io,
+		),
+	).toBe(1);
+	expect(a.err.join("\n")).toContain("another offbook owns the control port");
+	expect(a.err.join("\n")).toContain(String(CTRL));
+	expect(a.err.join("\n")).not.toContain("owns these ports");
+	expect(a.err.join("\n")).not.toContain("likely the demo");
+});
+
+// F5 — the branch that must NOT attribute: a foreign (non-offbook) listener
+// on the ctrl port fails probeOffbook's mode-shape check, so `up` preflight
+// must fall back to the generic busy message, not claim another offbook.
+// [itest->R-043]
+test("up against a ctrl port held by a foreign listener falls back to the generic busy message", async () => {
+	const FOREIGN_WS = 19045;
+	const FOREIGN_TCP = 12945;
+	const FOREIGN_CTRL = 19845; // not offbook: no `mode` field in the response
+	const foreign = Bun.serve({
+		port: FOREIGN_CTRL,
+		fetch: () => Response.json({ ok: true }),
+	});
+	try {
+		const scratch = mkdtempSync(join(tmpdir(), "attr-neg-"));
+		const b = io();
+		expect(
+			await run(
+				[
+					"up",
+					"--run-dir",
+					scratch,
+					"--ws-port",
+					String(FOREIGN_WS),
+					"--tcp-port",
+					String(FOREIGN_TCP),
+					"--ctrl-port",
+					String(FOREIGN_CTRL),
+				],
+				b.io,
+			),
+		).toBe(1);
+		expect(b.err.join("\n")).toContain("port(s) in use");
+		expect(b.err.join("\n")).toContain(`ctrl ${FOREIGN_CTRL}`);
+		expect(b.err.join("\n")).not.toContain("another offbook owns");
+		expect(b.err.join("\n")).not.toContain("another directory");
+	} finally {
+		foreign.stop(true);
+	}
 });
 
 test("interactive default boots lenient-loud past a bad scenario (autonomous, strict=false); up --strict makes it fatal", async () => {
@@ -1251,3 +1428,75 @@ test("up: busy port and failed boot both point at doctor", async () => {
 		rmSync(tmp, { recursive: true, force: true });
 	}
 }, 60_000); // the failed-boot case rides out `up`'s full readiness deadline
+
+// [itest->R-043]
+test("specsStalenessWarning: warns on hash mismatch, skips demo/absent/ctrl-only", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "staleness-"));
+	const iso = "2026-08-08T10:00:00.000Z";
+	// no boot file → skip
+	expect(await specsStalenessWarning(dir)).toBeUndefined();
+	// demo boot → skip
+	writeFileSync(
+		join(dir, "offbook.boot.json"),
+		JSON.stringify({ projectDir: dir, demo: true }),
+	);
+	writeFileSync(
+		join(dir, "offbook.log"),
+		`[offbook] ${iso} boot: bundled demo spec\n`,
+	);
+	expect(await specsStalenessWarning(dir)).toBeUndefined();
+	// project boot, matching hash → no warn
+	const services = "services: {}\n";
+	writeFileSync(join(dir, "services.yaml"), services);
+	writeFileSync(
+		join(dir, "offbook.boot.json"),
+		JSON.stringify({ projectDir: dir }),
+	);
+	const hash = createHash("sha256").update(services).digest("hex");
+	writeFileSync(
+		join(dir, "offbook.log"),
+		`[offbook] ${iso} boot: services.yaml sha256:${hash}\n`,
+	);
+	expect(await specsStalenessWarning(dir)).toBeUndefined();
+	// edited file → warn
+	writeFileSync(join(dir, "services.yaml"), "services: {}\n# edited\n");
+	expect(await specsStalenessWarning(dir)).toContain("restart to apply");
+	rmSync(dir, { recursive: true, force: true });
+});
+
+test("specsStalenessWarning: skips gracefully on no boot line, malformed JSON, or unreadable services", async () => {
+	// case 1: valid project boot, but log has no boot line (only ws-connect) → skip
+	const dir1 = mkdtempSync(join(tmpdir(), "staleness-no-boot-line-"));
+	const iso = "2026-08-08T10:00:00.000Z";
+	writeFileSync(
+		join(dir1, "offbook.boot.json"),
+		JSON.stringify({ projectDir: dir1 }),
+	);
+	writeFileSync(
+		join(dir1, "offbook.log"),
+		`[offbook] ${iso} ws-connect {"clientId":"browser-1"}\n`,
+	);
+	expect(await specsStalenessWarning(dir1)).toBeUndefined();
+	rmSync(dir1, { recursive: true, force: true });
+
+	// case 2: malformed JSON in boot file → skip
+	const dir2 = mkdtempSync(join(tmpdir(), "staleness-bad-json-"));
+	writeFileSync(join(dir2, "offbook.boot.json"), "{bad json");
+	expect(await specsStalenessWarning(dir2)).toBeUndefined();
+	rmSync(dir2, { recursive: true, force: true });
+
+	// case 3: services.yaml missing (deleted) since boot → warns (no skip; missing counts as changed)
+	const dir3 = mkdtempSync(join(tmpdir(), "staleness-missing-services-"));
+	const realContent = "services: {}\n";
+	const realHash = createHash("sha256").update(realContent).digest("hex");
+	writeFileSync(
+		join(dir3, "offbook.boot.json"),
+		JSON.stringify({ projectDir: dir3 }),
+	);
+	writeFileSync(
+		join(dir3, "offbook.log"),
+		`[offbook] ${iso} boot: services.yaml sha256:${realHash}\n`,
+	);
+	expect(await specsStalenessWarning(dir3)).toContain("restart to apply");
+	rmSync(dir3, { recursive: true, force: true });
+});

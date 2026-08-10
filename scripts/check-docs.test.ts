@@ -275,3 +275,72 @@ test("checkLinks ignores absolute URLs, mailto, and in-page anchors", () => {
   );
   expect(errs).toEqual([]);
 });
+
+// [utest->R-042]
+import {
+  checkSkillFrontmatter,
+  checkSkillLinks,
+  checkSkillVerbs,
+} from "./check-docs.ts";
+
+test("checkSkillVerbs: membership semantics (fork e, corrected)", () => {
+	const doc = (text: string) => [{ path: "skills/offbook-onboard/SKILL.md", text }];
+	expect(checkSkillVerbs(doc("run `offbook doctor` then `offbook specs`"))).toEqual([]);
+	expect(checkSkillVerbs(doc("`offbook specs update` refreshes"))).toEqual([]);
+	expect(checkSkillVerbs(doc("`offbook mode autonomous` flips it"))).toEqual([]);
+	expect(checkSkillVerbs(doc("`offbook publish <topic> --example`"))).toEqual([]);
+	expect(checkSkillVerbs(doc("try `offbook skil install`"))).toHaveLength(1);
+	expect(checkSkillVerbs(doc("`offbook specs prune` cleans"))).toHaveLength(1);
+});
+
+// F3(a) — a trailing shell metacharacter (comment or pipe) must not be read
+// as a second-token subcommand; F3(c) — bare-line forms, dead verbs in a
+// bare line, and the wrapped-span residual are all pinned explicitly.
+test("checkSkillVerbs: bare lines, trailing comments/pipes, and dead verbs", () => {
+	const doc = (text: string) => [{ path: "skills/offbook-onboard/SKILL.md", text }];
+	expect(checkSkillVerbs(doc("$ offbook up"))).toEqual([]);
+	expect(checkSkillVerbs(doc("offbook bogus"))).toHaveLength(1);
+	expect(checkSkillVerbs(doc("offbook specs   # provenance"))).toEqual([]);
+	expect(checkSkillVerbs(doc("offbook specs | grep hash"))).toEqual([]);
+	// a genuine dead verb in a comment/pipe tail still isn't a real form —
+	// truncation must not swallow the check for the part before the cut
+	expect(checkSkillVerbs(doc("offbook bogus # not a real verb"))).toHaveLength(1);
+});
+
+// F3(b)/(d) — pin the documented residual: a backtick span whose `offbook `
+// opener and first token are split across a line break (the verb name
+// itself, not just a trailing flag) is not scanned. adoption.md §9 states
+// this boundary; SKILL.md's own prose is kept clear of it by construction.
+test("checkSkillVerbs: wrapped-span boundary is a documented residual, not scanned", () => {
+	const doc = (text: string) => [{ path: "skills/offbook-onboard/SKILL.md", text }];
+	// `offbook` and its (dead) first token split across the line break inside
+	// one backtick span: the gate does not see it, by the stated residual.
+	expect(checkSkillVerbs(doc("see `offbook\n   bogus` for details"))).toEqual([]);
+	// contrast: a trailing FLAG wrapped to the next line is fine — the verb
+	// name itself (`up`) still shares a line with `offbook`.
+	expect(checkSkillVerbs(doc("run `offbook up\n   --ci` in CI"))).toEqual([]);
+});
+
+test("checkSkillLinks: intra-skill only", () => {
+	const at = (text: string) => [{ path: "skills/offbook-onboard/SKILL.md", text }];
+	expect(checkSkillLinks(at("[guide](../../docs/guides/daily-loop.md)"))).toHaveLength(1);
+	expect(checkSkillLinks(at("[here](#the-journey)"))).toEqual([]);
+	expect(checkSkillLinks(at("[web](https://example.com)"))).toEqual([]);
+});
+
+// F15 — the resolution clause (existsSync) must actually be exercised: a
+// real intra-skill file resolves clean, a missing one is flagged exactly
+// once. Both cases resolve relative to SKILL.md's own directory.
+test("checkSkillLinks: exercises real link resolution (pass and fail)", () => {
+	const at = (text: string) => [{ path: "skills/offbook-onboard/SKILL.md", text }];
+	expect(checkSkillLinks(at("[me](SKILL.md)"))).toEqual([]);
+	const errs = checkSkillLinks(at("[gone](missing.md)"));
+	expect(errs).toHaveLength(1);
+	expect(errs[0]).toContain("broken link");
+});
+
+test("checkSkillFrontmatter: name must match the install dir", () => {
+	expect(checkSkillFrontmatter("---\nname: offbook-onboard\ndescription: x\n---\nbody")).toEqual([]);
+	expect(checkSkillFrontmatter("---\nname: onboard\ndescription: x\n---\n")).toHaveLength(1);
+	expect(checkSkillFrontmatter("no frontmatter")).toHaveLength(1);
+});
