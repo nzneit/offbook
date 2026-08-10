@@ -1,6 +1,6 @@
 import net from "node:net";
 import { Duplex } from "node:stream";
-import Aedes from "aedes";
+import { Aedes } from "aedes";
 import type { ServerWebSocket } from "bun";
 import type {
 	Config,
@@ -55,7 +55,9 @@ export function fingerprintLine(e: FingerprintEvent): string {
 
 // `aedes`'s .d.ts doesn't type the `persistence` property (it's typed `any`
 // in AedesOptions but not surfaced on the class), even though it's a real
-// runtime property (aedes.js: `this.persistence = opts.persistence || memory()`).
+// runtime property (1.x aedes.js, inside `listen()`:
+// `this.persistence = opts.persistence || memory()` — so it exists only
+// after `start()` has run; `getState` is a post-start surface).
 // Narrow just the bit of surface we use.
 interface RetainedPacket {
 	topic: string;
@@ -342,15 +344,20 @@ export function createBroker(config: Config): BrokerModule {
 	});
 
 	return {
-		start: () =>
-			Promise.all([
+		start: async () => {
+			// aedes 1.x: persistence setup is async and moved out of the
+			// constructor into listen() — it must complete before either
+			// listener can accept a socket
+			await aedes.listen();
+			await Promise.all([
 				new Promise<void>((resolve) =>
 					wsServer.listen(config.brokerWsPort, () => resolve()),
 				),
 				new Promise<void>((resolve) =>
 					tcpServer.listen(config.brokerTcpPort, () => resolve()),
 				),
-			]).then(() => undefined),
+			]);
+		},
 		stop: () =>
 			Promise.all([
 				new Promise<void>((resolve) => wsServer.close(() => resolve())),
