@@ -106,7 +106,11 @@ test("logSafeEnv: a clean parent gains only NO_COLOR", () => {
 
 test("both server spawn sites pass logSafeEnv — inheritance masks a dropped guard, so pin the source (D-030)", async () => {
 	for (const file of ["index.ts", "serve.ts"]) {
-		const src = await Bun.file(new URL(file, import.meta.url)).text();
+		// comment lines dropped first, so a commented-out guard reads as absent
+		const src = (await Bun.file(new URL(file, import.meta.url)).text())
+			.split("\n")
+			.filter((l) => !l.trim().startsWith("//"))
+			.join("\n");
 		const spawns = src.split("spawn(process.execPath").length - 1;
 		expect(spawns).toBeGreaterThan(0);
 		expect(src.split("env: logSafeEnv()").length - 1).toBe(spawns);
