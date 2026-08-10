@@ -263,7 +263,10 @@ export function checkSkillVerbs(
   const members = new Set(forms);
   for (const f of files)
     for (const m of f.text.matchAll(/`offbook ([^`]+)`|^\s*(?:\$ )?offbook (.+)$/gm)) {
-      const rest = (m[1] ?? m[2] ?? "").trim();
+      // F3(a): truncate at a shell metacharacter before tokenizing, so a
+      // trailing comment or pipe (`offbook specs # note`, `offbook specs |
+      // grep x`) doesn't get read as a second-token subcommand.
+      const rest = (m[1] ?? m[2] ?? "").split(/[#|&;]/)[0].trim();
       if (rest.startsWith("-")) continue; // `offbook --version` etc: flags, not verbs
       const tokens = rest.split(/\s+/).filter((t) => !t.startsWith("-"));
       if (tokens.length === 0 || tokens[0].startsWith("<")) continue;

@@ -43,12 +43,13 @@ them, and run the named verification after every step.
    `"mock:up": "cd mock && offbook up"`, `"mock:down": "cd mock && offbook down"`.
 6. **First light.** `cd mock && offbook up`. Confirm ingestion with
    `offbook topics --json` (it refuses if no server is running here — that
-   refusal means `up` failed; read its output). Start the app. **The
-   acceptance test: the app's connect fingerprint appears** — `offbook
-   status` shows a nonzero `clients:` count. Zero connects while the app
-   works means the app is still on the real backend: revisit step 4. Then
-   run `offbook validation --watch` and show the human a violation landing
-   (e.g. `offbook publish <a-toClient-topic> --example` then break a field).
+   refusal means `up` failed; read its output). Start the app.
+   **The acceptance test: the app's connect fingerprint appears** —
+   `offbook status` shows a nonzero `clients:` count. Zero connects while the
+   app works means the app is still on the real backend: revisit step 4.
+   Then run `offbook validation --watch` and show the human a violation
+   landing (e.g. `offbook publish <a-toClient-topic> --example` then break a
+   field).
 7. **CI (offer, optional).** The daily-loop guide's CI recipe: `offbook up
    --ci`, run the app's integration tests, `offbook check`, `offbook down`.
 
