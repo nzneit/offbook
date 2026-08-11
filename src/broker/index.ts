@@ -65,6 +65,12 @@ export function fingerprintLine(e: FingerprintEvent): string {
 // persistence touched on that path). Both surfaces therefore carry an
 // explicit started guard below, so either one rejects with one legible
 // error instead of a QoS-dependent raw TypeError (or silent success).
+// start() is also single-lifecycle: a second aedes 1.x `listen()` silently
+// rebuilds persistence (wiping the retained store) and orphans the first
+// heartbeat interval before the port bind rejects, and start-after-stop
+// would resolve into a zombie (mqemitter permanently closed), so re-entry
+// rejects on entry; one lifecycle per BrokerModule, matching every real path
+// (compose starts once; the --watch respawn is a fresh process).
 // Narrow just the bit of surface we use.
 interface RetainedPacket {
 	topic: string;
@@ -351,8 +357,15 @@ export function createBroker(config: Config): BrokerModule {
 	});
 
 	let started = false;
+	let startCalled = false;
 	return {
 		start: async () => {
+			if (startCalled) {
+				throw new Error(
+					"broker already started — one start() per BrokerModule",
+				);
+			}
+			startCalled = true;
 			// aedes 1.x: persistence setup is async and moved out of the
 			// constructor into listen() — it must complete before either
 			// listener can accept a socket

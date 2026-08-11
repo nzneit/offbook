@@ -154,6 +154,23 @@ test("emit and getState before start() reject with one legible error (D-031: aed
 	await expect(b.getState()).rejects.toThrow("broker not started");
 });
 
+test("start() is single-lifecycle: re-entry rejects without destroying state, and start-after-stop rejects (D-031)", async () => {
+	const b = track(createBroker(ports(8)));
+	await b.start();
+	await b.emit({ topic: "pin/retained", payload: { v: 1 }, retain: true });
+	// B-1: a second start() must reject legibly BEFORE touching aedes.listen()
+	// — on raw aedes 1.x a second listen() rebuilds persistence (wiping the
+	// retained store) and orphans the heartbeat interval before the bind fails
+	await expect(b.start()).rejects.toThrow("broker already started");
+	// the retained store survived the rejected re-entry
+	const state = await b.getState();
+	expect(state.has("pin/retained")).toBe(true);
+	await b.stop();
+	// B-2: start-after-stop must reject too (1.x listen() would otherwise
+	// resolve into a zombie: mqemitter closed, ports accepting, nothing delivered)
+	await expect(b.start()).rejects.toThrow("broker already started");
+});
+
 // --- R-009: fuller tier-1 broker acceptance ---
 
 // [utest->R-009]
