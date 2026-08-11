@@ -57,7 +57,14 @@ export function fingerprintLine(e: FingerprintEvent): string {
 // in AedesOptions but not surfaced on the class), even though it's a real
 // runtime property (1.x aedes.js, inside `listen()`:
 // `this.persistence = opts.persistence || memory()` — so it exists only
-// after `start()` has run; `getState` is a post-start surface).
+// after `start()` has run; `getState` is a post-start surface). `emit` is a
+// post-start surface too: on raw aedes 1.x a pre-start publish fails
+// inconsistently by QoS — QoS>0 or retained reaches
+// `this.persistence.subscriptionsByTopic`/`storeRetained` and throws a raw
+// TypeError, while a QoS-0 non-retained publish silently succeeds (no
+// persistence touched on that path). Both surfaces therefore carry an
+// explicit started guard below, so either one rejects with one legible
+// error instead of a QoS-dependent raw TypeError (or silent success).
 // Narrow just the bit of surface we use.
 interface RetainedPacket {
 	topic: string;
@@ -343,6 +350,7 @@ export function createBroker(config: Config): BrokerModule {
 		}
 	});
 
+	let started = false;
 	return {
 		start: async () => {
 			// aedes 1.x: persistence setup is async and moved out of the
@@ -357,6 +365,7 @@ export function createBroker(config: Config): BrokerModule {
 					tcpServer.listen(config.brokerTcpPort, () => resolve()),
 				),
 			]);
+			started = true;
 		},
 		stop: () =>
 			Promise.all([
@@ -373,8 +382,13 @@ export function createBroker(config: Config): BrokerModule {
 		onFingerprint: (h) => {
 			fingerprints.push(h);
 		},
-		emit: (m) =>
-			new Promise<void>((resolve, reject) => {
+		emit: (m) => {
+			if (!started) {
+				return Promise.reject(
+					new Error("broker not started — call start() first"),
+				);
+			}
+			return new Promise<void>((resolve, reject) => {
 				const payload =
 					m.payload === undefined
 						? Buffer.alloc(0)
@@ -390,9 +404,15 @@ export function createBroker(config: Config): BrokerModule {
 					},
 					(err) => (err ? reject(err) : resolve()),
 				);
-			}),
-		getState: () =>
-			new Promise((resolve) => {
+			});
+		},
+		getState: () => {
+			if (!started) {
+				return Promise.reject(
+					new Error("broker not started — call start() first"),
+				);
+			}
+			return new Promise<ReadonlyMap<string, NormalizedMessage>>((resolve) => {
 				const map = new Map<string, NormalizedMessage>();
 				const stream = aedes.persistence.createRetainedStream("#");
 				stream.on("data", (p: RetainedPacket) => {
@@ -407,6 +427,7 @@ export function createBroker(config: Config): BrokerModule {
 					});
 				});
 				stream.on("end", () => resolve(map));
-			}),
+			});
+		},
 	};
 }

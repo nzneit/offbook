@@ -146,6 +146,14 @@ test("M0 gate (i): a browser-style mqtt.js client connects over ws, receives a r
 	}
 });
 
+test("emit and getState before start() reject with one legible error (D-031: aedes 1.x persistence lives in listen())", async () => {
+	const b = track(createBroker(ports(7)));
+	await expect(b.emit({ topic: "t", payload: { x: 1 } })).rejects.toThrow(
+		"broker not started",
+	);
+	await expect(b.getState()).rejects.toThrow("broker not started");
+});
+
 // --- R-009: fuller tier-1 broker acceptance ---
 
 // [utest->R-009]
