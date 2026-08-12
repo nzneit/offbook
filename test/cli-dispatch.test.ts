@@ -1375,6 +1375,15 @@ test("bare publish/scenario point at their listing verbs", async () => {
 
 test("up: busy port and failed boot both point at doctor", async () => {
 	const tmp = mkdtempSync(join(tmpdir(), "offbook-audit-"));
+	// the failed-boot premise is "no services.yaml in cwd", so pin cwd to an
+	// empty dir — inheriting the checkout root breaks the moment a stray
+	// `offbook init` lands there: the boot then SUCCEEDS, the test fails, and
+	// the detached server leaks onto the pinned ports, failing every later
+	// run with the port-conflict attribution instead of the doctor hint
+	const prevCwd = process.cwd();
+	const emptyCwd = join(tmp, "cwd");
+	mkdirSync(emptyCwd);
+	process.chdir(emptyCwd);
 	try {
 		// busy ws port → preflight fails before any spawn
 		const listener = Bun.listen({
@@ -1425,6 +1434,13 @@ test("up: busy port and failed boot both point at doctor", async () => {
 		).not.toBe(0);
 		expect(bootErr.join("\n")).toContain("offbook doctor");
 	} finally {
+		process.chdir(prevCwd);
+		// belt-and-braces: if a regression ever lets the boot succeed, tear
+		// the server down before dropping tmp instead of leaking it
+		await run(["down", "--run-dir", join(tmp, "b")], {
+			out: () => {},
+			err: () => {},
+		});
 		rmSync(tmp, { recursive: true, force: true });
 	}
 }, 60_000); // the failed-boot case rides out `up`'s full readiness deadline
