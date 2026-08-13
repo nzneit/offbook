@@ -48,22 +48,28 @@ them, and run the named verification after every step.
    field. After each edit run `offbook doctor mock/` until it reports ok
    (shape is checked locally; specs-reachable confirms each repo resolves).
 4. **Point the app at the mock.** Find the hardcoded broker URL in the app
-   source. Extract it behind a build-time env var per "Point your app at
-   offbook" in the wiring guide (`wiring-your-service.md`); real backend
-   stays the default; `ws://localhost:9001` goes in `.env.development`.
-   Show the human the full diff and get approval BEFORE applying it.
+   source; note the clientId if the same connect options set one (step 6
+   uses it to recognize the app's connect). Extract the URL behind a
+   build-time env var per "Point your app at offbook" in the wiring guide
+   (`wiring-your-service.md`); real backend stays the default;
+   `ws://localhost:9001` goes in `.env.development`. Show the human the
+   full diff and get approval BEFORE applying it.
 5. **Package scripts.** Add to the app's package.json, mirroring the
    daily-loop guide (`daily-loop.md`):
    `"mock:up": "cd mock && offbook up"`, `"mock:down": "cd mock && offbook down"`.
 6. **First light.** `cd mock && offbook up`. Confirm ingestion with
    `offbook topics --json` — keep the `--json`: it refuses if no server is
-   running here (bare `topics` silently falls back to the bundled demo
-   spec), and that refusal means `up` failed; read its output. Start the
+   running here (bare `topics` falls back to the bundled demo spec behind
+   a printed note), and that refusal means `up` failed; read its output.
+   Run `offbook status` and note the `clients:` count, then start the
    app. **The acceptance test: the app's connect fingerprint appears** —
-   the `clients:` line of `offbook status` shows a connect whose `last`
-   clientId is the app's. Check the id, not just a nonzero count: any
-   stray MQTT client also counts a connect. Zero connects while the app
-   works means the app is still on the real backend: revisit step 4.
+   `offbook status` again: the count went up and `last` shows the new
+   connect (step 4's clientId if the app sets one; generated ids change
+   every boot). If the picture is muddy — the count jumped by more than
+   one, or `last` is a client you don't recognize — read the fingerprints
+   directly: `offbook logs` prints every `ws-connect` line for this run,
+   not just the last. Zero new connects while the app works means the app
+   is still on the real backend: revisit step 4.
    Then run `offbook validation --watch` and show the human a violation
    landing: publish a clean example (`offbook publish <topic> --example`
    on a toClient topic), then copy that topic's `example:` line from
