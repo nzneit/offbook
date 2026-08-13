@@ -6,6 +6,7 @@
 import { createBroker, fingerprintLine } from "#src/broker/index.ts";
 import type { ControlPlaneCaps } from "#src/control-plane/index.ts";
 import { createServer } from "#src/control-plane/index.ts";
+import { createDispatchRegistry } from "#src/engine/dispatch.ts";
 import { l1Floor } from "#src/engine/faker.ts";
 import { createEngine } from "#src/engine/index.ts";
 import { resolveEmit } from "#src/engine/resolve-emit.ts";
@@ -59,6 +60,11 @@ export async function compose(parts: ComposeParts) {
 		record: vlog.record,
 		scenarios: () => runtime,
 		seedInstances: parts.seedInstances,
+		// each composed server owns its dispatch registry: the process-wide
+		// defaultDispatch would share L3 handlers across every engine in the
+		// process (the 2026-08-13 CI incident); loadHandlers routes handler-file
+		// registrations here via the free register()'s active-loader slot
+		dispatch: createDispatchRegistry(),
 	});
 	if (parts.scenariosDir !== undefined)
 		runtime = createScenarioRuntime({

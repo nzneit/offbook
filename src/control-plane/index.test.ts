@@ -429,6 +429,36 @@ test("POST /v1/publish: a valid fromClient publish re-enters onInbound and fires
 	expect(payload.target).toBe(22); // {{payload.target}} from the injected inbound
 });
 
+test("one server's handlersDir never L3-shadows another server's scenarios (2026-08-13 CI incident)", async () => {
+	// server A loads a hook-less handler owning command/{deviceId}/set — the
+	// exact shape dispatch.test.ts's fixtures leaked into the process-wide
+	// default dispatch, where (with bun's readdir-dependent test-file order)
+	// it silently swallowed this file's reactive-L2 inbound in CI
+	const hdir = mkdtempSync(join(tmpdir(), "offbook-bleed-"));
+	const dispatchPath = new URL("../engine/dispatch.ts", import.meta.url)
+		.pathname;
+	writeFileSync(
+		join(hdir, "10-quiet.ts"),
+		`import { register } from ${JSON.stringify(dispatchPath)};
+register("command/{deviceId}/set", () => ({}));`,
+	);
+	await boot(30, { parts: { handlersDir: hdir } });
+	// server B has only the reactive L2 scenario; A's handler must not own
+	// B's channel — the inbound must fire ack-set, not vanish into A's L3
+	const b = await boot(31);
+	await b.post("/v1/publish", {
+		topic: "command/thermostat-1/set",
+		payload: { mode: "heat", target: 22 },
+	});
+	await b.req("/v1/pending?wait");
+	const { state } = (await (await b.req("/v1/state")).json()) as {
+		state: StateEntry[];
+	};
+	expect(
+		state.find((e) => e.topic === "state/thermostat-1")?.payload,
+	).toMatchObject({ status: "accepted", target: 22 });
+});
+
 test("POST /v1/publish: unknown topic still injects raw (202) + unknown-topic violation; direction null iff unmatched", async () => {
 	const { req, post } = await boot(14);
 	const res = await post("/v1/publish", {

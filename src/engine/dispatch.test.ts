@@ -8,6 +8,7 @@ import {
 	defaultDispatch,
 	precedence,
 	type Registration,
+	register,
 } from "./dispatch.ts";
 
 // [utest->R-012]
@@ -132,11 +133,85 @@ register("command/{deviceId}/set", () => ({}));`,
 		`import { register } from ${JSON.stringify(dispatchPath)};
 register("command/{deviceId}/set", () => ({}));`,
 	);
-	const paths = await defaultDispatch.loadHandlers(dir);
+	// an isolated registry: loadHandlers routes the files' free register()
+	// calls here, so this test leaks nothing into the process singleton
+	const d = createDispatchRegistry();
+	const paths = await d.loadHandlers(dir);
 	expect(paths.map((p) => p.split("/").pop())).toEqual(["10-a.ts", "20-b.ts"]);
-	defaultDispatch.instantiate();
-	const sel = defaultDispatch.select("command/d1/set", stubRegistry);
+	d.instantiate();
+	const sel = d.select("command/d1/set", stubRegistry);
 	expect(sel?.registration.modulePath.endsWith("10-a.ts")).toBe(true);
+});
+
+test("loadHandlers captures handler-file registrations into the LOADING registry, not the process singleton", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "offbook-handlers-iso-"));
+	const dispatchPath = join(import.meta.dir, "dispatch.ts");
+	writeFileSync(
+		join(dir, "10-iso.ts"),
+		`import { register } from ${JSON.stringify(dispatchPath)};
+register("command/{deviceId}/set", () => ({}));`,
+	);
+	const d = createDispatchRegistry();
+	await d.loadHandlers(dir);
+	d.instantiate();
+	// the loading registry owns the registration…
+	expect(
+		d
+			.select("command/iso1/set", stubRegistry)
+			?.registration.modulePath.endsWith("10-iso.ts"),
+	).toBe(true);
+	// …and the singleton must not have inherited it: a later engine that
+	// defaults to the singleton would silently L3-shadow this channel (the
+	// 2026-08-13 CI incident — a leaked hook-less fixture handler swallowed
+	// another composed server's inbound, dropping its L2 scenario)
+	defaultDispatch.instantiate();
+	expect(
+		defaultDispatch
+			.select("command/iso1/set", stubRegistry)
+			?.registration.modulePath.endsWith("10-iso.ts") ?? false,
+	).toBe(false);
+});
+
+test("free register() with no load in flight targets the singleton (G11), including after a loadHandlers completed", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "offbook-handlers-post-"));
+	const dispatchPath = join(import.meta.dir, "dispatch.ts");
+	writeFileSync(
+		join(dir, "10-post.ts"),
+		`import { register } from ${JSON.stringify(dispatchPath)};
+register("command/{deviceId}/set", () => ({}));`,
+	);
+	const d = createDispatchRegistry();
+	await d.loadHandlers(dir);
+	// the load is over: a direct top-level register() (no import in flight)
+	// belongs to the process singleton, never to the last loading registry
+	register("offbook-sentinel/{p}", () => ({}));
+	d.instantiate();
+	expect(
+		d.all().some((x) => x.registration.pattern === "offbook-sentinel/{p}"),
+	).toBe(false);
+	const sentinelRegistry: SpecRegistry = {
+		diagnostics: () => [],
+		channels: () => [],
+		matchesFilter: () => false,
+		match: (topic: string) =>
+			topic === "offbook-sentinel/x"
+				? {
+						channel: {
+							topic: "offbook-sentinel/{p}",
+							direction: "fromClient" as const,
+							service: "t",
+							schema: {},
+							validate: () => [],
+						},
+						params: { p: "x" },
+					}
+				: undefined,
+	};
+	defaultDispatch.instantiate();
+	expect(
+		defaultDispatch.select("offbook-sentinel/x", sentinelRegistry)?.registration
+			.pattern,
+	).toBe("offbook-sentinel/{p}");
 });
 
 test("precedence is code-unit ordered, not locale ordered ('B.ts' beats 'a.ts')", () => {
