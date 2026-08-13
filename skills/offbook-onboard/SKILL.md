@@ -1,6 +1,6 @@
 ---
 name: offbook-onboard
-description: Embed offbook (the MQTT-over-WebSockets mock) into this app repo — scaffold the mock project, wire the AsyncAPI spec repos, point the app at the mock, and verify first light.
+description: Embed offbook (the MQTT-over-WebSockets mock) into this app repo — scaffold the mock project, wire the AsyncAPI spec repos, point the app at the mock, and verify first light. Use when asked to onboard, set up, or embed offbook, to mock the MQTT/AsyncAPI backend, or when onboarding stalls (doctor reports skill drift, `offbook up` hits a port conflict, the app connects zero times).
 ---
 
 # Onboarding offbook into this app repo
@@ -13,13 +13,27 @@ MQTT-over-WebSockets backend from AsyncAPI specs — into the current repo.
 disagrees with them, this skill is wrong — follow the guide and say so.
 
 **Locating the offbook docs:** read `.installed-from` in this skill's
-directory. If its `sourcePath` exists on this machine, the guides are at
-`<sourcePath>/docs/guides/`. Otherwise its `originUrl` is the clone URL
+directory. Its `sourcePath` may start with `~` — expand that to the home
+directory before testing the path (a literal check on the `~` string
+false-negatives). If the expanded path exists on this machine, the guides
+are at `<sourcePath>/docs/guides/`. Otherwise its `originUrl` is the clone URL
 (clone it, or hand the URL to the human). If neither helps, ask a teammate
 for the offbook clone URL — never guess a host.
 
 Work conversationally: one question at a time, show diffs before applying
 them, and run the named verification after every step.
+
+## Never
+
+- **Never guess a git host or clone URL.** An invented host is at best a
+  dead end and at worst sends internal repo paths outside the org — ask
+  the human or a teammate.
+- **Never edit app source without approval.** Show the full diff and get
+  a yes first: the app must default to the real backend, and a silent
+  edit here can quietly repoint every developer's build.
+- **Never `offbook skill install --force` before the human reviews the
+  drift listing.** Local edits are drift; a clean-replace destroys
+  anything not yet upstreamed.
 
 ## The journey
 
@@ -34,22 +48,35 @@ them, and run the named verification after every step.
    field. After each edit run `offbook doctor mock/` until it reports ok
    (shape is checked locally; specs-reachable confirms each repo resolves).
 4. **Point the app at the mock.** Find the hardcoded broker URL in the app
-   source. Extract it behind a build-time env var per the wiring guide's
-   "Point your app at offbook" section (real backend stays the default;
-   `ws://localhost:9001` goes in `.env.development`). Show the human the
+   source; note the clientId if the same connect options set one (step 6
+   uses it to recognize the app's connect). Extract the URL behind a
+   build-time env var per "Point your app at offbook" in the wiring guide
+   (`wiring-your-service.md`); real backend stays the default;
+   `ws://localhost:9001` goes in `.env.development`. Show the human the
    full diff and get approval BEFORE applying it.
 5. **Package scripts.** Add to the app's package.json, mirroring the
-   daily-loop guide:
+   daily-loop guide (`daily-loop.md`):
    `"mock:up": "cd mock && offbook up"`, `"mock:down": "cd mock && offbook down"`.
 6. **First light.** `cd mock && offbook up`. Confirm ingestion with
-   `offbook topics --json` (it refuses if no server is running here — that
-   refusal means `up` failed; read its output). Start the app.
-   **The acceptance test: the app's connect fingerprint appears** —
-   `offbook status` shows a nonzero `clients:` count. Zero connects while the
-   app works means the app is still on the real backend: revisit step 4.
+   `offbook topics --json` — keep the `--json`: it refuses if no server is
+   running here (bare `topics` falls back to the bundled demo spec behind
+   a printed note), and that refusal means `up` failed; read its output.
+   Run `offbook status` and note the `clients:` count, then start the
+   app. **The acceptance test: the app's connect fingerprint appears** —
+   `offbook status` again: the count went up and `last` shows the new
+   connect (step 4's clientId if the app sets one; generated ids change
+   every boot). If the picture is muddy — the count jumped by more than
+   one, or `last` is a client you don't recognize — read the fingerprints
+   directly: `offbook logs` prints the whole log; the `ws-connect` lines
+   after the last boot line are this run's connects, every one of them,
+   not just the last. Zero new connects while the app works means the app
+   is still on the real backend: revisit step 4.
    Then run `offbook validation --watch` and show the human a violation
-   landing (e.g. `offbook publish <a-toClient-topic> --example` then break a
-   field).
+   landing: publish a clean example (`offbook publish <topic> --example`
+   on a toClient topic), then copy that topic's `example:` line from
+   `offbook topics`, break one required field (delete it or wrong-type
+   it), and send it with `offbook publish <topic> --payload '<json>'` — a
+   violation line appears in the `--watch` terminal.
 7. **CI (offer, optional).** The daily-loop guide's CI recipe: `offbook up
    --ci`, run the app's integration tests, `offbook check`, `offbook down`.
 

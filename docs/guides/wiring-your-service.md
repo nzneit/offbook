@@ -62,11 +62,13 @@ further.
 A fetch failure aborts `up` (no half-booted mock). The error names the
 service; `offbook doctor` checks all repos' reachability in one pass.
 
-**First light is not done until your app's connect lands.** Start the app,
-then `offbook status`: the `clients:` line counts connects observed this
-run. Zero connects while the app "works" means it is talking to the real
-backend, not the mock — check §8's env wiring. (`offbook logs` shows the
-full connect fingerprint.)
+**First light is not done until your app's connect lands.** Note the
+`clients:` count in `offbook status`, start the app, then `offbook status`
+again: the count goes up and `last` shows your app's connect. Zero new
+connects while the app "works" means it is talking to the real backend,
+not the mock — check §8's env wiring. (If `last` shows some other client,
+`offbook logs` prints every `ws-connect` line — the full record, not just
+the last.)
 
 ## 5. Keeping specs fresh
 
