@@ -1373,8 +1373,34 @@ test("bare publish/scenario point at their listing verbs", async () => {
 	expect(scnErr.join("\n")).toContain("offbook scenarios");
 });
 
+// bind-probe: a leaked detached server holds its ports, and a listening
+// socket releases on process exit (no TIME_WAIT), so binding is the
+// truthful "is it free" check
+function portFree(port: number): boolean {
+	try {
+		const probe = Bun.listen({
+			hostname: "127.0.0.1",
+			port,
+			socket: { data() {} },
+		});
+		probe.stop(true);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 test("up: busy port and failed boot both point at doctor", async () => {
 	const tmp = mkdtempSync(join(tmpdir(), "offbook-audit-"));
+	// the failed-boot premise is "no services.yaml in cwd", so pin cwd to an
+	// empty dir — inheriting the checkout root breaks the moment a stray
+	// `offbook init` lands there: the boot then SUCCEEDS, the test fails, and
+	// the detached server leaks onto the pinned ports, failing every later
+	// run with the port-conflict attribution instead of the doctor hint
+	const prevCwd = process.cwd();
+	const emptyCwd = join(tmp, "cwd");
+	mkdirSync(emptyCwd);
+	process.chdir(emptyCwd);
 	try {
 		// busy ws port → preflight fails before any spawn
 		const listener = Bun.listen({
@@ -1423,8 +1449,28 @@ test("up: busy port and failed boot both point at doctor", async () => {
 				{ out: () => {}, err: (l) => bootErr.push(l) },
 			),
 		).not.toBe(0);
-		expect(bootErr.join("\n")).toContain("offbook doctor");
+		const bootText = bootErr.join("\n");
+		expect(bootText).toContain("offbook doctor");
+		// discriminate from the preflight-busy path (its generic message also
+		// names doctor): only a spawned-then-dead server prints this header,
+		// so a stray squatter on 19141/12997 can't green this case without
+		// the boot path ever running
+		expect(bootText).toContain("server failed to start");
+
+		// leak guard: a regression that leaves the server alive (boot
+		// succeeded, or bound-but-never-ready — `up` clears the runfile after
+		// the deadline, so the finally's down can't reach that one) must fail
+		// HERE, not squat silently on the pinned fixture ports
+		for (const port of [19141, 12997, 19897])
+			expect({ port, free: portFree(port) }).toEqual({ port, free: true });
 	} finally {
+		process.chdir(prevCwd);
+		// belt-and-braces: if a regression ever lets the boot succeed, tear
+		// the server down before dropping tmp instead of leaking it
+		await run(["down", "--run-dir", join(tmp, "b")], {
+			out: () => {},
+			err: () => {},
+		});
 		rmSync(tmp, { recursive: true, force: true });
 	}
 }, 60_000); // the failed-boot case rides out `up`'s full readiness deadline
