@@ -43,13 +43,23 @@ export function precedence(a: Registration, b: Registration): number {
 	return a.order - b.order;
 }
 
+// While a loadHandlers import is in flight, the free register() below routes
+// here: a handler file's top-level register(...) must land in the registry
+// that is importing it, never in the process singleton — or one engine's
+// handlers leak into every other engine in the process (the 2026-08-13 CI
+// incident: a leaked hook-less fixture handler silently L3-shadowed another
+// composed server's channel, and bun's readdir-dependent test-file order
+// turned the leak into a per-checkout coin flip). Every caller awaits its
+// imports sequentially, so one slot suffices.
+let activeLoader: DispatchRegistry | undefined;
+
 export function createDispatchRegistry(): DispatchRegistry {
 	const registrations: Registration[] = [];
 	const instances = new Map<Registration, Handler>();
 	let order = 0;
 	let importingPath = ""; // set around each loadHandlers import; "" = direct registration
 
-	return {
+	const api: DispatchRegistry = {
 		register(pattern, factory, modulePath) {
 			registrations.push({
 				pattern,
@@ -66,10 +76,12 @@ export function createDispatchRegistry(): DispatchRegistry {
 			).sort();
 			for (const p of paths) {
 				importingPath = p;
+				activeLoader = api;
 				try {
 					await import(p);
 				} finally {
 					importingPath = "";
+					activeLoader = undefined;
 				}
 			}
 			return paths;
@@ -106,6 +118,7 @@ export function createDispatchRegistry(): DispatchRegistry {
 				);
 		},
 	};
+	return api;
 }
 
 // The process singleton behind the contracts §3 free function. User handler
@@ -113,5 +126,5 @@ export function createDispatchRegistry(): DispatchRegistry {
 export const defaultDispatch: DispatchRegistry = createDispatchRegistry();
 
 export function register(pattern: string, factory: HandlerFactory): void {
-	defaultDispatch.register(pattern, factory);
+	(activeLoader ?? defaultDispatch).register(pattern, factory);
 }
