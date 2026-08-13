@@ -67,7 +67,8 @@ them, and run the named verification after every step.
    connect (step 4's clientId if the app sets one; generated ids change
    every boot). If the picture is muddy — the count jumped by more than
    one, or `last` is a client you don't recognize — read the fingerprints
-   directly: `offbook logs` prints every `ws-connect` line for this run,
+   directly: `offbook logs` prints the whole log; the `ws-connect` lines
+   after the last boot line are this run's connects, every one of them,
    not just the last. Zero new connects while the app works means the app
    is still on the real backend: revisit step 4.
    Then run `offbook validation --watch` and show the human a violation
