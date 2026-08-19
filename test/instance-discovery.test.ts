@@ -629,9 +629,63 @@ test("up refuses a foreign-host runfile instead of reclaiming it (row 10, shared
 				],
 				x.io,
 			),
-		).toBe(1);
+		).toBe(2);
 		expect(await readRunfile(runDir)).toBeDefined();
 		expect(existsSync(pointerPath(state, runDir))).toBe(true);
+		expect(x.err.join("\n")).toContain("written on some-other-machine");
+		expect(x.out.join("\n")).not.toContain("reclaiming");
+	} finally {
+		squatter.stop(true);
+		if (prevState === undefined) delete process.env.OFFBOOK_STATE_DIR;
+		else process.env.OFFBOOK_STATE_DIR = prevState;
+		for (const d of [proj, state]) rmSync(d, { recursive: true, force: true });
+	}
+});
+
+// demo --serve shares launchDetached, so the wrong-host refusal (M10, exit 2)
+// must flow through it identically
+test("demo --serve refuses a foreign-host runfile with M10, exit 2 (row 10)", async () => {
+	// [itest->R-046]
+	const proj = mkdtempSync(join(tmpdir(), "offbook-demohost-"));
+	const state = mkdtempSync(join(tmpdir(), "offbook-demohost-state-"));
+	const runDir = join(proj, ".offbook");
+	const prevState = process.env.OFFBOOK_STATE_DIR;
+	process.env.OFFBOOK_STATE_DIR = state;
+	await writeRunfile(
+		runDir,
+		{
+			pid: Bun.spawnSync(["true"]).pid ?? 4_193_996,
+			brokerWsPort: 19444,
+			brokerTcpPort: 12489,
+			controlPlanePort: 19445,
+			startedAt: "t",
+			token: "d3".repeat(16),
+			host: "some-other-machine",
+		},
+		{ stateDir: state },
+	);
+	// ws squatter: a regression that reclaims cannot also boot the demo
+	const squatter = Bun.serve({ port: 19444, fetch: () => new Response("x") });
+	try {
+		const x = io();
+		expect(
+			await run(
+				[
+					"demo",
+					"--serve",
+					"--run-dir",
+					runDir,
+					"--ws-port",
+					"19444",
+					"--tcp-port",
+					"12489",
+					"--ctrl-port",
+					"19445",
+				],
+				x.io,
+			),
+		).toBe(2);
+		expect(await readRunfile(runDir)).toBeDefined();
 		expect(x.err.join("\n")).toContain("written on some-other-machine");
 		expect(x.out.join("\n")).not.toContain("reclaiming");
 	} finally {

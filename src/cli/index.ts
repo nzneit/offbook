@@ -180,9 +180,10 @@ function skippedNote(s: SkippedInstance): string {
 		: M13(s.projectDir, s.pid, s.ctrlPort);
 }
 
-// the one place the wrong-host refusal (M10) is rendered: verbatim catalog
-// wording on stderr (never re-prefixed by run()'s renderer), or the
-// wrong-host envelope under --json; exit 2 either way
+// where the management verbs' wrong-host refusal (M10) is rendered: verbatim
+// catalog wording on stderr (never re-prefixed by run()'s renderer), or the
+// wrong-host envelope under --json; exit 2 either way. launchDetached renders
+// its own M10 at the up/demo seam — same wording, same exit code.
 async function resolveOrRefuse(
 	opts: Parameters<typeof resolveInstance>[0],
 	io: Io,
@@ -1367,7 +1368,7 @@ async function launchDetached(
 		};
 	},
 	io: Io,
-): Promise<number | null> {
+): Promise<number | "wrong-host" | null> {
 	const { runDir, config } = spec;
 	const stateDir = stateDirFromEnv();
 	const existing = await resolveRunning(runDir);
@@ -1380,7 +1381,7 @@ async function launchDetached(
 		// below: refused as already-running, records untouched either way.)
 		if (run.host !== undefined && run.host !== hostname()) {
 			io.err(M10(run.host, runDir)); // row 10: inert, never touched
-			return null;
+			return "wrong-host"; // M10 is a refusal — exit 2, like every verb
 		}
 		if (existing.live) {
 			io.err(
@@ -1544,6 +1545,7 @@ async function cmdUp(rest: string[], io: Io): Promise<number> {
 		},
 		io,
 	);
+	if (pid === "wrong-host") return 2;
 	if (pid === null) return 1;
 
 	io.out(
@@ -1613,6 +1615,7 @@ async function cmdDemoServe(rest: string[], io: Io): Promise<number> {
 		},
 		io,
 	);
+	if (pid === "wrong-host") return 2;
 	if (pid === null) return 1;
 	io.out(
 		`offbook demo --serve — pid ${pid} · bundled thermostat spec · mode ${config.mode} · seed ${config.seed}`,
