@@ -2,8 +2,9 @@
 // Instance discovery integration: serve.ts boot-contract fatals here;
 // the state-table row suite lands in this file in a later task.
 // Ports for this file (repo convention: unique per file): 19430-19449,
-// tcp 12490-12495 (bound by the real `up` runs below; 19440-19443 +
-// tcp 12494-12495 belong to the `up`-refusal tests, which never spawn).
+// tcp 12489-12495 (bound by the real `up` runs below; 19440-19445 +
+// tcp 12489 + 12494-12495 belong to the `up`/`demo --serve` refusal
+// tests, which never spawn).
 //
 // State-table checklist (spec "The instance state table") — where each row
 // is pinned:
@@ -645,7 +646,7 @@ test("up refuses a foreign-host runfile instead of reclaiming it (row 10, shared
 // demo --serve shares launchDetached, so the wrong-host refusal (M10, exit 2)
 // must flow through it identically
 test("demo --serve refuses a foreign-host runfile with M10, exit 2 (row 10)", async () => {
-	// [itest->R-046]
+	// [itest->R-045]
 	const proj = mkdtempSync(join(tmpdir(), "offbook-demohost-"));
 	const state = mkdtempSync(join(tmpdir(), "offbook-demohost-state-"));
 	const runDir = join(proj, ".offbook");
