@@ -16,7 +16,12 @@ import {
 	StaticManifestSource,
 	writeLockfile,
 } from "#src/ingestion/index.ts";
-import type { Config, SpecInfo, SpecRegistry } from "#src/model/index.ts";
+import type {
+	Config,
+	ServerIdentity,
+	SpecInfo,
+	SpecRegistry,
+} from "#src/model/index.ts";
 import { buildRegistry, mergeRegistries } from "#src/registry/index.ts";
 
 export interface ProjectBootOptions {
@@ -24,6 +29,7 @@ export interface ProjectBootOptions {
 	config: Config;
 	environment?: string; // v1: 'default'
 	log?: (line: string) => void;
+	server?: ServerIdentity; // R-044: serve.ts's identity, threaded to compose
 }
 
 export async function bootProject(opts: ProjectBootOptions): Promise<Composed> {
@@ -115,6 +121,7 @@ export async function bootProject(opts: ProjectBootOptions): Promise<Composed> {
 			return { registry: next.registry, specs: next.specs };
 		},
 		log: opts.log,
+		server: opts.server,
 	});
 }
 
@@ -123,6 +130,7 @@ export async function bootProject(opts: ProjectBootOptions): Promise<Composed> {
 export async function bootDemo(opts: {
 	config: Config;
 	log?: (line: string) => void;
+	server?: ServerIdentity; // R-044: serve.ts's identity, threaded to compose
 }): Promise<Composed> {
 	const demoDir = join(import.meta.dir, "../demo");
 	const specText = await Bun.file(join(demoDir, "thermostat.yaml")).text();
@@ -139,5 +147,6 @@ export async function bootDemo(opts: {
 		// state, so the dashboard has a device before any client subscribes
 		seedInstances: { "state/{deviceId}": [{ deviceId: "thermostat-1" }] },
 		log: opts.log,
+		server: opts.server,
 	});
 }

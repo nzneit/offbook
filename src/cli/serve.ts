@@ -15,9 +15,10 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, watch as fsWatch, openSync } from "node:fs";
-import { join } from "node:path";
+import { hostname } from "node:os";
+import { isAbsolute, join } from "node:path";
 import { loadConfig } from "#src/config/index.ts";
-import type { Config } from "#src/model/index.ts";
+import type { Config, ServerIdentity } from "#src/model/index.ts";
 import { bootDemo, bootProject } from "./boot.ts";
 import { stateDirFromEnv } from "./registry.ts";
 import { logPath, logSafeEnv, writeRunfile } from "./runfile.ts";
@@ -28,6 +29,7 @@ interface BootFile {
 	environment?: string;
 	watch?: boolean;
 	demo?: boolean; // demo --serve: bundled spec, no project files (D-015)
+	token?: string; // R-044: the launch lineage id `up` baked in (required)
 }
 
 const bootPath = process.argv[2];
@@ -44,6 +46,36 @@ const stateDir = stateDirFromEnv();
 try {
 	const boot = JSON.parse(await Bun.file(bootPath).text()) as BootFile;
 	const config = loadConfig(boot.config);
+	// D-032 — `up` bakes ABSOLUTE paths and the launch token into the boot
+	// file. A relative runDir would re-resolve against THIS process's cwd
+	// (which may have been moved or deleted under a --watch respawn); a
+	// missing token leaves the lineage unidentifiable. Both are fatal —
+	// the fix is rerunning `offbook up` on this build.
+	if (!isAbsolute(config.runDir))
+		throw new Error(
+			`boot file carries a relative runDir '${config.runDir}' — rerun \`offbook up\` (this build bakes absolute paths)`,
+		);
+	if (typeof boot.token !== "string" || boot.token === "")
+		throw new Error("boot file carries no launch token — rerun `offbook up`");
+	const token = boot.token;
+	const ports = {
+		brokerWsPort: config.brokerWsPort,
+		brokerTcpPort: config.brokerTcpPort,
+		controlPlanePort: config.controlPlanePort,
+	};
+	const startedAt = new Date().toISOString();
+	// R-044 — what GET /v1/server answers; pid/startedAt are THIS
+	// incarnation's, token is the lineage's
+	const identity: ServerIdentity = {
+		pid: process.pid,
+		token,
+		host: hostname(),
+		projectDir: boot.projectDir,
+		runDir: config.runDir,
+		startedAt,
+		demo: boot.demo === true,
+		ports,
+	};
 	// F8 — read once, BEFORE boot: the hash below must reflect exactly what
 	// bootProject loaded, not a second read of a file a slow (git-fetching)
 	// boot had time to edit or delete out from under it. `existsSync` mirrors
@@ -59,12 +91,13 @@ try {
 				: undefined;
 	const composed =
 		boot.demo === true
-			? await bootDemo({ config, log })
+			? await bootDemo({ config, log, server: identity })
 			: await bootProject({
 					projectDir: boot.projectDir,
 					config,
 					environment: boot.environment,
 					log,
+					server: identity,
 				});
 	await composed.start();
 	// R-043 — the boot line (adoption.md §10): every startup logs what it
@@ -81,19 +114,11 @@ try {
 				.update(servicesText ?? "")
 				.digest("hex")}`,
 		);
-	const ports = {
-		brokerWsPort: config.brokerWsPort,
-		brokerTcpPort: config.brokerTcpPort,
-		controlPlanePort: config.controlPlanePort,
-	};
-	// the runfile follows the SERVING pid across --watch respawns (G14)
+	// the runfile follows the SERVING pid across --watch respawns (G14);
+	// token stays the lineage's, host this machine's (R-044)
 	await writeRunfile(
 		config.runDir,
-		{
-			pid: process.pid,
-			...ports,
-			startedAt: new Date().toISOString(),
-		},
+		{ pid: process.pid, ...ports, startedAt, token, host: hostname() },
 		{ stateDir },
 	);
 	log(
@@ -135,6 +160,8 @@ try {
 							pid: child.pid,
 							...ports,
 							startedAt: new Date().toISOString(),
+							token,
+							host: hostname(),
 						},
 						{ stateDir },
 					);
