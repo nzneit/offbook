@@ -1380,6 +1380,7 @@ async function launchDetached(
 	const child = spawn(process.execPath, [serveEntry, bootFile], {
 		detached: true,
 		stdio: ["ignore", logFd, logFd],
+		cwd: runDir, // explicit cwd: never inherit a possibly-deleted launch cwd (D-032)
 		env: logSafeEnv(), // D-030 — the log must stay ANSI-clean
 	});
 	closeSync(logFd);

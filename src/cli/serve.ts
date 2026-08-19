@@ -148,24 +148,38 @@ try {
 				const child = spawn(process.execPath, [process.argv[1], bootPath], {
 					detached: true,
 					stdio: ["ignore", fd, fd],
+					// the child must NOT inherit this process's cwd — posix_spawn
+					// fails ENOENT when the launch cwd was deleted, however
+					// absolute the paths; the runDir provably exists (D-032)
+					cwd: config.runDir,
 					// D-030 — belt-and-braces: launchDetached already sanitized this
 					// process's env, but the respawn must not depend on that
 					env: logSafeEnv(),
 				});
 				child.unref();
-				if (child.pid !== undefined)
-					await writeRunfile(
-						config.runDir,
-						{
-							pid: child.pid,
-							...ports,
-							startedAt: new Date().toISOString(),
-							token,
-							host: hostname(),
-						},
-						{ stateDir },
-					);
-				process.exit(0);
+				child.once("spawn", () => {
+					void (async () => {
+						if (child.pid !== undefined)
+							await writeRunfile(
+								config.runDir,
+								{
+									pid: child.pid,
+									...ports,
+									startedAt: new Date().toISOString(),
+									token,
+									host: hostname(),
+								},
+								{ stateDir },
+							);
+						process.exit(0);
+					})();
+				});
+				child.once("error", (cause) => {
+					// ports are already freed (composed.stop() ran) — dying loudly
+					// with the reason beats a silent exit(0) with no successor
+					log(`respawn failed: ${cause.message}`);
+					process.exit(1);
+				});
 			}, 200);
 		});
 	}
