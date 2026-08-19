@@ -93,4 +93,5 @@ them, and run the named verification after every step.
   (started in `<projectDir>`) — `offbook down --run-dir <runDir>` stops it
   from anywhere on this machine" — run the pasted command; when the owner
   is an older offbook build the message instead says "`offbook down` in
-  that project's directory frees the control port".
+  that project's directory frees the control port; check the others
+  separately if they persist".
