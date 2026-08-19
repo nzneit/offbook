@@ -4,7 +4,6 @@ import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import {
 	existsSync,
-	mkdirSync,
 	mkdtempSync,
 	readdirSync,
 	rmSync,
