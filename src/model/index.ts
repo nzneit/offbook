@@ -302,3 +302,22 @@ export type ErrorCode =
 	| "bad-request" // malformed body / params (generic 400)
 	| "example-on-unknown-topic" // POST /publish { example: true } on an unknown topic
 	| "example-and-payload"; // POST /publish with BOTH payload and example present
+
+// R-044/D-032 — the GET /v1/server identity read (contracts §5; named
+// `server`, not `instance` — "instance" is the frozen §3 term for
+// materialized channel instances). `token` identifies the LAUNCH lineage
+// (constant across --watch respawns); `pid` identifies the incarnation.
+export interface ServerIdentity {
+	pid: number;
+	token: string;
+	host: string;
+	projectDir: string;
+	runDir: string; // absolute
+	startedAt: string;
+	demo: boolean;
+	ports: {
+		brokerWsPort: number;
+		brokerTcpPort: number;
+		controlPlanePort: number;
+	};
+}
