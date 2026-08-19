@@ -51,7 +51,10 @@ offbook down
 ```
 
 Scripts and CI that must pin one instance pass `--run-dir mock/.offbook` on
-every verb — pinned addressing behaves identically on every offbook build.
+every verb: pinned addressing always means that one instance, on every
+offbook build, and never another. Gate on the exit code (and, under `--json`,
+the refusal envelope's `error.code`) rather than on refusal wording, which
+can change between builds.
 
 ## When something is off
 
