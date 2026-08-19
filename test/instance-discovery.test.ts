@@ -218,4 +218,22 @@ test("shouldClearFailedBoot: our dead spawn clears; a repointed runfile or anoth
 			},
 		}),
 	).toBe(false);
+	// a legacy probe (pre-D-032 answerer) is never a concurrent-up winner; the clear proceeds
+	expect(
+		shouldClearFailedBoot(spawned, { run: ours, probe: { kind: "legacy" } }),
+	).toBe(true);
+	// pid mismatch: the runfile was repointed or corrupted
+	expect(
+		shouldClearFailedBoot(spawned, {
+			run: { ...ours, pid: 42 },
+			probe: silent,
+		}),
+	).toBe(false);
+	// token mismatch: the runfile was repointed or corrupted
+	expect(
+		shouldClearFailedBoot(spawned, {
+			run: { ...ours, token: "dd".repeat(16) },
+			probe: silent,
+		}),
+	).toBe(false);
 });
