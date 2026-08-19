@@ -356,26 +356,33 @@ All CLI-local over existing surfaces — structured `offbook.log` lines (D-014/D
 
 #### Server identity — the launch token, host rule, and GET /v1/server
 **UID**: R-044
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/contracts.md#R-044
+**IMPL**: src/model/index.ts, src/cli/runfile.ts, src/control-plane/index.ts, src/compose/index.ts, src/cli/serve.ts, src/cli/boot.ts, src/cli/index.ts
+**TEST**: src/cli/runfile.test.ts, src/control-plane/index.test.ts, src/cli/resolve.test.ts, test/instance-discovery.test.ts
 A per-launch 128-bit `token` (lineage — constant across `--watch` respawns) and `host` (`os.hostname()`) join the G14 runfile and boot file; `GET /v1/server` echoes `{ pid, token, host, projectDir, runDir, startedAt, demo, ports }`; `up` bakes absolute projectDir/runDir/token into `offbook.boot.json` and its 30s readiness loop succeeds only when `/v1/server` answers with this launch's token; `serve.ts` treats a relative boot-file runDir or a missing token as a fatal boot error; `pidAlive` treats EPERM as alive; every identity probe retries once with a longer timeout before concluding not-answering.
 
 #### Instance discovery — machine-local registry, shared resolver, verb policy
 **UID**: R-045
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/contracts.md#R-045
+**IMPL**: src/cli/registry.ts, src/cli/guard.ts, src/cli/messages.ts, src/cli/resolve.ts, src/cli/runfile.ts, src/cli/index.ts, src/cli/client.ts, src/cli/doctor.ts, test/preload.ts
+**TEST**: src/cli/registry.test.ts, src/cli/guard.test.ts, src/cli/messages.test.ts, src/cli/resolve.test.ts, src/cli/doctor.test.ts, test/cli-dispatch.test.ts, test/instance-discovery.test.ts
 Pointer files (`{ v: 1, runDir, host }`, atomic same-directory writes, sha256(realpath runDir) names) ride every `writeRunfile`/`clearRunfile`; one verb-agnostic resolver implements the 10-row instance state table (adopt-on-sight, guarded reclaim/reap/self-heal, the deletion law, the host rule) and the 3-stage containment tiebreak; verbs apply the policy table — in-band `offbook @ <projectDir>` naming on registry-resolved reads with byte-identical cwd output, `(offbook:`-prefixed stderr notes only for mutations and anomalies, refusal tables with paste-ready `--run-dir` selectors, the 0/1/2 exit-code contract, `--json` single-document refusal envelopes, `down`'s compare-and-signal and unrelated-sole-candidate exit-0 no-op, `logs`' local-first divergence banner, `topics`' demo-only `--json` refusal, doctor/`up`-preflight attribution naming the owning project.
 
 #### `offbook up [dir]` — start a project's instance without cd
 **UID**: R-046
-**STATUS**: specified
+**STATUS**: tested
 **COVERS**: docs/specs/contracts.md#R-046
+**IMPL**: src/cli/index.ts, src/cli/boot.ts
+**TEST**: test/instance-discovery.test.ts
 Optional positional (default `.`): `projectDir = resolve(cwd, dir)` must exist and be a directory before any mkdir/boot-file/pointer write (else exit 1 with the M2 hint); default runDir becomes `<projectDir>/.offbook` (`--run-dir` stays cwd-relative); the EI2 fresh-project check and the no-services.yaml hint use projectDir.
 
 #### Manage-from-anywhere docs sweep — guides, README, adoption surface, onboarding skill
 **UID**: R-047
-**STATUS**: specified
+**STATUS**: built
 **COVERS**: docs/specs/adoption.md#R-047
+**IMPL**: docs/guides/daily-loop.md, docs/guides/getting-started.md, docs/guides/wiring-your-service.md, README.md, docs/specs/adoption.md, skills/offbook-onboard/SKILL.md
 Management-verb examples drop the cwd premise (`cd mock &&` package scripts become `offbook up mock`/`offbook down`); daily-loop carries the two-sentence user model verbatim and the scripted-consumer `--run-dir` line; adoption.md §10's attribution gains the named-owner variant and its "no guess at which offbook instance it is" sentence is superseded, as are the pinned `topics --json` refusal wording and §9's step-6 parenthetical; the onboarding skill's steps 5/6 lose `cd mock` and pin their checks to `--run-dir mock/.offbook`; one migration sentence covers pre-upgrade instances.
 
 #### Registry dedupe by file identity on case-insensitive filesystems

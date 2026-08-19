@@ -1,5 +1,5 @@
 # 2026-08-19: Instance discovery — manage a running offbook from any directory (intake)
-**Status**: open
+**Status**: resolved
 **Owner**: nzneit
 
 Source: docs/superpowers/specs/2026-08-18-instance-discovery-design.md (rev 3 —
