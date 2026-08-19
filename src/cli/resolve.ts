@@ -5,15 +5,15 @@
 // notes. Side effects are EXACTLY the state-table record ops — adopt-on-
 // sight, reclaim, reap, self-heal — every one guarded. NO verb policy lives
 // here; what each verb does with a Resolution is index.ts's policy table.
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { ServerIdentity } from "#src/model/index.ts";
 import { DEFAULT_CONFIG } from "#src/model/index.ts";
 import { CliError } from "./client.ts";
 import { guarded } from "./guard.ts";
-import { M10, M14 } from "./messages.ts";
-import { canonicalPath, writePointer } from "./registry.ts";
+import { M10, M14, M14missing, M15d, M17 } from "./messages.ts";
+import { canonicalPath, scanPointers, writePointer } from "./registry.ts";
 import type { Runfile } from "./runfile.ts";
 import {
 	clearRunfile,
@@ -21,6 +21,7 @@ import {
 	probeServer,
 	readRunfile,
 	runfilePath,
+	writeRunfile,
 } from "./runfile.ts";
 
 export interface ResolvedInstance {
@@ -239,7 +240,133 @@ export async function resolveInstance(opts: {
 			foreignSeen,
 		};
 
-	// rows 6-10: the registry scan (Task 11)
+	// rows 6-10: the registry scan — candidates probed concurrently (cost
+	// bounded by reaping plus the n=1 discipline). Best-effort always: an
+	// unreadable state dir degrades to cwd-scoped behavior with the
+	// catalog's degradation note — registry failures never fail a verb.
 	const candidates: ResolvedInstance[] = [];
+	const selfHealPort =
+		opts.selfHealProbePort ?? DEFAULT_CONFIG.controlPlanePort;
+	try {
+		const pointers = (await scanPointers(stateDir)).filter(
+			(p) => p.pointer.runDir !== canonicalPath(cwdRunDir), // rows 1-5 covered cwd's own
+		);
+		await Promise.all(
+			pointers.map(async ({ path, raw, pointer }) => {
+				if (pointer.host !== hostname()) {
+					foreignSeen = true; // row 10: inert
+					return;
+				}
+				if (!existsSync(runfilePath(pointer.runDir))) {
+					// row 9 — self-heal probe FIRST: /v1/server on the default
+					// control port answering with this pointer's runDir means
+					// alive-but-de-runfiled; rewrite the runfile from the served
+					// identity (guarded site #5), then treat as row 6
+					const probe = await probeServer(selfHealPort);
+					if (
+						probe.kind === "server" &&
+						canonicalPath(probe.identity.runDir) === pointer.runDir
+					) {
+						const id = probe.identity;
+						const healedRun: Runfile = {
+							pid: id.pid,
+							brokerWsPort: id.ports.brokerWsPort,
+							brokerTcpPort: id.ports.brokerTcpPort,
+							controlPlanePort: id.ports.controlPlanePort,
+							startedAt: id.startedAt,
+							token: id.token,
+							host: id.host,
+						};
+						await guarded({
+							// site #5: the runfile must STILL be missing at write time
+							read: () => readRunfile(pointer.runDir),
+							expect: (cur) => cur === undefined,
+							act: async () => {
+								await writeRunfile(pointer.runDir, healedRun, { stateDir });
+							},
+						});
+						candidates.push({
+							runDir: pointer.runDir,
+							run: healedRun,
+							identity: id,
+							projectDir: id.projectDir,
+							demo: id.demo,
+							source: "registry",
+						});
+						return;
+					}
+					// row 9 reap branch — guarded site #1: the pointer file must be
+					// unchanged since the scan read it AND the target still absent,
+					// re-verified immediately before the unlink
+					const reaped = await guarded({
+						read: () =>
+							Bun.file(path)
+								.text()
+								.catch(() => ""),
+						expect: (cur) =>
+							cur !== "" &&
+							cur === raw &&
+							!existsSync(runfilePath(pointer.runDir)),
+						act: () => rmSync(path, { force: true }),
+					});
+					if (reaped) notes.push(M14missing(dirname(pointer.runDir)));
+					return;
+				}
+				const out = await examineRunDir(pointer.runDir, "registry", stateDir);
+				if (out.note !== undefined) notes.push(out.note);
+				if (out.foreign === true) foreignSeen = true;
+				if (out.skipped !== undefined) skipped.push(out.skipped);
+				if (out.resolved !== undefined) candidates.push(out.resolved);
+			}),
+		);
+	} catch {
+		// M17 is the catalog's degradation message; its recovery selector
+		// points at the cwd run dir (the only instance still addressable)
+		notes.push(M17(opts.cwd, cwdRunDir));
+		return { candidates: [], skipped, notes, foreignSeen };
+	}
+
+	if (candidates.length === 1)
+		return { resolved: candidates[0], candidates, skipped, notes, foreignSeen };
+	if (candidates.length === 0)
+		return { candidates, skipped, notes, foreignSeen };
+
+	// several live: the three-stage tiebreak on realpath'd projectDirs.
+	// stage 1: sole ancestor-or-equal of cwd; stage 2: sole strict
+	// descendant; stage 3: sole non-demo (the forgotten-demo day), with the
+	// passed-over demo named (M15d). Otherwise: ambiguous — the verb refuses.
+	const cwdReal = canonicalPath(opts.cwd);
+	const projOf = (c: ResolvedInstance): string =>
+		canonicalPath(c.projectDir ?? dirname(c.runDir));
+	const stage1 = candidates.filter((c) => containsOrEqual(projOf(c), cwdReal));
+	if (stage1.length === 1)
+		return { resolved: stage1[0], candidates, skipped, notes, foreignSeen };
+	const stage2 = candidates.filter(
+		(c) => containsOrEqual(cwdReal, projOf(c)) && projOf(c) !== cwdReal,
+	);
+	if (stage2.length === 1)
+		return { resolved: stage2[0], candidates, skipped, notes, foreignSeen };
+	const nonDemo = candidates.filter((c) => !c.demo);
+	if (nonDemo.length === 1) {
+		for (const d of candidates.filter((c) => c.demo))
+			notes.push(M15d(d.projectDir ?? dirname(d.runDir), d.runDir));
+		return { resolved: nonDemo[0], candidates, skipped, notes, foreignSeen };
+	}
 	return { candidates, skipped, notes, foreignSeen };
+}
+
+// M3's verification (R-044): the port-answerer CLAIMS a runDir; the runfile
+// AT that runDir carrying the same token proves the claim — discovery never
+// invents facts. undefined = attribute nothing (callers keep the generic
+// pre-D-032 wording).
+export async function attributeCtrlPort(
+	port: number,
+): Promise<{ projectDir: string; runDir: string; demo: boolean } | undefined> {
+	const probe = await probeServer(port);
+	if (probe.kind !== "server") return undefined;
+	const id = probe.identity;
+	if (id.host !== hostname()) return undefined;
+	const run = await readRunfile(id.runDir);
+	if (run === undefined || run.token !== id.token) return undefined;
+	return { projectDir: id.projectDir, runDir: id.runDir, demo: id.demo };
 }
