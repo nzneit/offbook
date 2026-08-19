@@ -2292,3 +2292,71 @@ test("signalInstance escalates on a token-less runfile whose current-build serve
 		rmSync(state, { recursive: true, force: true });
 	}
 }, 20_000);
+
+// [itest->R-045]
+test("logs: a local stopped log wins for output with the divergence banner; with no local log the resolved instance's log prints under its header", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-logs-"));
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	mkdirSync(join(cwd, ".offbook"), { recursive: true });
+	await Bun.write(join(cwd, ".offbook", "offbook.log"), "old local line\n");
+	await inDiscoveryWorld(cwd, async () => {
+		const inst = await fakeInstance({ port: 19461, projectDir: proj });
+		await Bun.write(join(inst.runDir, "offbook.log"), "live remote line\n");
+		try {
+			// local log exists: printed, with the banner naming the live one
+			const local = io();
+			expect(await run(["logs"], local.io)).toBe(0);
+			expect(local.out).toContain("old local line");
+			expect(
+				local.err.some(
+					(l) =>
+						l.startsWith("(offbook: showing the local stopped log at") &&
+						l.includes(proj),
+				),
+			).toBe(true);
+			// no local log: the resolved instance's log prints under its header
+			rmSync(join(cwd, ".offbook", "offbook.log"));
+			const remote = io();
+			expect(await run(["logs"], remote.io)).toBe(0);
+			expect(remote.out[0]).toBe(`offbook @ ${proj} (ws 1 · http 19461)`);
+			expect(remote.out).toContain("live remote line");
+		} finally {
+			inst.stop();
+		}
+	});
+	rmSync(proj, { recursive: true, force: true });
+	rmSync(cwd, { recursive: true, force: true });
+});
+
+// [itest->R-045]
+test("logs -f: the divergence banner prints before the follow loop starts", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-logsf-"));
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	mkdirSync(join(cwd, ".offbook"), { recursive: true });
+	await Bun.write(join(cwd, ".offbook", "offbook.log"), "old local line\n");
+	await inDiscoveryWorld(cwd, async () => {
+		const inst = await fakeInstance({ port: 19471, projectDir: proj });
+		// -f never returns in-process: drive the real bin (same pattern as
+		// the existing follow tests), inheriting the pinned state-dir env
+		const proc = Bun.spawn([BIN, "logs", "-f"], {
+			cwd,
+			env: { ...process.env },
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		try {
+			await pause(1200);
+			proc.kill();
+			await proc.exited;
+			const err = await new Response(proc.stderr).text();
+			const out = await new Response(proc.stdout).text();
+			expect(err).toContain("(offbook: showing the local stopped log at");
+			expect(err).toContain(proj);
+			expect(out).toContain("old local line");
+		} finally {
+			inst.stop();
+		}
+	});
+	rmSync(proj, { recursive: true, force: true });
+	rmSync(cwd, { recursive: true, force: true });
+}, 20_000);

@@ -52,6 +52,7 @@ import {
 	M16,
 	M17,
 	M18,
+	M19,
 	M22,
 	refusalEnvelope,
 } from "./messages.ts";
@@ -1903,9 +1904,52 @@ async function cmdLogs(rest: string[], io: Io): Promise<number> {
 		"run-dir": { type: "string" },
 		follow: { type: "boolean", short: "f" },
 	});
-	const path = logPath(runDirOf(values));
-	if (!existsSync(path))
-		throw new CliError(`no log at ${path} — has \`offbook up\` run here?`);
+	const explicit = str(values["run-dir"]);
+	// logs always runs the resolver — the banner needs its outcome; the
+	// local log merely wins for OUTPUT (post-mortem logs keep working in
+	// the project directory, a stated non-goal boundary)
+	const res = await resolveOrRefuse(
+		{ cwd: process.cwd(), runDirFlag: explicit, stateDir: stateDirFromEnv() },
+		io,
+		false,
+	);
+	if (typeof res === "number") return res;
+	for (const n of res.notes) io.err(n);
+	const localRunDir = resolve(process.cwd(), explicit ?? DEFAULT_CONFIG.runDir);
+	const localPath = logPath(localRunDir);
+	let path = localPath;
+	if (existsSync(localPath)) {
+		if (
+			res.resolved !== undefined &&
+			canonicalPath(res.resolved.runDir) !== canonicalPath(localRunDir)
+		)
+			io.err(
+				M19(
+					localPath,
+					res.resolved.projectDir ?? dirname(res.resolved.runDir),
+					res.resolved.runDir,
+				),
+			);
+	} else if (res.resolved !== undefined) {
+		if (res.resolved.source === "registry")
+			io.out(
+				M16(
+					res.resolved.projectDir ?? dirname(res.resolved.runDir),
+					res.resolved.run.brokerWsPort,
+					res.resolved.run.controlPlanePort,
+					res.resolved.demo,
+				),
+			);
+		path = logPath(res.resolved.runDir);
+	} else if (res.candidates.length > 1) {
+		io.err(M8());
+		for (const line of instanceTable(rowsOf(res.candidates), "logs"))
+			io.err(line);
+		return 2;
+	} else {
+		for (const s of res.skipped) io.err(skippedNote(s));
+		throw new CliError(`no log at ${localPath} — has \`offbook up\` run here?`);
+	}
 	const text = await Bun.file(path).text();
 	if (text.trimEnd() !== "") io.out(text.trimEnd());
 	if (!values.follow) return 0;
