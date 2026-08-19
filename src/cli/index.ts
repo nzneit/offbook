@@ -57,6 +57,7 @@ import {
 	M19,
 	M20,
 	M22,
+	M23,
 	refusalEnvelope,
 } from "./messages.ts";
 import { canonicalPath, stateDirFromEnv } from "./registry.ts";
@@ -221,6 +222,16 @@ function withServer(
 	};
 }
 
+// The explicit-path refusal, shared by targetFor and cmdTopics: `--run-dir`
+// never scans the registry, so the message may name only the directory
+// actually checked and must make NO machine-wide claim (M11/M12 answer cwd
+// resolution). Pre-D-032 wordings, byte for byte.
+function runDirRefusal(runDirFlag: string, skipped?: { pid: number }): string {
+	return skipped === undefined
+		? `offbook is not running (no runfile in ${runDirFlag}) — run \`offbook up\`, or pass --ctrl-port`
+		: `offbook is not running (stale runfile in ${runDirFlag}, pid ${skipped.pid}) — run \`offbook up\``;
+}
+
 // Resolves for one verb invocation and applies the naming/refusal policy
 // (spec "Verb policy" + "Naming and notes"): prints resolver notes, M13
 // skips, and the registry-resolution naming duty (M16 header for reads on
@@ -280,11 +291,7 @@ async function targetFor(
 	// already reclaimed above (row 5), surfacing as no-runfile plus the M14 note.
 	const runDirFlag = str(values["run-dir"]);
 	if (runDirFlag !== undefined) {
-		const s = res.skipped[0];
-		const message =
-			s === undefined
-				? `offbook is not running (no runfile in ${runDirFlag}) — run \`offbook up\`, or pass --ctrl-port`
-				: `offbook is not running (stale runfile in ${runDirFlag}, pid ${s.pid}) — run \`offbook up\``;
+		const message = runDirRefusal(runDirFlag, res.skipped[0]);
 		if (json) io.out(refusalEnvelope("not-running", message));
 		else io.err(message);
 		return 1;
@@ -560,18 +567,22 @@ async function cmdTopics(rest: string[], io: Io): Promise<number> {
 			return 2;
 		} else {
 			// zero live anywhere
+			const runDirFlag = str(values["run-dir"]);
 			const own =
 				res.skipped.length === 1 &&
 				res.skipped[0].runDir === resolve(process.cwd(), DEFAULT_CONFIG.runDir)
 					? res.skipped[0]
 					: undefined;
 			if (values.json === true) {
-				io.out(
-					refusalEnvelope(
-						"not-running",
-						own !== undefined ? M12(own.pid) : M11(),
-					),
-				);
+				// targetFor's explicit-path carve-out: under --run-dir nothing
+				// machine-wide was scanned, so nothing machine-wide is claimed
+				const message =
+					runDirFlag !== undefined
+						? runDirRefusal(runDirFlag, res.skipped[0])
+						: own !== undefined
+							? M12(own.pid)
+							: M11();
+				io.out(refusalEnvelope("not-running", message));
 				return 1;
 			}
 			// the M0 human fallback survives — with the skips disclosed
@@ -1360,15 +1371,36 @@ async function launchDetached(
 	const { runDir, config } = spec;
 	const stateDir = stateDirFromEnv();
 	const existing = await resolveRunning(runDir);
-	if (existing?.live) {
-		io.err(
-			`offbook: already running (pid ${existing.run.pid}, ports ws ${existing.run.brokerWsPort} / tcp ${existing.run.brokerTcpPort} / http ${existing.run.controlPlanePort}) — run \`offbook down\` first`,
-		);
-		return null;
-	}
-	if (existing) {
-		io.out(`(reclaiming stale runfile — pid ${existing.run.pid} is gone)`);
-		clearRunfile(runDir, { stateDir });
+	if (existing !== undefined) {
+		const { run } = existing;
+		// the deletion law (§5): only a provably dead pid on THIS host is
+		// reclaimed. Rows 10 and 3 refuse instead — deleting their records
+		// would strand an instance `offbook down` can still stop. (Row 4 —
+		// another offbook answering the port — lands in the live branch
+		// below: refused as already-running, records untouched either way.)
+		if (run.host !== undefined && run.host !== hostname()) {
+			io.err(M10(run.host, runDir)); // row 10: inert, never touched
+			return null;
+		}
+		if (existing.live) {
+			io.err(
+				`offbook: already running (pid ${run.pid}, ports ws ${run.brokerWsPort} / tcp ${run.brokerTcpPort} / http ${run.controlPlanePort}) — run \`offbook down\` first`,
+			);
+			return null;
+		}
+		if (pidAlive(run.pid)) {
+			io.err(M23(run.pid, runDir)); // row 3: booting or wedged
+			return null;
+		}
+		// row 5, guarded site #2: the runfile must still name the pid just
+		// judged dead — a concurrent up's winner must survive this clear
+		const reclaimed = await guarded({
+			read: () => readRunfile(runDir),
+			expect: (cur) => cur !== undefined && cur.pid === run.pid,
+			act: () => clearRunfile(runDir, { stateDir }),
+		});
+		if (reclaimed)
+			io.out(`(reclaiming stale runfile — pid ${run.pid} is gone)`);
 	}
 	await preflightPorts(config);
 	const token = randomBytes(16).toString("hex"); // the launch lineage id (R-044)

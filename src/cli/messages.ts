@@ -133,6 +133,13 @@ export const M21 = (): string =>
 export const M22 = (): string =>
 	"offbook down: the instance restarted underneath — rerun `offbook down`";
 
+// `up` meeting state-table row 3 in its own runDir: the pid is alive and
+// the control port is silent (booting, or wedged). The deletion law keeps
+// both records, so the refusal borrows M12's clause and hands over the
+// selector that stops it — never M11's machine-wide claim (nothing scanned).
+export const M23 = (pid: number, runDir: string): string =>
+	`offbook: not answering here (pid ${pid}, runfile in ${runDir}) — it may still be starting; \`offbook down --run-dir ${runDir}\` stops it if it is wedged`;
+
 // The CLI refusal envelope (D-032): mirrors the §5 error-envelope
 // convention WITHOUT touching the closed ErrorCode union — these codes
 // exist only on the CLI's own --json surface. Contract: --json stdout is

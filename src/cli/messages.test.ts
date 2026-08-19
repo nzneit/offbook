@@ -12,6 +12,7 @@ import {
 	M13,
 	M16,
 	M22,
+	M23,
 	refusalEnvelope,
 } from "./messages.ts";
 
@@ -20,6 +21,15 @@ test("the two automation anchors: M11 leads with 'offbook is not running'; notes
 	expect(M12(7).startsWith("offbook is not running")).toBe(false); // M12 is the wedged variant
 	expect(M12(7).startsWith("offbook is not answering here")).toBe(true);
 	expect(M13("/p", 7, 19801).startsWith("(offbook:")).toBe(true);
+});
+
+test("M23 (`up` on a wedged instance): M12's clause + a paste-ready selector, no machine-wide claim", () => {
+	expect(M23(41, "/app/mock/.offbook")).toBe(
+		"offbook: not answering here (pid 41, runfile in /app/mock/.offbook) — it may still be starting; `offbook down --run-dir /app/mock/.offbook` stops it if it is wedged",
+	);
+	expect(
+		M23(41, "/app/mock/.offbook").startsWith("offbook is not running"),
+	).toBe(false);
 });
 
 test("instance table rows: identity line + one complete paste-ready command per instance", () => {
@@ -101,6 +111,7 @@ test("every catalog template renders non-empty (and keeps the per-file coverage 
 		catalog.M20("/p"),
 		catalog.M21(),
 		catalog.M22(),
+		catalog.M23(1, "/p/.offbook"),
 	];
 	for (const m of rendered) expect(m.length).toBeGreaterThan(0);
 });

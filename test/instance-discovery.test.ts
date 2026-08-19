@@ -2,20 +2,23 @@
 // Instance discovery integration: serve.ts boot-contract fatals here;
 // the state-table row suite lands in this file in a later task.
 // Ports for this file (repo convention: unique per file): 19430-19449,
-// tcp 12490-12495 (bound by the real `up` runs below).
+// tcp 12490-12495 (bound by the real `up` runs below; 19440-19443 +
+// tcp 12494-12495 belong to the `up`-refusal tests, which never spawn).
 //
 // State-table checklist (spec "The instance state table") — where each row
 // is pinned:
 //   row 1  cwd+token       src/cli/resolve.test.ts "row 1" + the up-bakes-identity test here
 //   row 2  cwd+legacy      src/cli/resolve.test.ts "row 2" + "row 2 machine-wide" here
 //   row 3  cwd+silent      src/cli/resolve.test.ts "row 3" + cli-dispatch M12 test
+//                          + "up refuses a wedged instance" here (`up`'s own path)
 //   row 4  cwd wrong-token src/cli/resolve.test.ts "row 4"
 //   row 5  cwd dead pid    src/cli/resolve.test.ts "row 5"
 //   row 6  pointer+token   src/cli/resolve.test.ts "rows 6-8" + verb-policy tests in cli-dispatch
 //   row 7  pointer skipped "rows 6-8" (silent) + "row 7 wrong-token pointer" here
 //   row 8  pointer dead    "rows 6-8" (reap)
 //   row 9  runfile missing src/cli/resolve.test.ts "row 9" (both branches)
-//   row 10 foreign host    src/cli/resolve.test.ts (explicit path) + "row 10 foreign pointer" here
+//   row 10 foreign host    src/cli/resolve.test.ts (explicit path) + "row 10 foreign pointer"
+//                          and "up refuses a foreign-host runfile" here
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -527,3 +530,114 @@ test("--watch respawn with the launch cwd deleted: same token, new pid, correct 
 		rmSync(projectDir, { recursive: true, force: true });
 	}
 }, 120_000);
+
+// The deletion law on `up`'s OWN reclaim path (spec "The instance state
+// table"): only row 5 (provably dead, local) is reclaimed. Both tests hold
+// the ws port so a regression that reclaims cannot also spawn a server.
+
+// [itest->R-045]
+test("up refuses a wedged instance (alive pid, silent control port) instead of reclaiming its records", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-upwedged-"));
+	const state = mkdtempSync(join(tmpdir(), "offbook-upwedged-state-"));
+	const runDir = join(proj, ".offbook");
+	const prevState = process.env.OFFBOOK_STATE_DIR;
+	process.env.OFFBOOK_STATE_DIR = state;
+	// row 3: process.pid is unmistakably alive; 19441 answers nothing
+	await writeRunfile(
+		runDir,
+		{
+			pid: process.pid,
+			brokerWsPort: 19440,
+			brokerTcpPort: 12494,
+			controlPlanePort: 19441,
+			startedAt: "t",
+			token: "d1".repeat(16),
+			host: hostname(),
+		},
+		{ stateDir: state },
+	);
+	const squatter = Bun.serve({ port: 19440, fetch: () => new Response("x") });
+	try {
+		const x = io();
+		expect(
+			await run(
+				[
+					"up",
+					"--run-dir",
+					runDir,
+					"--ws-port",
+					"19440",
+					"--tcp-port",
+					"12494",
+					"--ctrl-port",
+					"19441",
+				],
+				x.io,
+			),
+		).toBe(1);
+		// M12 promises `offbook down` still stops it — both records survive
+		expect(await readRunfile(runDir)).toBeDefined();
+		expect(existsSync(pointerPath(state, runDir))).toBe(true);
+		expect(x.err.join("\n")).toContain("not answering here");
+		expect(x.err.join("\n")).toContain(String(process.pid));
+		expect(x.out.join("\n")).not.toContain("reclaiming");
+	} finally {
+		squatter.stop(true);
+		if (prevState === undefined) delete process.env.OFFBOOK_STATE_DIR;
+		else process.env.OFFBOOK_STATE_DIR = prevState;
+		for (const d of [proj, state]) rmSync(d, { recursive: true, force: true });
+	}
+});
+
+// [itest->R-045]
+test("up refuses a foreign-host runfile instead of reclaiming it (row 10, shared network home)", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-uphost-"));
+	const state = mkdtempSync(join(tmpdir(), "offbook-uphost-state-"));
+	const runDir = join(proj, ".offbook");
+	const prevState = process.env.OFFBOOK_STATE_DIR;
+	process.env.OFFBOOK_STATE_DIR = state;
+	// the pid reads DEAD here — pids are per-machine, which is exactly why
+	// the host rule outranks the dead-pid reclaim
+	await writeRunfile(
+		runDir,
+		{
+			pid: Bun.spawnSync(["true"]).pid ?? 4_193_996,
+			brokerWsPort: 19442,
+			brokerTcpPort: 12495,
+			controlPlanePort: 19443,
+			startedAt: "t",
+			token: "d2".repeat(16),
+			host: "some-other-machine",
+		},
+		{ stateDir: state },
+	);
+	const squatter = Bun.serve({ port: 19442, fetch: () => new Response("x") });
+	try {
+		const x = io();
+		expect(
+			await run(
+				[
+					"up",
+					"--run-dir",
+					runDir,
+					"--ws-port",
+					"19442",
+					"--tcp-port",
+					"12495",
+					"--ctrl-port",
+					"19443",
+				],
+				x.io,
+			),
+		).toBe(1);
+		expect(await readRunfile(runDir)).toBeDefined();
+		expect(existsSync(pointerPath(state, runDir))).toBe(true);
+		expect(x.err.join("\n")).toContain("written on some-other-machine");
+		expect(x.out.join("\n")).not.toContain("reclaiming");
+	} finally {
+		squatter.stop(true);
+		if (prevState === undefined) delete process.env.OFFBOOK_STATE_DIR;
+		else process.env.OFFBOOK_STATE_DIR = prevState;
+		for (const d of [proj, state]) rmSync(d, { recursive: true, force: true });
+	}
+});

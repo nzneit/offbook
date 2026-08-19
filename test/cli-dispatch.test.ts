@@ -783,6 +783,23 @@ test("topics --json with no live server refuses with the not-running envelope (e
 	expect(human.out[0]).toContain("showing the bundled demo spec"); // pinned note survives
 });
 
+// [itest->R-045] — `--run-dir` never scans the registry, so the refusal may
+// name only the directory actually checked: M11's machine-wide clause would
+// be a claim nobody verified (the same carve-out every other read verb has)
+test("topics --json --run-dir names the directory checked and claims nothing machine-wide", async () => {
+	const empty = mkdtempSync(join(tmpdir(), "no-server-pinned-"));
+	const refused = io();
+	expect(await run(["topics", "--json", "--run-dir", empty], refused.io)).toBe(
+		1,
+	);
+	const { message } = (
+		JSON.parse(refused.out[0]) as { error: { message: string } }
+	).error;
+	expect(message).toContain(`no runfile in ${empty}`);
+	expect(message).not.toContain("nothing else is running on this machine");
+	expect(message).not.toContain(".offbook)"); // never M11's unchecked directory
+});
+
 test("down is idempotent on a dead/absent runfile; status exits nonzero when down; logs reads the log file", async () => {
 	const deadPid = Bun.spawnSync(["true"]).pid ?? 4_193_998;
 	const dir = join(base, "run-down");
