@@ -378,6 +378,9 @@ test("row 9 heals the cwd's OWN dangling pointer", async () => {
 		expect(res.resolved?.runDir).toBe(runDir);
 		expect(existsSync(join(runDir, "offbook.run"))).toBe(true); // rewritten
 		expect((await readRunfile(runDir))?.token).toBe(token);
+		// spec row 9 resolves "then row 6": a healed instance reports source
+		// "registry" even in its own cwd — the M16 header discloses the heal
+		expect(res.resolved?.source).toBe("registry");
 	} finally {
 		server.stop();
 		rmSync(state, { recursive: true, force: true });
@@ -676,7 +679,10 @@ test("an unreadable registry degrades to cwd-scoped behavior with the could-not-
 // runfile path can never exist, forcing row 9's branch), must not stop a
 // healthy live+verified pointer scanned in the same Promise.all from
 // resolving.
-test("a weird pointer never sinks the healthy candidate scanned alongside it", async () => {
+// NB: nothing here THROWS — this pins "a dangling pointer reaped in the same
+// pass does not disturb a healthy candidate"; the per-pointer catch itself is
+// correct by inspection (no portable way to force a mapper throw non-root)
+test("a dangling pointer reaped in the same pass does not disturb the healthy candidate", async () => {
 	const state = scratch("offbook-res-state-");
 	const cwd = scratch("offbook-res-emptycwd-");
 	// healthy: live + verified
