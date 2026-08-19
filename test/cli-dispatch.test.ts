@@ -26,7 +26,7 @@ import {
 	signalInstance,
 	specsStalenessWarning,
 } from "#src/cli/index.ts";
-import { readRunfile, writeRunfile } from "#src/cli/runfile.ts";
+import { pidAlive, readRunfile, writeRunfile } from "#src/cli/runfile.ts";
 import type { Composed } from "#src/compose/index.ts";
 import { compose } from "#src/compose/index.ts";
 import { loadConfig } from "#src/config/index.ts";
@@ -2009,7 +2009,7 @@ test("signalInstance, guarded site #3: a repointed runfile aborts with the resta
 		);
 		expect(code).toBe(1);
 		expect(x.err.join("\n")).toContain("restarted underneath");
-		expect(victim.killed).toBe(false); // the successor was never signaled
+		expect(pidAlive(victim.pid)).toBe(true); // still alive = never signaled
 		expect(await readRunfile(runDir)).toBeDefined(); // its registration survives
 	} finally {
 		victim.kill();
@@ -2075,6 +2075,7 @@ test("down, related descendant instance: signals it and reports where it was sta
 			server.stop(true);
 			try {
 				victim.kill();
+				await victim.exited;
 			} catch {}
 		}
 	});
@@ -2226,6 +2227,64 @@ test("signalInstance, guarded site #2: a successor registered during shutdown su
 		const kept = await readRunfile(runDir);
 		expect(kept?.pid).toBe(555555); // the successor's registration survived
 	} finally {
+		try {
+			victim.kill();
+		} catch {}
+		rmSync(proj, { recursive: true, force: true });
+		rmSync(state, { recursive: true, force: true });
+	}
+}, 20_000);
+
+// [utest->R-045]
+test("signalInstance escalates on a token-less runfile whose current-build server claims the runDir", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-i3-"));
+	const runDir = join(proj, ".offbook");
+	const state = mkdtempSync(join(tmpdir(), "offbook-vp-i3-state-"));
+	// ignores SIGTERM — forces the 5s wait loop to time out into escalation
+	const victim = Bun.spawn([
+		process.execPath,
+		"-e",
+		'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000);',
+	]);
+	const runfile = {
+		pid: victim.pid,
+		brokerWsPort: 1,
+		brokerTcpPort: 2,
+		controlPlanePort: 19470,
+		startedAt: "t",
+	}; // NO token field — pre-D-032/pre-R-044 runfile shape
+	await writeRunfile(runDir, runfile, { stateDir: state });
+	const identity = {
+		pid: victim.pid,
+		token: "aa".repeat(16),
+		host: hostname(),
+		projectDir: proj,
+		runDir,
+		startedAt: "t",
+		demo: false,
+		ports: { brokerWsPort: 1, brokerTcpPort: 2, controlPlanePort: 19470 },
+	};
+	const server = Bun.serve({
+		port: 19470,
+		fetch: (req) =>
+			new URL(req.url).pathname === "/v1/server"
+				? Response.json(identity)
+				: new Response("nope", { status: 404 }),
+	});
+	try {
+		await Bun.sleep(300); // let the identity handler come up
+		const code = await signalInstance(
+			{ runDir, run: runfile, projectDir: proj, demo: false, source: "cwd" },
+			state,
+			io().io,
+		);
+		// SIGTERM ignored → 5s wait → escalation now fires via the new
+		// token-less + current-build-server clause → SIGKILL
+		expect(code).toBe(0);
+		await victim.exited;
+		expect(await readRunfile(runDir)).toBeUndefined(); // post-kill clear ran
+	} finally {
+		server.stop(true);
 		try {
 			victim.kill();
 		} catch {}

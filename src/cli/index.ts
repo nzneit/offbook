@@ -1566,7 +1566,7 @@ async function cmdDown(rest: string[], io: Io): Promise<number> {
 	// wrong-token skip is never signaled — the pid may be reused (row 4)
 	const ownRunDir =
 		explicit !== undefined
-			? (res.skipped[0]?.runDir ?? resolve(process.cwd(), explicit))
+			? res.skipped[0]?.runDir
 			: resolve(process.cwd(), DEFAULT_CONFIG.runDir);
 	const own = res.skipped.find(
 		(s) => s.runDir === ownRunDir && s.reason === "silent",
@@ -1631,7 +1631,12 @@ export async function signalInstance(
 		read: () => readRunfile(runDir),
 		expect: (cur) => cur !== undefined && cur.pid === run.pid,
 		act: () => {
-			process.kill(run.pid, "SIGTERM");
+			try {
+				process.kill(run.pid, "SIGTERM");
+			} catch (cause) {
+				// ESRCH inside the guard's race window = already dead — that IS success
+				if ((cause as NodeJS.ErrnoException).code !== "ESRCH") throw cause;
+			}
 		},
 	});
 	if (!signaled) {
@@ -1642,8 +1647,10 @@ export async function signalInstance(
 	while (pidAlive(run.pid) && Date.now() < deadline) await sleep(50);
 	if (pidAlive(run.pid)) {
 		// the SIGKILL escalation re-verifies BOTH granularities: the runfile
-		// still names this pid, AND the port is silent or answers with the
-		// signaled lineage — a new port owner is never killed
+		// must still name this pid, and the port must not answer as a
+		// DIFFERENT offbook. NB the port check only excludes other offbooks —
+		// a non-offbook squatter reads as "silent" — so the runfile pid
+		// re-read is the real gate on this escalation.
 		const cur = await readRunfile(runDir);
 		const probe = await probeServer(run.controlPlanePort, 300);
 		const portIsOurs =
@@ -1651,12 +1658,20 @@ export async function signalInstance(
 			(probe.kind === "server" &&
 				lineage !== undefined &&
 				probe.identity.token === lineage) ||
+			(probe.kind === "server" &&
+				lineage === undefined &&
+				canonicalPath(probe.identity.runDir) === canonicalPath(runDir)) ||
 			(probe.kind === "legacy" && lineage === undefined);
 		if (cur === undefined || cur.pid !== run.pid || !portIsOurs) {
 			io.err(M22());
 			return 1;
 		}
-		process.kill(run.pid, "SIGKILL");
+		try {
+			process.kill(run.pid, "SIGKILL");
+		} catch (cause) {
+			// ESRCH inside the guard's race window = already dead — that IS success
+			if ((cause as NodeJS.ErrnoException).code !== "ESRCH") throw cause;
+		}
 		await sleep(100);
 	}
 	// site #2: clear only while the runfile still names the signaled pid —
