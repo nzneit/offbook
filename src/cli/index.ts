@@ -40,12 +40,14 @@ import {
 	instanceTable,
 	M8,
 	M11,
+	M11s,
 	M12,
 	M13,
 	M13wrongToken,
 	M15,
 	M16,
 	M17,
+	M18,
 	refusalEnvelope,
 } from "./messages.ts";
 import { stateDirFromEnv } from "./registry.ts";
@@ -1532,20 +1534,63 @@ async function cmdDown(rest: string[], io: Io): Promise<number> {
 async function cmdStatus(rest: string[], io: Io): Promise<number> {
 	const { values } = parseFlags(rest, {
 		"run-dir": { type: "string" },
+		"ctrl-port": { type: "string" },
 		json: { type: "boolean" },
 	});
-	const runDir = runDirOf(values);
-	const resolved = await resolveRunning(runDir);
-	if (!resolved?.live) {
-		io.err(
-			`offbook: not running${resolved ? ` (stale runfile, pid ${resolved.run.pid})` : ` (no runfile in ${runDir})`}`,
-		);
+	if (values["ctrl-port"] !== undefined) return statusByCtrlPort(values, io);
+	const json = values.json === true;
+	const res = await resolveOrRefuse(
+		{
+			cwd: process.cwd(),
+			runDirFlag: str(values["run-dir"]),
+			stateDir: stateDirFromEnv(),
+		},
+		io,
+		json,
+	);
+	if (typeof res === "number") return res;
+	for (const n of res.notes) io.err(n);
+	if (res.resolved === undefined) {
+		if (res.candidates.length > 1) {
+			if (json)
+				io.out(refusalEnvelope("ambiguous", M8(), rowsOf(res.candidates)));
+			else {
+				io.err(M8());
+				for (const line of instanceTable(rowsOf(res.candidates), "status"))
+					io.err(line);
+			}
+			return 2;
+		}
+		const runDirFlag = str(values["run-dir"]);
+		if (runDirFlag !== undefined) {
+			// explicit addressing keeps status's pre-D-032 wordings
+			const s = res.skipped[0];
+			io.err(
+				`offbook: not running${s !== undefined ? ` (stale runfile, pid ${s.pid})` : ` (no runfile in ${runDirFlag})`}`,
+			);
+			return 1;
+		}
+		const own =
+			res.skipped.length === 1 &&
+			res.skipped[0].runDir === resolve(process.cwd(), DEFAULT_CONFIG.runDir)
+				? res.skipped[0]
+				: undefined;
+		if (own !== undefined) {
+			if (json) io.out(refusalEnvelope("not-running", M12(own.pid)));
+			else io.err(M12(own.pid));
+			return 1;
+		}
+		for (const s of res.skipped) io.err(skippedNote(s));
+		if (json) io.out(refusalEnvelope("not-running", M11s()));
+		else io.err(M11s());
 		return 1;
 	}
-	const run = resolved.run;
+	const inst = res.resolved;
+	for (const s of res.skipped) io.err(skippedNote(s));
+	const run = inst.run;
 	const a = api(run.controlPlanePort);
 	const clients = clientsFromLog(
-		await Bun.file(logPath(runDir))
+		await Bun.file(logPath(inst.runDir))
 			.text()
 			.catch(() => ""),
 	);
@@ -1560,10 +1605,17 @@ async function cmdStatus(rest: string[], io: Io): Promise<number> {
 		{ summary: ValidationSummary },
 		{ summary: DiagnosticSummary },
 	];
-	if (values.json) {
+	if (json) {
 		io.out(
 			JSON.stringify(
 				{
+					server: {
+						projectDir: inst.projectDir,
+						runDir: inst.runDir,
+						source: inst.source,
+						demo: inst.demo,
+					},
+					skipped: res.skipped,
 					run,
 					mode: modeRes,
 					specs: specsRes.specs,
@@ -1578,6 +1630,15 @@ async function cmdStatus(rest: string[], io: Io): Promise<number> {
 		return 0;
 	}
 	const v = valRes.summary;
+	if (inst.source === "registry")
+		io.out(
+			M16(
+				inst.projectDir ?? dirname(inst.runDir),
+				run.brokerWsPort,
+				run.controlPlanePort,
+				inst.demo,
+			),
+		);
 	io.out(`offbook: running (pid ${run.pid}, since ${run.startedAt})`);
 	io.out(`  mode ${modeRes.mode} · seed ${modeRes.seed}`);
 	io.out(
@@ -1600,6 +1661,80 @@ async function cmdStatus(rest: string[], io: Io): Promise<number> {
 	}
 	io.out(
 		`  violations: client ${v.byOrigin.client} / mock ${v.byOrigin.mock} — caught ${v.distinct.client} distinct client break(s)`,
+	);
+	io.out(
+		`  diagnostics: ${diagRes.summary.errors} error(s) · ${diagRes.summary.warnings} warning(s)`,
+	);
+	return 0;
+}
+
+// status --ctrl-port (D-032): identity-only reporting — the server's own
+// claim, no log- or boot-file-derived extras (their run-dir correspondence
+// is what --ctrl-port cannot verify; the identity CAN, so it is shown).
+// Pre-upgrade servers refuse with M18 (no degraded partial-output mode).
+async function statusByCtrlPort(values: FlagValues, io: Io): Promise<number> {
+	const port = toInt(str(values["ctrl-port"]) ?? "", "--ctrl-port");
+	const json = values.json === true;
+	const probe = await probeServer(port);
+	if (probe.kind === "legacy") {
+		if (json) io.out(refusalEnvelope("version-skew", M18()));
+		else io.err(M18());
+		return 2;
+	}
+	if (probe.kind === "silent")
+		throw new CliError(
+			`could not reach offbook at http://localhost:${port} — is it running?`,
+		);
+	const id = probe.identity;
+	const a = api(port);
+	const [modeRes, specsRes, valRes, diagRes] = (await Promise.all([
+		a.get("/v1/mode"),
+		a.get("/v1/specs"),
+		a.get("/v1/validation"),
+		a.get("/v1/diagnostics"),
+	])) as [
+		{ mode: string; seed: number },
+		{ specs: SpecInfo[]; warnings?: string[] },
+		{ summary: ValidationSummary },
+		{ summary: DiagnosticSummary },
+	];
+	if (json) {
+		io.out(
+			JSON.stringify(
+				{
+					server: {
+						projectDir: id.projectDir,
+						runDir: id.runDir,
+						source: "ctrl-port",
+						demo: id.demo,
+					},
+					skipped: [],
+					mode: modeRes,
+					specs: specsRes.specs,
+					validation: valRes.summary,
+					diagnostics: diagRes.summary,
+				},
+				null,
+				2,
+			),
+		);
+		return 0;
+	}
+	io.out(
+		M16(
+			id.projectDir,
+			id.ports.brokerWsPort,
+			id.ports.controlPlanePort,
+			id.demo,
+		),
+	);
+	io.out(`offbook: running (pid ${id.pid}, since ${id.startedAt})`);
+	io.out(`  mode ${modeRes.mode} · seed ${modeRes.seed}`);
+	io.out(
+		`  ports: ws ${id.ports.brokerWsPort} · tcp ${id.ports.brokerTcpPort} · http ${id.ports.controlPlanePort}`,
+	);
+	io.out(
+		`  violations: client ${valRes.summary.byOrigin.client} / mock ${valRes.summary.byOrigin.mock} — caught ${valRes.summary.distinct.client} distinct client break(s)`,
 	);
 	io.out(
 		`  diagnostics: ${diagRes.summary.errors} error(s) · ${diagRes.summary.warnings} warning(s)`,
@@ -1825,7 +1960,7 @@ export const USAGE = `usage: offbook <command>
   demo [--serve]             bundled demo spec — one-shot catch, or --serve to keep serving
   up [--ci] [--strict] [--watch] [--seed n] [--ws-port n] [--tcp-port n] [--ctrl-port n] [--env e]
   down                       stop the running server (idempotent)
-  status [--json]            running/ports/mode/specs/violations at a glance
+  status [--json] [--ctrl-port n]    running/ports/mode/specs/violations at a glance
   logs [-f]                  print (or follow) the server log
   topics [--compact] [--no-examples] [--schema] [--receives|--sends] [--json]
   state [--topic prefix]     retained state

@@ -1856,3 +1856,84 @@ test("specs update reads the RESOLVED instance's boot record for the staleness w
 	rmSync(proj, { recursive: true, force: true });
 	rmSync(cwd, { recursive: true, force: true });
 });
+
+// [itest->R-045]
+test("status, registry-resolved: first line names the instance; --json carries the server block + skipped array", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-status-"));
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	await inDiscoveryWorld(cwd, async () => {
+		const inst = await fakeInstance({
+			port: 19456,
+			projectDir: proj,
+			routes: {
+				"/v1/mode": { mode: "autonomous", seed: 1, lastResetSeq: 0 },
+				"/v1/specs": { specs: [], resolutionMode: "branch" },
+				"/v1/validation": {
+					violations: [],
+					summary: {
+						byOrigin: { client: 0, mock: 0 },
+						distinct: { total: 0, client: 0, mock: 0 },
+					},
+				},
+				"/v1/diagnostics": {
+					diagnostics: [],
+					summary: { errors: 0, warnings: 0, info: 0, byKind: {} },
+				},
+			},
+		});
+		try {
+			const human = io();
+			expect(await run(["status"], human.io)).toBe(0);
+			expect(human.out[0]).toBe(`offbook @ ${proj} (ws 1 · http 19456)`);
+
+			const json = io();
+			expect(await run(["status", "--json"], json.io)).toBe(0);
+			expect(json.out).toHaveLength(1);
+			const doc = JSON.parse(json.out[0]) as {
+				server: { projectDir: string; source: string; demo: boolean };
+				skipped: unknown[];
+			};
+			expect(doc.server).toMatchObject({
+				projectDir: proj,
+				source: "registry",
+				demo: false,
+			});
+			expect(doc.skipped).toEqual([]);
+		} finally {
+			inst.stop();
+		}
+	});
+	rmSync(proj, { recursive: true, force: true });
+	rmSync(cwd, { recursive: true, force: true });
+});
+
+// [itest->R-045]
+test("status --ctrl-port against a pre-upgrade (legacy) server refuses with the older-build message, exit 2", async () => {
+	const legacy = Bun.serve({
+		port: 19457,
+		fetch: (req) =>
+			new URL(req.url).pathname === "/v1/mode"
+				? Response.json({ mode: "passive" })
+				: new Response("nope", { status: 404 }),
+	});
+	try {
+		const x = io();
+		expect(await run(["status", "--ctrl-port", "19457"], x.io)).toBe(2);
+		expect(x.err.join("\n")).toContain("started by an older offbook build");
+	} finally {
+		legacy.stop(true);
+	}
+});
+
+// [itest->R-045]
+test("status with nothing anywhere: the not-running clause covers the whole machine, exit 1", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	await inDiscoveryWorld(cwd, async () => {
+		const x = io();
+		expect(await run(["status"], x.io)).toBe(1);
+		expect(x.err.join("\n")).toContain(
+			"offbook: not running (no runfile in .offbook, and nothing else is running on this machine)",
+		);
+	});
+	rmSync(cwd, { recursive: true, force: true });
+});
