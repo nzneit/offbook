@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { renderTopics, runDemo } from "./index.ts";
 
 test("renderTopics lists every topic with client-facing direction phrasing and fields (M0 gate ii)", async () => {
@@ -27,8 +30,11 @@ test("runDemo boots, publishes off-contract, catches a schema/client violation, 
 
 test("CLI works from a non-repo cwd (DEMO_SPEC must be module-relative, not cwd-relative)", async () => {
 	const bin = `${import.meta.dir}/../../bin/offbook`;
+	// a SCRATCH non-repo cwd, not literal /tmp: a stray /tmp/.offbook runfile
+	// (shared machine state) would otherwise feed the D-032 resolver a
+	// reclaim note on stderr and flake the empty-stderr assertion
 	const proc = Bun.spawn([bin, "topics"], {
-		cwd: "/tmp",
+		cwd: mkdtempSync(join(tmpdir(), "offbook-nonrepo-")),
 		stdout: "pipe",
 		stderr: "pipe",
 	});
