@@ -22,7 +22,7 @@ import {
 	writeRunfile,
 } from "./runfile.ts";
 
-// ports for this file (repo convention: unique per file): 19960-19971
+// ports for this file (repo convention: unique per file): 19960-19972
 
 test("probeOffbook: a listener answering non-mode JSON is not attributed as offbook", async () => {
 	const server = Bun.serve({
@@ -225,6 +225,26 @@ test("probeServer: a 200 /v1/server body that is not identity-shaped is silent, 
 		expect((await probeServer(19971)).kind).toBe("silent");
 	} finally {
 		notOffbook.stop(true);
+	}
+});
+
+// [utest->R-044]
+test("probeServer: a listener that accepts but never answers is silent within the retry bound, not hung", async () => {
+	// a wedged instance holds the connection open: the identity probe must give
+	// up on its own timeout (and its one doubled retry), or every verb that
+	// resolves an instance hangs with it
+	const listener = Bun.listen({
+		hostname: "127.0.0.1",
+		port: 19972,
+		socket: { data() {} },
+	});
+	try {
+		const start = Date.now();
+		expect((await probeServer(19972, 60)).kind).toBe("silent");
+		// 60ms + a 120ms retry: bounded by timeoutMs, not by the 500ms default
+		expect(Date.now() - start).toBeLessThan(1000);
+	} finally {
+		listener.stop(true);
 	}
 });
 
