@@ -767,16 +767,17 @@ test("topics falls back to the bundled demo spec when nothing is running (M0 dis
 	expect(t.err).toEqual([]);
 });
 
-// [itest->R-043]
-test("topics --json with no live server refuses (exit 1, run-dir-qualified); human fallback stays", async () => {
+// [itest->R-045]
+test("topics --json with no live server refuses with the not-running envelope (exit 1); human fallback stays", async () => {
 	const empty = mkdtempSync(join(tmpdir(), "no-server-"));
 	const refused = io();
 	expect(await run(["topics", "--json", "--run-dir", empty], refused.io)).toBe(
 		1,
 	);
-	expect(refused.err.join("\n")).toContain(
-		"bundled-demo fallback is human-only",
-	);
+	expect(refused.out).toHaveLength(1);
+	expect(
+		(JSON.parse(refused.out[0]) as { error: { code: string } }).error.code,
+	).toBe("not-running");
 	const human = io();
 	expect(await run(["topics", "--run-dir", empty], human.io)).toBe(0);
 	expect(human.out[0]).toContain("showing the bundled demo spec"); // pinned note survives
@@ -2360,3 +2361,57 @@ test("logs -f: the divergence banner prints before the follow loop starts", asyn
 	rmSync(proj, { recursive: true, force: true });
 	rmSync(cwd, { recursive: true, force: true });
 }, 20_000);
+
+// [itest->R-045]
+test("topics --json: a registry-resolved DEMO refuses with the demo-only envelope (exit 1); human mode serves it under a demo-marked header", async () => {
+	const demoDir = mkdtempSync(join(tmpdir(), "offbook-vp-demo-"));
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	await inDiscoveryWorld(cwd, async () => {
+		const inst = await fakeInstance({
+			port: 19462,
+			projectDir: demoDir,
+			demo: true,
+			routes: { "/v1/topics": { topics: [] } },
+		});
+		try {
+			const json = io();
+			expect(await run(["topics", "--json"], json.io)).toBe(1);
+			expect(json.out).toHaveLength(1);
+			const envelope = JSON.parse(json.out[0]) as {
+				error: { code: string; message: string };
+			};
+			expect(envelope.error.code).toBe("demo-only");
+			expect(envelope.error.message).toContain(
+				"the only running offbook is the bundled demo",
+			);
+			const human = io();
+			expect(await run(["topics", "--compact"], human.io)).toBe(0);
+			expect(human.out[0]).toBe(
+				`offbook @ ${demoDir} (ws 1 · http 19462) — the bundled demo`,
+			);
+		} finally {
+			inst.stop();
+		}
+	});
+	rmSync(demoDir, { recursive: true, force: true });
+	rmSync(cwd, { recursive: true, force: true });
+});
+
+// [itest->R-045]
+test("topics with nothing live: --json refuses with the not-running envelope; human keeps the bundled-demo fallback + note", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-nofall-"));
+	await inDiscoveryWorld(cwd, async () => {
+		const json = io();
+		expect(await run(["topics", "--json"], json.io)).toBe(1);
+		expect(json.out).toHaveLength(1);
+		expect(
+			(JSON.parse(json.out[0]) as { error: { code: string } }).error.code,
+		).toBe("not-running");
+		const human = io();
+		expect(await run(["topics", "--compact"], human.io)).toBe(0);
+		expect(human.out[0]).toBe(
+			"(no running offbook — showing the bundled demo spec; `offbook up` serves your project's topics)",
+		);
+	});
+	rmSync(cwd, { recursive: true, force: true });
+});

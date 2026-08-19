@@ -1,9 +1,9 @@
-// R-019 — the HTTP thin client every read/action verb shares: resolve the
-// control-plane port (explicit --ctrl-port wins, else the runfile of a LIVE
-// offbook), call /v1/*, and turn the §5 error envelope into a CliError the
-// dispatcher renders (closed ErrorCode union — no ad-hoc strings).
+// R-019 — the HTTP thin client every read/action verb shares: call /v1/* at
+// a caller-resolved control-plane port and turn the §5 error envelope into a
+// CliError the dispatcher renders (closed ErrorCode union — no ad-hoc
+// strings). Port resolution itself is R-045/D-032's resolver (./resolve.ts)
+// plus each verb's own --ctrl-port branch — this file no longer resolves.
 import type { ErrorCode } from "#src/model/index.ts";
-import { resolveRunning } from "./runfile.ts";
 
 export class CliError extends Error {
 	constructor(
@@ -12,28 +12,6 @@ export class CliError extends Error {
 	) {
 		super(message);
 	}
-}
-
-export async function resolveCtrlPort(
-	runDir: string,
-	ctrlPortFlag?: string,
-): Promise<number> {
-	if (ctrlPortFlag !== undefined) {
-		const port = Number(ctrlPortFlag);
-		if (!Number.isInteger(port) || port <= 0)
-			throw new CliError(`--ctrl-port: not a port: '${ctrlPortFlag}'`);
-		return port;
-	}
-	const resolved = await resolveRunning(runDir);
-	if (!resolved)
-		throw new CliError(
-			`offbook is not running (no runfile in ${runDir}) — run \`offbook up\`, or pass --ctrl-port`,
-		);
-	if (!resolved.live)
-		throw new CliError(
-			`offbook is not running (stale runfile in ${runDir}, pid ${resolved.run.pid}) — run \`offbook up\``,
-		);
-	return resolved.run.controlPlanePort;
 }
 
 interface Envelope {

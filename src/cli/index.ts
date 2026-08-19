@@ -31,7 +31,7 @@ import { DEFAULT_CONFIG } from "#src/model/index.ts";
 import { buildRegistry } from "#src/registry/index.ts";
 import { checkoutCommit, checkoutOrigin, repoRoot } from "./checkout.ts";
 import type { Api } from "./client.ts";
-import { api, CliError, resolveCtrlPort } from "./client.ts";
+import { api, CliError } from "./client.ts";
 import type { CheckStatus, DoctorCtx } from "./doctor.ts";
 import { runDoctor } from "./doctor.ts";
 import { guarded } from "./guard.ts";
@@ -53,6 +53,7 @@ import {
 	M17,
 	M18,
 	M19,
+	M20,
 	M22,
 	refusalEnvelope,
 } from "./messages.ts";
@@ -142,10 +143,6 @@ function parseJson(value: string, flag: string): unknown {
 const runDirOf = (values: FlagValues): string =>
 	str(values["run-dir"]) ?? DEFAULT_CONFIG.runDir;
 
-async function clientFor(values: FlagValues): Promise<Api> {
-	return api(await resolveCtrlPort(runDirOf(values), str(values["ctrl-port"])));
-}
-
 // --- D-032: the verb-policy front door over the shared resolver ---
 
 type VerbKind = "read" | "mutate";
@@ -230,7 +227,7 @@ async function targetFor(
 	verb: string,
 ): Promise<Target | number> {
 	if (values["ctrl-port"] !== undefined)
-		return { api: await clientFor(values) };
+		return { api: api(toInt(str(values["ctrl-port"]) ?? "", "--ctrl-port")) };
 	const json = values.json === true;
 	const res = await resolveOrRefuse(
 		{
@@ -508,20 +505,70 @@ async function cmdTopics(rest: string[], io: Io): Promise<number> {
 	let topics: TopicInfo[];
 	let note: string | undefined;
 	if (values["ctrl-port"] !== undefined) {
-		const a = await clientFor(values);
+		const a = api(toInt(str(values["ctrl-port"]) ?? "", "--ctrl-port"));
 		topics = ((await a.get(`/v1/topics${query}`)) as { topics: TopicInfo[] })
 			.topics;
 	} else {
-		const running = await resolveRunning(runDirOf(values));
-		if (running?.live) {
-			const a = api(running.run.controlPlanePort);
+		const res = await resolveOrRefuse(
+			{
+				cwd: process.cwd(),
+				runDirFlag: str(values["run-dir"]),
+				stateDir: stateDirFromEnv(),
+			},
+			io,
+			values.json === true,
+		);
+		if (typeof res === "number") return res;
+		for (const n of res.notes) io.err(n);
+		if (res.resolved !== undefined) {
+			const inst = res.resolved;
+			for (const s of res.skipped) io.err(skippedNote(s));
+			const projectDir = inst.projectDir ?? dirname(inst.runDir);
+			if (values.json === true && inst.source === "registry" && inst.demo) {
+				// the agent path must never mistake demo topics for ingestion
+				// (a cwd-resolved demo is deliberate; a discovered one is not)
+				io.out(refusalEnvelope("demo-only", M20(projectDir)));
+				return 1;
+			}
+			if (inst.source === "registry" && values.json !== true)
+				io.out(
+					M16(
+						projectDir,
+						inst.run.brokerWsPort,
+						inst.run.controlPlanePort,
+						inst.demo,
+					),
+				);
+			const a = api(inst.run.controlPlanePort);
 			topics = ((await a.get(`/v1/topics${query}`)) as { topics: TopicInfo[] })
 				.topics;
-		} else {
+		} else if (res.candidates.length > 1) {
 			if (values.json === true)
-				throw new CliError(
-					"no running offbook in this run-dir — run `offbook up` here, or pass --ctrl-port; the bundled-demo fallback is human-only",
+				io.out(refusalEnvelope("ambiguous", M8(), rowsOf(res.candidates)));
+			else {
+				io.err(M8());
+				for (const line of instanceTable(rowsOf(res.candidates), "topics"))
+					io.err(line);
+			}
+			return 2;
+		} else {
+			// zero live anywhere
+			const own =
+				res.skipped.length === 1 &&
+				res.skipped[0].runDir === resolve(process.cwd(), DEFAULT_CONFIG.runDir)
+					? res.skipped[0]
+					: undefined;
+			if (values.json === true) {
+				io.out(
+					refusalEnvelope(
+						"not-running",
+						own !== undefined ? M12(own.pid) : M11(),
+					),
 				);
+				return 1;
+			}
+			// the M0 human fallback survives — with the skips disclosed
+			for (const s of res.skipped) io.err(skippedNote(s));
 			topics = (await demoTopicInfo()).filter(
 				(t) => direction === undefined || t.direction === direction,
 			);
