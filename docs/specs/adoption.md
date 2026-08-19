@@ -212,6 +212,7 @@ Stated in the skill itself: `contracts.md` > guides > skill. If the skill disagr
 - The verb gets ordinary unit tests (§6).
 - Agent *behavior* is acknowledged as not CI-testable; the gates pin what is pinnable (links, verbs, templates).
 
+<!-- anchor: R-047 -->
 ## 10. First-light integrity <!-- anchor: first-light-integrity -->
 
 **Status**: design for `R-043` (D-028, review-round fork g), 2026-08-08. The FMEA of the embedding journey found the most trust-corrupting failures on the **first-light** path are silent: the app quietly talking to the reachable real backend while offbook runs empty (the adopter concludes the tool does nothing), a busy port blamed on a "foreign process" that is offbook's own demo from another directory, and two advertised loops that succeed while stale. All three fixes share one shape, forced by the frozen contracts: **CLI-local, over existing surfaces — structured `offbook.log` lines (the D-014/D-015 precedent) plus the runfile/`probeOffbook` liveness machinery. No `/v1` endpoint or response shape changes.**

@@ -354,6 +354,54 @@ A bundled Claude Code skill (`skills/offbook-onboard/`, source dir = install dir
 **TEST**: test/cli-dispatch.test.ts, src/cli/doctor.test.ts, test/demo-serve.test.ts, src/cli/runfile.test.ts
 All CLI-local over existing surfaces — structured `offbook.log` lines (D-014/D-015 precedent) plus the runfile/`probeOffbook` machinery; no `/v1` changes: `offbook status` gains a connects-observed clients line read from the D-015 fingerprint lines after the last boot line (last client id + time; never a live count), and the wiring guide + onboarding skill make the connect fingerprint the explicit first-light acceptance test; `up` preflight and doctor's ports check evaluate all three ports and probe a busy ctrl port with `probeOffbook`, attributing an answering offbook ("another offbook owns the control port `<n>`; also busy: `<other labels>` — `offbook down` in that project's directory frees the control port; check the others separately if they persist") instead of blaming a foreign process, with ctrl-free overlap falling back to the generic message; the server logs a boot line every startup (`boot: services.yaml sha256:…` / `boot: bundled demo spec`) and `offbook specs update` warns "changed since `offbook up` — restart to apply" on hash mismatch (skipping on `--ctrl-port`-only, demo boots, or no boot line); `offbook topics --json` with no live server refuses (exit 1, run-dir-qualified message) rather than silently returning the bundled demo spec, while the human-path fallback and its printed note stay.
 
+#### Server identity — the launch token, host rule, and GET /v1/server
+**UID**: R-044
+**STATUS**: specified
+**COVERS**: docs/specs/contracts.md#R-044
+A per-launch 128-bit `token` (lineage — constant across `--watch` respawns) and `host` (`os.hostname()`) join the G14 runfile and boot file; `GET /v1/server` echoes `{ pid, token, host, projectDir, runDir, startedAt, demo, ports }`; `up` bakes absolute projectDir/runDir/token into `offbook.boot.json` and its 30s readiness loop succeeds only when `/v1/server` answers with this launch's token; `serve.ts` treats a relative boot-file runDir or a missing token as a fatal boot error; `pidAlive` treats EPERM as alive; every identity probe retries once with a longer timeout before concluding not-answering.
+
+#### Instance discovery — machine-local registry, shared resolver, verb policy
+**UID**: R-045
+**STATUS**: specified
+**COVERS**: docs/specs/contracts.md#R-045
+Pointer files (`{ v: 1, runDir, host }`, atomic same-directory writes, sha256(realpath runDir) names) ride every `writeRunfile`/`clearRunfile`; one verb-agnostic resolver implements the 10-row instance state table (adopt-on-sight, guarded reclaim/reap/self-heal, the deletion law, the host rule) and the 3-stage containment tiebreak; verbs apply the policy table — in-band `offbook @ <projectDir>` naming on registry-resolved reads with byte-identical cwd output, `(offbook:`-prefixed stderr notes only for mutations and anomalies, refusal tables with paste-ready `--run-dir` selectors, the 0/1/2 exit-code contract, `--json` single-document refusal envelopes, `down`'s compare-and-signal and unrelated-sole-candidate exit-0 no-op, `logs`' local-first divergence banner, `topics`' demo-only `--json` refusal, doctor/`up`-preflight attribution naming the owning project.
+
+#### `offbook up [dir]` — start a project's instance without cd
+**UID**: R-046
+**STATUS**: specified
+**COVERS**: docs/specs/contracts.md#R-046
+Optional positional (default `.`): `projectDir = resolve(cwd, dir)` must exist and be a directory before any mkdir/boot-file/pointer write (else exit 1 with the M2 hint); default runDir becomes `<projectDir>/.offbook` (`--run-dir` stays cwd-relative); the EI2 fresh-project check and the no-services.yaml hint use projectDir.
+
+#### Manage-from-anywhere docs sweep — guides, README, adoption surface, onboarding skill
+**UID**: R-047
+**STATUS**: specified
+**COVERS**: docs/specs/adoption.md#R-047
+Management-verb examples drop the cwd premise (`cd mock &&` package scripts become `offbook up mock`/`offbook down`); daily-loop carries the two-sentence user model verbatim and the scripted-consumer `--run-dir` line; adoption.md §10's attribution gains the named-owner variant and its "no guess at which offbook instance it is" sentence is superseded, as are the pinned `topics --json` refusal wording and §9's step-6 parenthetical; the onboarding skill's steps 5/6 lose `cd mock` and pin their checks to `--run-dir mock/.offbook`; one migration sentence covers pre-upgrade instances.
+
+#### Registry dedupe by file identity on case-insensitive filesystems
+**UID**: R-048
+**STATUS**: deferred
+**COVERS**: docs/superpowers/specs/2026-08-18-instance-discovery-design.md#non-goals
+Scans dedupe by realpath string only (D-032 trim); a case-aliased runDir may briefly list one instance twice — dedupe by file identity if a real collision surfaces.
+
+#### Machine-wide naming for a project directory moved under a running server
+**UID**: R-049
+**STATUS**: deferred
+**COVERS**: docs/superpowers/specs/2026-08-18-instance-discovery-design.md#non-goals
+A moved projectDir loses machine-wide naming until restart (D-032 trim); a marked-unverified naming surface is the fast-follow.
+
+#### Richer version-skew handling than the M18 refusal
+**UID**: R-050
+**STATUS**: deferred
+**COVERS**: docs/superpowers/specs/2026-08-18-instance-discovery-design.md#non-goals
+`status --ctrl-port` against a pre-D-032 server refuses with a version notice (no degraded partial output); richer handling is a fast-follow.
+
+#### TTY-only numbered instance picker
+**UID**: R-051
+**STATUS**: deferred
+**COVERS**: docs/superpowers/specs/2026-08-18-instance-discovery-design.md#non-goals
+Choosing among instances is always a printed table of complete paste-ready commands (agents and scripts must never hang); an interactive numbered picker gated on TTY is a fast-follow.
+
 <!--
 Seeding is staged (doc-system.md §7). Batch 1 (R-001..R-007) + R-008 (M0) + R-009 (broker tier-1 residual): seeded; reconciled where traces exist (the R-006/R-007 spikes closed 2026-08-03 via the real-application runs, D-026). Batch 2+ (R-010..R-031): the full module/spike/gate carve per D-007 and docs/archive/intake/2026-07-21-batch-2-seeding-carve.md.
 What remains unseeded resolves case by case (not bulk):
