@@ -1735,6 +1735,7 @@ test("ambiguity: two live instances refuse with the M8 table (exit 2); --json em
 			};
 			expect(envelope.error.code).toBe("ambiguous");
 			expect(envelope.candidates).toHaveLength(2);
+			expect(json.err.join("\n")).not.toContain("--run-dir");
 		} finally {
 			a.stop();
 			b.stop();
@@ -1786,5 +1787,72 @@ test("zero live, nothing skipped: M11 with its automation anchor, exit 1", async
 			),
 		).toBe(true);
 	});
+	rmSync(cwd, { recursive: true, force: true });
+});
+
+// [itest->R-045]
+test("mutating verb, registry-resolved: M15 stderr note, never an M16 header", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-mut-"));
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	await inDiscoveryWorld(cwd, async () => {
+		const inst = await fakeInstance({
+			port: 19454,
+			projectDir: proj,
+			routes: { "/v1/reset": { reset: true, seed: 7, sinceSeq: 3 } },
+		});
+		try {
+			const x = io();
+			expect(await run(["reset"], x.io)).toBe(0);
+			expect(x.err).toContain(
+				`(offbook: using the offbook started in ${proj})`,
+			);
+			expect(x.out.some((l) => l.startsWith("offbook @"))).toBe(false);
+			expect(x.out).toContain("reset — seed 7 · violation baseline #3");
+		} finally {
+			inst.stop();
+		}
+	});
+	rmSync(proj, { recursive: true, force: true });
+	rmSync(cwd, { recursive: true, force: true });
+});
+
+// [itest->R-045]
+test("specs update reads the RESOLVED instance's boot record for the staleness warning", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-stale-"));
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	await Bun.write(join(proj, "services.yaml"), "services: {}\n"); // current content
+	await inDiscoveryWorld(cwd, async () => {
+		const inst = await fakeInstance({
+			port: 19455,
+			projectDir: proj,
+			routes: { "/v1/specs/refresh": { specs: [] } },
+		});
+		// the instance's boot record + a boot line hashing DIFFERENT content
+		await Bun.write(
+			join(inst.runDir, "offbook.boot.json"),
+			JSON.stringify({ projectDir: proj, config: {}, token: inst.token }),
+		);
+		const staleHash = new Bun.CryptoHasher("sha256")
+			.update("older content")
+			.digest("hex");
+		await Bun.write(
+			join(inst.runDir, "offbook.log"),
+			`[offbook] 2026-08-19T00:00:00.000Z boot: services.yaml sha256:${staleHash}\n`,
+		);
+		try {
+			const x = io();
+			expect(await run(["specs", "update"], x.io)).toBe(0);
+			expect(
+				x.out.some((l) =>
+					l.includes(
+						"services.yaml changed since `offbook up` — restart to apply",
+					),
+				),
+			).toBe(true);
+		} finally {
+			inst.stop();
+		}
+	});
+	rmSync(proj, { recursive: true, force: true });
 	rmSync(cwd, { recursive: true, force: true });
 });

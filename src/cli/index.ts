@@ -908,7 +908,13 @@ async function cmdSpecs(rest: string[], io: Io): Promise<number> {
 		...COMMON,
 		json: { type: "boolean" },
 	});
-	const t = await targetFor(values, io, update ? "mutate" : "read", "specs");
+	// the selector must reproduce the refused invocation — "specs" alone would read, not refresh
+	const t = await targetFor(
+		values,
+		io,
+		update ? "mutate" : "read",
+		update ? "specs update" : "specs",
+	);
 	if (typeof t === "number") return t;
 	const a = t.api;
 	if (update) {
@@ -921,8 +927,11 @@ async function cmdSpecs(rest: string[], io: Io): Promise<number> {
 		}
 		io.out(`specs refreshed (${specs.length} service(s))`);
 		renderSpecs(io, specs);
-		if (str(values["ctrl-port"]) === undefined) {
-			const warn = await specsStalenessWarning(runDirOf(values));
+		// R-043 semantics under D-032: the staleness warning reads the
+		// RESOLVED instance's boot record (skipped under --ctrl-port, where
+		// run-dir correspondence stays unverified)
+		if (str(values["ctrl-port"]) === undefined && t.inst !== undefined) {
+			const warn = await specsStalenessWarning(t.inst.runDir);
 			if (warn !== undefined) io.out(warn);
 		}
 		return 0;
@@ -1051,7 +1060,9 @@ async function cmdPublish(rest: string[], io: Io): Promise<number> {
 		body.qos = toInt(str(values.qos) ?? "", "--qos");
 	if (values.retain) body.retain = true;
 
-	const a = await clientFor(values);
+	const t = await targetFor(values, io, "mutate", "publish");
+	if (typeof t === "number") return t;
+	const a = t.api;
 	const res = (await a.post("/v1/publish", body)) as {
 		topic: string;
 		direction: TopicInfo["direction"] | null;
@@ -1106,7 +1117,9 @@ async function cmdScenario(rest: string[], io: Io): Promise<number> {
 	// EQ4: the same --payload* family as publish; bare = seed-faked inbound
 	const fromFlags = await payloadBody(values, { bareIsExample: false });
 	if ("payload" in fromFlags) body.payload = fromFlags.payload;
-	const a = await clientFor(values);
+	const t = await targetFor(values, io, "mutate", "scenario");
+	if (typeof t === "number") return t;
+	const a = t.api;
 	let res: { scenario: string; fired: boolean; sinceSeq: number };
 	try {
 		res = (await a.post(`/v1/trigger/${encodeURIComponent(name)}`, body)) as {
@@ -1138,7 +1151,9 @@ async function cmdReset(rest: string[], io: Io): Promise<number> {
 		...COMMON,
 		seed: { type: "string" },
 	});
-	const a = await clientFor(values);
+	const t = await targetFor(values, io, "mutate", "reset");
+	if (typeof t === "number") return t;
+	const a = t.api;
 	const body =
 		values.seed !== undefined
 			? { seed: toInt(str(values.seed) ?? "", "--seed") }
