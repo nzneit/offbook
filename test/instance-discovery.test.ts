@@ -6,7 +6,7 @@
 import { expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { Io } from "#src/cli/index.ts";
 import { run, shouldClearFailedBoot } from "#src/cli/index.ts";
 import { pointerPath } from "#src/cli/registry.ts";
@@ -237,3 +237,85 @@ test("shouldClearFailedBoot: our dead spawn clears; a repointed runfile or anoth
 		}),
 	).toBe(false);
 });
+
+// [itest->R-046]
+test("up <missing-dir> and up <file> refuse with the not-a-directory hint BEFORE any write", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-updir-"));
+	const prevCwd = process.cwd();
+	process.chdir(cwd);
+	try {
+		const missing = io();
+		expect(await run(["up", "nope"], missing.io)).toBe(1);
+		expect(missing.err.join("\n")).toContain(
+			"is not a directory — pass your project directory",
+		);
+		expect(existsSync(join(cwd, "nope"))).toBe(false); // no mkdir happened
+		expect(existsSync(join(cwd, ".offbook"))).toBe(false); // and no boot file anywhere
+
+		await Bun.write(join(cwd, "a-file"), "x");
+		const file = io();
+		expect(await run(["up", "a-file"], file.io)).toBe(1);
+		expect(file.err.join("\n")).toContain("is not a directory");
+	} finally {
+		process.chdir(prevCwd);
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// [itest->R-046]
+test("up <dir>: projectDir + runDir land under the positional; a later status from the parent resolves to it", async () => {
+	const projectDir = await gitSpecProject();
+	const parent = dirname(projectDir);
+	const dir = basename(projectDir);
+	const runDir = join(projectDir, ".offbook");
+	const prevCwd = process.cwd();
+	const state = mkdtempSync(join(tmpdir(), "offbook-updir-state-"));
+	const prevState = process.env.OFFBOOK_STATE_DIR;
+	process.env.OFFBOOK_STATE_DIR = state;
+	process.chdir(parent); // the flagship flow: up mock from /app
+	try {
+		const x = io();
+		expect(
+			await run(
+				[
+					"up",
+					dir,
+					"--ci",
+					"--ws-port",
+					"19434",
+					"--tcp-port",
+					"12492",
+					"--ctrl-port",
+					"19435",
+				],
+				x.io,
+			),
+		).toBe(0);
+		expect(existsSync(join(parent, ".offbook"))).toBe(false); // never a second runDir at the launch cwd
+		const boot = JSON.parse(
+			await Bun.file(join(runDir, "offbook.boot.json")).text(),
+		) as { projectDir?: string; config?: { runDir?: string } };
+		expect(boot.projectDir).toBe(projectDir);
+		expect(boot.config?.runDir).toBe(runDir);
+		const identity = (await (
+			await fetch("http://localhost:19435/v1/server")
+		).json()) as { projectDir: string; runDir: string };
+		expect(identity.projectDir).toBe(projectDir);
+		// status from the parent: the strict-descendant tiebreak names it
+		const s = io();
+		expect(await run(["status"], s.io)).toBe(0);
+		expect(s.out[0]).toContain(`offbook @ ${projectDir}`);
+		expect(await run(["down", "--run-dir", runDir], io().io)).toBe(0);
+	} finally {
+		process.chdir(prevCwd);
+		const leftover = await readRunfile(runDir);
+		if (leftover) {
+			try {
+				process.kill(leftover.pid, "SIGKILL");
+			} catch {}
+		}
+		process.env.OFFBOOK_STATE_DIR = prevState;
+		rmSync(state, { recursive: true, force: true });
+		rmSync(projectDir, { recursive: true, force: true });
+	}
+}, 90_000);

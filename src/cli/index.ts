@@ -6,7 +6,7 @@
 // boot/read the bundled demo spec locally (M0's zero-config discovery floor).
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, statSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,6 +38,7 @@ import { guarded } from "./guard.ts";
 import type { InstanceRow } from "./messages.ts";
 import {
 	instanceTable,
+	M2,
 	M3,
 	M5,
 	M6,
@@ -1443,7 +1444,7 @@ async function launchDetached(
 }
 
 async function cmdUp(rest: string[], io: Io): Promise<number> {
-	const { values } = parseFlags(rest, {
+	const { values, positionals } = parseFlags(rest, {
 		"run-dir": { type: "string" },
 		ci: { type: "boolean" },
 		strict: { type: "boolean" },
@@ -1454,7 +1455,20 @@ async function cmdUp(rest: string[], io: Io): Promise<number> {
 		"tcp-port": { type: "string" },
 		"ctrl-port": { type: "string" },
 	});
-	const runDir = resolve(process.cwd(), runDirOf(values));
+	// R-046: `offbook up [dir]` — the project directory positional, default
+	// `.`. Preflight FIRST: refuse before any mkdir, boot-file, or
+	// registration write.
+	const projectDir = resolve(process.cwd(), positionals[0] ?? ".");
+	if (!existsSync(projectDir) || !statSync(projectDir).isDirectory()) {
+		io.err(M2(projectDir));
+		return 1;
+	}
+	// default runDir lives under the PROJECT dir; explicit --run-dir stays
+	// cwd-relative (§1a, D-032)
+	const runDir =
+		values["run-dir"] !== undefined
+			? resolve(process.cwd(), str(values["run-dir"]) ?? "")
+			: join(projectDir, DEFAULT_CONFIG.runDir);
 
 	// two boot profiles: interactive default vs --ci (co-set, EH1/F10);
 	// --strict stays an independent flag (--frozen is v2)
@@ -1489,7 +1503,7 @@ async function cmdUp(rest: string[], io: Io): Promise<number> {
 			runDir,
 			config,
 			boot: {
-				projectDir: process.cwd(),
+				projectDir,
 				config: overrides,
 				environment: str(values.env),
 				watch,
@@ -1515,7 +1529,7 @@ async function cmdUp(rest: string[], io: Io): Promise<number> {
 	const { scenarios } = (await api(config.controlPlanePort).get(
 		"/v1/scenarios",
 	)) as { scenarios: unknown[] };
-	const handlersDir = join(process.cwd(), "handlers");
+	const handlersDir = join(projectDir, "handlers");
 	const handlerFiles = existsSync(handlersDir)
 		? [...new Bun.Glob("**/*.ts").scanSync({ cwd: handlersDir })]
 		: [];
@@ -2224,7 +2238,7 @@ export const USAGE = `usage: offbook <command>
   doctor [dir] [--offline] [--json] [--run-dir <dir>]  preflight: runtime, deps, config, spec reachability, ports
   skill install [--dest <dir>] [--force]  install the onboarding skill into this repo's .claude/skills/
   demo [--serve]             bundled demo spec — one-shot catch, or --serve to keep serving
-  up [--ci] [--strict] [--watch] [--seed n] [--ws-port n] [--tcp-port n] [--ctrl-port n] [--env e]
+  up [dir] [--ci] [--strict] [--watch] [--seed n] [--ws-port n] [--tcp-port n] [--ctrl-port n] [--env e]
   down                       stop the running server (idempotent)
   status [--json] [--ctrl-port n]    running/ports/mode/specs/violations at a glance
   logs [-f]                  print (or follow) the server log

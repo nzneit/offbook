@@ -36,7 +36,7 @@ export async function bootProject(opts: ProjectBootOptions): Promise<Composed> {
 	const servicesPath = join(opts.projectDir, "services.yaml");
 	if (!existsSync(servicesPath))
 		throw new Error(
-			`no services.yaml in ${opts.projectDir} — run \`offbook init\` (or \`offbook demo\` for the bundled spec)`,
+			`no services.yaml in ${opts.projectDir} — run \`offbook init ${opts.projectDir}\` (or \`offbook demo\` for the bundled spec)`,
 		);
 	const { gitHost, services } = await loadServices(servicesPath);
 	const envPath = join(opts.projectDir, "environments.yaml");
