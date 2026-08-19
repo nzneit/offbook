@@ -44,6 +44,7 @@ const WS = 19001;
 const TCP = 12901;
 const CTRL = 19801;
 const CTRL_FLAG = ["--ctrl-port", String(CTRL)];
+const STATE = process.env.OFFBOOK_STATE_DIR ?? "";
 
 const SCENARIO = `
 - name: accept-set
@@ -618,13 +619,17 @@ test("check with no --since gates on the window since the LAST RESET (server-ret
 
 test("status prints the caught-N-distinct-breaks scoreboard, diagnostics counts, and the connect target", async () => {
 	const dir = join(base, "run-live-status");
-	await writeRunfile(dir, {
-		pid: process.pid,
-		brokerWsPort: WS,
-		brokerTcpPort: TCP,
-		controlPlanePort: CTRL,
-		startedAt: "t",
-	});
+	await writeRunfile(
+		dir,
+		{
+			pid: process.pid,
+			brokerWsPort: WS,
+			brokerTcpPort: TCP,
+			controlPlanePort: CTRL,
+			startedAt: "t",
+		},
+		{ stateDir: STATE },
+	);
 	const st = io();
 	expect(await run(["status", "--run-dir", dir], st.io)).toBe(0);
 	const text = st.out.join("\n");
@@ -637,13 +642,17 @@ test("status prints the caught-N-distinct-breaks scoreboard, diagnostics counts,
 
 test("client verbs resolve the runfile: live pid+port works, stale pid errors, no runfile errors", async () => {
 	const liveDir = join(base, "run-live");
-	await writeRunfile(liveDir, {
-		pid: process.pid, // alive, and CTRL answers as offbook
-		brokerWsPort: WS,
-		brokerTcpPort: TCP,
-		controlPlanePort: CTRL,
-		startedAt: "t",
-	});
+	await writeRunfile(
+		liveDir,
+		{
+			pid: process.pid, // alive, and CTRL answers as offbook
+			brokerWsPort: WS,
+			brokerTcpPort: TCP,
+			controlPlanePort: CTRL,
+			startedAt: "t",
+		},
+		{ stateDir: STATE },
+	);
 	const live = io();
 	expect(await run(["mode", "--run-dir", liveDir], live.io)).toBe(0);
 	expect(live.out.join("\n")).toContain("mode:");
@@ -651,13 +660,17 @@ test("client verbs resolve the runfile: live pid+port works, stale pid errors, n
 	// a pid that is definitely dead: a spawned-and-exited child
 	const dead = Bun.spawnSync(["true"]);
 	const staleDir = join(base, "run-stale");
-	await writeRunfile(staleDir, {
-		pid: dead.pid ?? 4_193_999,
-		brokerWsPort: WS,
-		brokerTcpPort: TCP,
-		controlPlanePort: CTRL,
-		startedAt: "t",
-	});
+	await writeRunfile(
+		staleDir,
+		{
+			pid: dead.pid ?? 4_193_999,
+			brokerWsPort: WS,
+			brokerTcpPort: TCP,
+			controlPlanePort: CTRL,
+			startedAt: "t",
+		},
+		{ stateDir: STATE },
+	);
 	const stale = io();
 	expect(await run(["state", "--run-dir", staleDir], stale.io)).toBe(1);
 	expect(stale.err.join("\n")).toContain("stale runfile");
@@ -698,13 +711,17 @@ test("topics --json with no live server refuses (exit 1, run-dir-qualified); hum
 test("down is idempotent on a dead/absent runfile; status exits nonzero when down; logs reads the log file", async () => {
 	const deadPid = Bun.spawnSync(["true"]).pid ?? 4_193_998;
 	const dir = join(base, "run-down");
-	await writeRunfile(dir, {
-		pid: deadPid,
-		brokerWsPort: 1,
-		brokerTcpPort: 2,
-		controlPlanePort: 3,
-		startedAt: "t",
-	});
+	await writeRunfile(
+		dir,
+		{
+			pid: deadPid,
+			brokerWsPort: 1,
+			brokerTcpPort: 2,
+			controlPlanePort: 3,
+			startedAt: "t",
+		},
+		{ stateDir: STATE },
+	);
 	const d1 = io();
 	expect(await run(["down", "--run-dir", dir], d1.io)).toBe(0);
 	expect(d1.out.join("\n")).toContain("not running");
@@ -968,13 +985,17 @@ test("up spawns the detached server from a local-git project, status/specs/logs 
 test("up preflights the ports in the foreground (named fix, no detached EADDRINUSE) and auto-reclaims a stale runfile", async () => {
 	const dir = join(base, "run-preflight");
 	const dead = Bun.spawnSync(["true"]).pid ?? 4_193_997;
-	await writeRunfile(dir, {
-		pid: dead,
-		brokerWsPort: 1,
-		brokerTcpPort: 2,
-		controlPlanePort: 3,
-		startedAt: "t",
-	});
+	await writeRunfile(
+		dir,
+		{
+			pid: dead,
+			brokerWsPort: 1,
+			brokerTcpPort: 2,
+			controlPlanePort: 3,
+			startedAt: "t",
+		},
+		{ stateDir: STATE },
+	);
 	// CTRL is held by the suite-A server, so preflight must fail fast — after
 	// reclaiming the stale runfile, before anything spawns
 	const up = io();

@@ -8,15 +8,18 @@
 // offbook.log free of ANSI, which the R-043 parsers read as raw bytes.
 // [utest->R-043]
 import { expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pointerPath } from "./registry.ts";
 import {
+	clearRunfile,
 	logSafeEnv,
 	pidAlive,
 	probeOffbook,
 	probeServer,
 	readRunfile,
+	writeRunfile,
 } from "./runfile.ts";
 
 // ports for this file (repo convention: unique per file): 19960-19968
@@ -210,5 +213,33 @@ test("readRunfile tolerates and returns token/host fields", async () => {
 	const run = await readRunfile(dir);
 	expect(run?.token).toBe("ff".repeat(16));
 	expect(run?.host).toBe("devbox");
+	rmSync(dir, { recursive: true, force: true });
+});
+
+// [utest->R-045]
+test("writeRunfile registers a pointer; clearRunfile removes it; registry failure never blocks", async () => {
+	const state = mkdtempSync(join(tmpdir(), "offbook-state-"));
+	const dir = mkdtempSync(join(tmpdir(), "offbook-runfile-ptr-"));
+	const run = {
+		pid: 1,
+		brokerWsPort: 1,
+		brokerTcpPort: 2,
+		controlPlanePort: 3,
+		startedAt: "t",
+	};
+	const { registered } = await writeRunfile(dir, run, { stateDir: state });
+	expect(registered).toBe(true);
+	expect(existsSync(pointerPath(state, dir))).toBe(true);
+	clearRunfile(dir, { stateDir: state });
+	expect(existsSync(pointerPath(state, dir))).toBe(false);
+	expect(existsSync(join(dir, "offbook.run"))).toBe(false);
+
+	// an unwritable state dir degrades: runfile still written, registered false
+	const blocked = join(state, "blocked");
+	await Bun.write(blocked, "a FILE where the state dir should be");
+	const second = await writeRunfile(dir, run, { stateDir: blocked });
+	expect(second.registered).toBe(false);
+	expect(existsSync(join(dir, "offbook.run"))).toBe(true);
+	rmSync(state, { recursive: true, force: true });
 	rmSync(dir, { recursive: true, force: true });
 });

@@ -109,6 +109,7 @@ function projectWith(files: Record<string, string>): string {
 }
 
 const GOOD_REPO_ROOT = fakeRepo(">=1.3", ALL_DEPS);
+const STATE = mkdtempSync(join(tmpdir(), "offbook-doctor-state-"));
 
 test("project: no services.yaml is a warn pointing at init, never a fail", async () => {
 	const report = await runDoctor(
@@ -398,13 +399,17 @@ test("runfile: absent passes; stale (alive pid, dead port) warns with a `down` h
 	expect(byName(none, "runfile").status).toBe("pass");
 
 	const staleDir = mkdtempSync(join(tmpdir(), "offbook-doctor-stale-"));
-	await writeRunfile(staleDir, {
-		pid: process.pid, // alive, but the control port answers nothing → stale
-		brokerWsPort: 19130,
-		brokerTcpPort: 12995,
-		controlPlanePort: 19132,
-		startedAt: "2026-07-29T00:00:00.000Z",
-	});
+	await writeRunfile(
+		staleDir,
+		{
+			pid: process.pid, // alive, but the control port answers nothing → stale
+			brokerWsPort: 19130,
+			brokerTcpPort: 12995,
+			controlPlanePort: 19132,
+			startedAt: "2026-07-29T00:00:00.000Z",
+		},
+		{ stateDir: STATE },
+	);
 	const stale = await runDoctor(
 		ctxWith({
 			repoRoot: GOOD_REPO_ROOT,
@@ -423,13 +428,17 @@ test("runfile: absent passes; stale (alive pid, dead port) warns with a `down` h
 	});
 	try {
 		const liveDir = mkdtempSync(join(tmpdir(), "offbook-doctor-live-"));
-		await writeRunfile(liveDir, {
-			pid: process.pid,
-			brokerWsPort: 19130,
-			brokerTcpPort: 12995,
-			controlPlanePort: 19133,
-			startedAt: "2026-07-29T00:00:00.000Z",
-		});
+		await writeRunfile(
+			liveDir,
+			{
+				pid: process.pid,
+				brokerWsPort: 19130,
+				brokerTcpPort: 12995,
+				controlPlanePort: 19133,
+				startedAt: "2026-07-29T00:00:00.000Z",
+			},
+			{ stateDir: STATE },
+		);
 		const live = await runDoctor(
 			ctxWith({
 				repoRoot: GOOD_REPO_ROOT,

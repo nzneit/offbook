@@ -33,6 +33,7 @@ import type { Api } from "./client.ts";
 import { api, CliError, resolveCtrlPort } from "./client.ts";
 import type { CheckStatus, DoctorCtx } from "./doctor.ts";
 import { runDoctor } from "./doctor.ts";
+import { stateDirFromEnv } from "./registry.ts";
 import {
 	clearRunfile,
 	logPath,
@@ -1025,6 +1026,7 @@ async function launchDetached(
 	io: Io,
 ): Promise<number | null> {
 	const { runDir, config } = spec;
+	const stateDir = stateDirFromEnv();
 	const existing = await resolveRunning(runDir);
 	if (existing?.live) {
 		io.err(
@@ -1034,7 +1036,7 @@ async function launchDetached(
 	}
 	if (existing) {
 		io.out(`(reclaiming stale runfile — pid ${existing.run.pid} is gone)`);
-		clearRunfile(runDir);
+		clearRunfile(runDir, { stateDir });
 	}
 	await preflightPorts(config);
 	mkdirSync(runDir, { recursive: true });
@@ -1051,13 +1053,17 @@ async function launchDetached(
 	child.unref();
 	const pid = child.pid;
 	if (pid === undefined) throw new CliError("up: failed to spawn the server");
-	await writeRunfile(runDir, {
-		pid,
-		brokerWsPort: config.brokerWsPort,
-		brokerTcpPort: config.brokerTcpPort,
-		controlPlanePort: config.controlPlanePort,
-		startedAt: new Date().toISOString(),
-	});
+	await writeRunfile(
+		runDir,
+		{
+			pid,
+			brokerWsPort: config.brokerWsPort,
+			brokerTcpPort: config.brokerTcpPort,
+			controlPlanePort: config.controlPlanePort,
+			startedAt: new Date().toISOString(),
+		},
+		{ stateDir },
+	);
 	const deadline = Date.now() + 30_000;
 	let ready = false;
 	while (Date.now() < deadline) {
@@ -1069,7 +1075,7 @@ async function launchDetached(
 		await sleep(100);
 	}
 	if (!ready) {
-		clearRunfile(runDir);
+		clearRunfile(runDir, { stateDir });
 		io.err(`offbook up: server failed to start — ${logPath(runDir)} ends:`);
 		const tail = (
 			await Bun.file(logPath(runDir))
@@ -1228,10 +1234,11 @@ async function cmdDemoServe(rest: string[], io: Io): Promise<number> {
 async function cmdDown(rest: string[], io: Io): Promise<number> {
 	const { values } = parseFlags(rest, { "run-dir": { type: "string" } });
 	const runDir = runDirOf(values);
+	const stateDir = stateDirFromEnv();
 	const run = await readRunfile(runDir);
 	// idempotent (P7): dead/absent pid cleans the runfile and exits 0
 	if (!run || !pidAlive(run.pid)) {
-		clearRunfile(runDir);
+		clearRunfile(runDir, { stateDir });
 		io.out("offbook: not running");
 		return 0;
 	}
@@ -1242,7 +1249,7 @@ async function cmdDown(rest: string[], io: Io): Promise<number> {
 		process.kill(run.pid, "SIGKILL");
 		await sleep(100);
 	}
-	clearRunfile(runDir);
+	clearRunfile(runDir, { stateDir });
 	io.out(`offbook down — stopped (pid ${run.pid})`);
 	return 0;
 }

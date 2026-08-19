@@ -9,6 +9,7 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { ServerIdentity } from "#src/model/index.ts";
+import { removePointer, writePointer } from "./registry.ts";
 
 export interface Runfile {
 	pid: number;
@@ -65,13 +66,31 @@ export async function readRunfile(
 	}
 }
 
-export async function writeRunfile(runDir: string, run: Runfile) {
+// D-032: every runfile writer is a registry writer, every clearer a
+// remover — the pointer can then only DANGLE, never disagree. Best-effort:
+// registry failures never block up or any verb (the caller surfaces M17).
+export async function writeRunfile(
+	runDir: string,
+	run: Runfile,
+	opts: { stateDir: string },
+): Promise<{ registered: boolean }> {
 	mkdirSync(runDir, { recursive: true });
 	await Bun.write(runfilePath(runDir), `${JSON.stringify(run, null, 2)}\n`);
+	try {
+		await writePointer(opts.stateDir, runDir);
+		return { registered: true };
+	} catch {
+		return { registered: false };
+	}
 }
 
-export function clearRunfile(runDir: string): void {
+export function clearRunfile(runDir: string, opts: { stateDir: string }): void {
 	rmSync(runfilePath(runDir), { force: true });
+	try {
+		removePointer(opts.stateDir, runDir);
+	} catch {
+		// a broken registry must not break down's idempotence
+	}
 }
 
 export function pidAlive(pid: number): boolean {

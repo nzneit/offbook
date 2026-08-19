@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { loadConfig } from "#src/config/index.ts";
 import type { Config } from "#src/model/index.ts";
 import { bootDemo, bootProject } from "./boot.ts";
+import { stateDirFromEnv } from "./registry.ts";
 import { logPath, logSafeEnv, writeRunfile } from "./runfile.ts";
 
 interface BootFile {
@@ -37,6 +38,8 @@ if (!bootPath) {
 
 const log = (line: string) =>
 	console.error(`[offbook] ${new Date().toISOString()} ${line}`);
+
+const stateDir = stateDirFromEnv();
 
 try {
 	const boot = JSON.parse(await Bun.file(bootPath).text()) as BootFile;
@@ -84,11 +87,15 @@ try {
 		controlPlanePort: config.controlPlanePort,
 	};
 	// the runfile follows the SERVING pid across --watch respawns (G14)
-	await writeRunfile(config.runDir, {
-		pid: process.pid,
-		...ports,
-		startedAt: new Date().toISOString(),
-	});
+	await writeRunfile(
+		config.runDir,
+		{
+			pid: process.pid,
+			...ports,
+			startedAt: new Date().toISOString(),
+		},
+		{ stateDir },
+	);
 	log(
 		`listening — http :${config.controlPlanePort} · ws :${config.brokerWsPort} · tcp :${config.brokerTcpPort} · mode ${config.mode} · seed ${config.seed}`,
 	);
@@ -122,11 +129,15 @@ try {
 				});
 				child.unref();
 				if (child.pid !== undefined)
-					await writeRunfile(config.runDir, {
-						pid: child.pid,
-						...ports,
-						startedAt: new Date().toISOString(),
-					});
+					await writeRunfile(
+						config.runDir,
+						{
+							pid: child.pid,
+							...ports,
+							startedAt: new Date().toISOString(),
+						},
+						{ stateDir },
+					);
 				process.exit(0);
 			}, 200);
 		});
