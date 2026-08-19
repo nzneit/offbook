@@ -444,7 +444,8 @@ test("row 2 machine-wide: a legacy instance discovered via pointer surfaces as s
 
 // [itest->R-044] — the launch-token granularity, pinned end to end: the
 // token is the LINEAGE's (constant across --watch respawns), the pid the
-// incarnation's; absolute boot-file paths keep the respawn correct even
+// incarnation's; an explicit spawn cwd (NOT merely absolute boot-file
+// paths — posix_spawn resolves the CALLER's cwd) keeps the respawn correct even
 // after the launch cwd is deleted out from under it
 test("--watch respawn with the launch cwd deleted: same token, new pid, correct runfile", async () => {
 	const projectDir = await gitSpecProject();
@@ -490,6 +491,7 @@ test("--watch respawn with the launch cwd deleted: same token, new pid, correct 
 			await Bun.sleep(300);
 			second = await readRunfile(runDir);
 		}
+		expect(second).toBeDefined(); // a timeout must fail here, not on the neighbour
 		expect(second?.pid).not.toBe(first?.pid); // new incarnation
 		expect(second?.token).toBe(token); // same lineage
 		// the respawned server answers /v1/server with the SAME token

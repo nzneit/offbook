@@ -150,7 +150,10 @@ try {
 					stdio: ["ignore", fd, fd],
 					// the child must NOT inherit this process's cwd — posix_spawn
 					// fails ENOENT when the launch cwd was deleted, however
-					// absolute the paths; the runDir provably exists (D-032)
+					// absolute the paths; the runDir provably exists (D-032).
+					// NB launchDetached's own explicit cwd already shields the
+					// respawn when the LAUNCH cwd dies — this line matters for
+					// anyone spawning serve.ts directly (tests do)
 					cwd: config.runDir,
 					// D-030 — belt-and-braces: launchDetached already sanitized this
 					// process's env, but the respawn must not depend on that
