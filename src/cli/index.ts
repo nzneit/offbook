@@ -38,6 +38,7 @@ import { guarded } from "./guard.ts";
 import type { InstanceRow } from "./messages.ts";
 import {
 	instanceTable,
+	M3,
 	M5,
 	M6,
 	M8,
@@ -63,7 +64,12 @@ import type {
 	ResolvedInstance,
 	SkippedInstance,
 } from "./resolve.ts";
-import { containsOrEqual, resolveInstance, WrongHostError } from "./resolve.ts";
+import {
+	attributeCtrlPort,
+	containsOrEqual,
+	resolveInstance,
+	WrongHostError,
+} from "./resolve.ts";
 import type { Runfile, ServerProbe } from "./runfile.ts";
 import {
 	clearRunfile,
@@ -1283,18 +1289,30 @@ async function preflightPorts(config: Config): Promise<void> {
 	];
 	const busy = candidates.filter((c) => !portListenable(c.port));
 	if (busy.length === 0) return;
-	if (
-		busy.some((b) => b.label === "ctrl") &&
-		(await probeOffbook(config.controlPlanePort))
-	) {
+	if (busy.some((b) => b.label === "ctrl")) {
 		const others = busy.filter((b) => b.label !== "ctrl");
 		const alsoBusy =
 			others.length > 0
 				? `; also busy: ${others.map((b) => `${b.label} ${b.port}`).join(", ")}`
 				: "";
-		throw new CliError(
-			`another offbook owns the control port ${config.controlPlanePort}${alsoBusy} — \`offbook down\` in that project's directory frees the control port; check the others separately if they persist`,
-		);
+		// D-032: name the owner when the port's claim is PROVEN (the served
+		// identity matches the claimed runfile's token); a bare offbook-shaped
+		// answer keeps the pre-D-032 generic attribution — never a guess
+		const owner = await attributeCtrlPort(config.controlPlanePort);
+		if (owner !== undefined)
+			throw new CliError(
+				M3({
+					port: config.controlPlanePort,
+					projectDir: owner.projectDir,
+					runDir: owner.runDir,
+					demo: owner.demo,
+					alsoBusy,
+				}),
+			);
+		if (await probeOffbook(config.controlPlanePort))
+			throw new CliError(
+				`another offbook owns the control port ${config.controlPlanePort}${alsoBusy} — \`offbook down\` in that project's directory frees the control port; check the others separately if they persist`,
+			);
 	}
 	throw new CliError(
 		`port(s) in use: ${busy.map((b) => `${b.label} ${b.port}`).join(", ")} — another broker/server? set ${busy.map((b) => b.flag).join("/")} (P7); \`offbook doctor\` checks all three ports`,
@@ -2175,6 +2193,7 @@ async function cmdDoctor(rest: string[], io: Io): Promise<number> {
 		runDir,
 		offline: values.offline === true,
 		bunVersion: Bun.version,
+		stateDir: stateDirFromEnv(),
 		ports: run
 			? {
 					ws: run.brokerWsPort,

@@ -2,12 +2,19 @@
 // names a next step (docs/specs/adoption.md §3).
 // [utest->R-035]
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {
+	mkdirSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { hostname, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { DoctorCtx, DoctorReport } from "./doctor.ts";
 import { DOCTOR_CHECKS, runDoctor, versionAtLeast } from "./doctor.ts";
 import { run } from "./index.ts";
+import { pointerPath } from "./registry.ts";
 import { writeRunfile } from "./runfile.ts";
 
 // ports for this file (repo convention: unique per file): 19130-19135, 12995
@@ -20,6 +27,7 @@ function ctxWith(over: Partial<DoctorCtx>): DoctorCtx {
 		offline: true,
 		bunVersion: "1.3.14",
 		ports: { ws: 19130, tcp: 12995, ctrl: 19131 },
+		stateDir: STATE,
 		...over,
 	};
 }
@@ -605,4 +613,120 @@ test("`offbook doctor` verb: --json shape, exit codes, USAGE listing", async () 
 	const usage: string[] = [];
 	await run([], { out: () => {}, err: (l: string) => usage.push(l) });
 	expect(usage.join("\n")).toContain("doctor");
+});
+
+// [utest->R-045]
+test("ports: an attributable owner is NAMED with a paste-ready down command; unverifiable owners keep the generic attribution", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-doctor-owner-"));
+	const runDir = join(proj, ".offbook");
+	const token = "da".repeat(16);
+	await writeRunfile(
+		runDir,
+		{
+			pid: process.pid,
+			brokerWsPort: 19130,
+			brokerTcpPort: 12995,
+			controlPlanePort: 19136,
+			startedAt: "t",
+			token,
+			host: hostname(),
+		},
+		{ stateDir: STATE },
+	);
+	const identity = {
+		pid: process.pid,
+		token,
+		host: hostname(),
+		projectDir: proj,
+		runDir,
+		startedAt: "t",
+		demo: false,
+		ports: {
+			brokerWsPort: 19130,
+			brokerTcpPort: 12995,
+			controlPlanePort: 19136,
+		},
+	};
+	const server = Bun.serve({
+		port: 19136,
+		fetch: (req) =>
+			new URL(req.url).pathname === "/v1/server"
+				? Response.json(identity)
+				: new Response("nope", { status: 404 }),
+	});
+	try {
+		const report = await runDoctor(
+			ctxWith({
+				repoRoot: GOOD_REPO_ROOT,
+				projectDir: projectWith({}),
+				ports: { ws: 19130, tcp: 12995, ctrl: 19136 },
+			}),
+		);
+		const check = byName(report, "ports");
+		expect(check.status).toBe("fail");
+		expect(check.detail).toContain(`(started in ${proj})`);
+		expect(check.hint).toContain(`offbook down --run-dir ${runDir}`);
+		expect(check.hint).toContain("from anywhere on this machine");
+	} finally {
+		server.stop(true);
+		rmSync(proj, { recursive: true, force: true });
+	}
+});
+
+// [utest->R-045]
+test("runfile: a live local runfile without a pointer warns that it is not yet manageable from elsewhere", async () => {
+	const server = Bun.serve({
+		port: 19137,
+		fetch: () => Response.json({ mode: "passive" }),
+	});
+	try {
+		const liveDir = mkdtempSync(join(tmpdir(), "offbook-doctor-unreg-"));
+		await writeRunfile(
+			liveDir,
+			{
+				pid: process.pid,
+				brokerWsPort: 19130,
+				brokerTcpPort: 12995,
+				controlPlanePort: 19137,
+				startedAt: "t",
+			},
+			{ stateDir: STATE },
+		);
+		// simulate the pre-upgrade instance: live runfile, NO pointer
+		rmSync(pointerPath(STATE, liveDir), { force: true });
+		const report = await runDoctor(
+			ctxWith({
+				repoRoot: GOOD_REPO_ROOT,
+				projectDir: projectWith({}),
+				runDir: liveDir,
+			}),
+		);
+		const check = byName(report, "runfile");
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("not yet manageable from other directories");
+	} finally {
+		server.stop(true);
+	}
+});
+
+// [utest->R-045]
+test("skill: an installed skill still teaching `cd mock && offbook up` escalates to the predates-manage-from-anywhere warning", async () => {
+	const top = mkdtempSync(join(tmpdir(), "offbook-doctor-m21-"));
+	Bun.spawnSync(["git", "init", "-q", top]);
+	const installed = join(top, ".claude", "skills", "offbook-onboard");
+	mkdirSync(installed, { recursive: true });
+	await Bun.write(
+		join(installed, "SKILL.md"),
+		"6. **First light.** `cd mock && offbook up`. Confirm ingestion.\n",
+	);
+	const skillOnly = DOCTOR_CHECKS.find((c) => c.name === "skill");
+	if (skillOnly === undefined) throw new Error("no skill check");
+	const report = await runDoctor(
+		ctxWith({ repoRoot: GOOD_REPO_ROOT, projectDir: top }),
+		[skillOnly],
+	);
+	const check = byName(report, "skill");
+	expect(check.status).toBe("warn");
+	expect(check.detail).toContain("predates manage-from-anywhere");
+	rmSync(top, { recursive: true, force: true });
 });

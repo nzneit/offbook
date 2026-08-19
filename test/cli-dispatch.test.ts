@@ -1164,6 +1164,39 @@ test("up against a ctrl port held by a foreign listener falls back to the generi
 	}
 });
 
+// [itest->R-045]
+test("up preflight: an attributable control-port owner is named with the from-anywhere down command", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-owner-"));
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	await inDiscoveryWorld(cwd, async () => {
+		const inst = await fakeInstance({ port: 19463, projectDir: proj });
+		try {
+			const x = io();
+			expect(
+				await run(
+					[
+						"up",
+						"--ws-port",
+						"19464",
+						"--tcp-port",
+						"12496",
+						"--ctrl-port",
+						"19463",
+					],
+					x.io,
+				),
+			).toBe(1);
+			const err = x.err.join("\n");
+			expect(err).toContain(`(started in ${proj})`);
+			expect(err).toContain(`offbook down --run-dir ${join(proj, ".offbook")}`);
+		} finally {
+			inst.stop();
+		}
+	});
+	rmSync(proj, { recursive: true, force: true });
+	rmSync(cwd, { recursive: true, force: true });
+});
+
 test("interactive default boots lenient-loud past a bad scenario (autonomous, strict=false); up --strict makes it fatal", async () => {
 	const projectDir = await gitSpecProject();
 	const scenariosDir = join(projectDir, "scenarios");
