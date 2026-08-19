@@ -243,7 +243,7 @@ test("row 10 on the explicit path: a foreign-host runfile refuses with the wrote
 	const runDir = join(proj, ".offbook");
 	await writeRunfile(
 		runDir,
-		RUN(19406, "77".repeat(16), "some-other-machine"),
+		RUN(19408, "77".repeat(16), "some-other-machine"),
 		{
 			stateDir: state,
 		},
