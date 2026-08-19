@@ -9,7 +9,7 @@ import { join } from "node:path";
 import type { ServerIdentity } from "#src/model/index.ts";
 import type { CliError } from "./client.ts";
 import { pointerPath } from "./registry.ts";
-import { resolveInstance } from "./resolve.ts";
+import { resolveInstance, WrongHostError } from "./resolve.ts";
 import { writeRunfile } from "./runfile.ts";
 
 const scratch = (prefix: string) => mkdtempSync(join(tmpdir(), prefix));
@@ -115,11 +115,13 @@ test("row 4: wrong token — the port belongs to someone else; skipped, never re
 	const server = identityServer(19403, {
 		token: "44".repeat(16), // NOT the runfile's
 		runDir: "/somewhere/else/.offbook",
+		projectDir: "/somewhere/else",
 	});
 	try {
 		const res = await resolveInstance({ cwd, stateDir: state });
 		expect(res.resolved).toBeUndefined();
 		expect(res.skipped[0]?.reason).toBe("wrong-token");
+		expect(res.skipped[0]?.answeringProjectDir).toBe("/somewhere/else");
 		expect(existsSync(join(runDir, "offbook.run"))).toBe(true);
 	} finally {
 		server.stop();
@@ -171,6 +173,70 @@ test("--run-dir accepts a projectDir whose .offbook holds the runfile; no regist
 	}
 });
 
+// [utest->R-045]
+test("explicit-path dead pid is reported, not reclaimed", async () => {
+	const state = scratch("offbook-res-state-");
+	const proj = scratch("offbook-res-proj-");
+	const runDir = join(proj, ".offbook");
+	const dead = Bun.spawnSync(["true"]);
+	await writeRunfile(
+		join(proj, ".offbook"),
+		{ ...RUN(19406, "88".repeat(16)), pid: dead.pid ?? 4_193_990 },
+		{ stateDir: state },
+	);
+	try {
+		const res = await resolveInstance({
+			cwd: "/tmp",
+			runDirFlag: join(proj, ".offbook"),
+			stateDir: state,
+		});
+		expect(res.resolved).toBeUndefined();
+		expect(res.skipped[0]?.reason).toBe("dead");
+		expect(existsSync(join(runDir, "offbook.run"))).toBe(true); // NOT reclaimed
+		expect(existsSync(pointerPath(state, runDir))).toBe(true);
+	} finally {
+		rmSync(state, { recursive: true, force: true });
+		rmSync(proj, { recursive: true, force: true });
+	}
+});
+
+// [utest->R-045]
+test("pre-D-032 runfile without a token: the served identity's runDir vouches for it (ours fallback)", async () => {
+	const state = scratch("offbook-res-state-");
+	const proj = scratch("offbook-res-proj-");
+	const runDir = join(proj, ".offbook");
+	await writeRunfile(runDir, RUN(19407), { stateDir: state });
+	let server = identityServer(19407, {
+		token: "99".repeat(16),
+		runDir,
+		projectDir: proj,
+	});
+	try {
+		const res = await resolveInstance({ cwd: proj, stateDir: state });
+		expect(res.resolved?.source).toBe("cwd");
+		expect(res.resolved?.identity?.token).toBe("99".repeat(16));
+	} finally {
+		server.stop();
+	}
+	// negative: the served identity claims a DIFFERENT runDir — the
+	// runDir-match fallback must fail, not silently accept any identity
+	await writeRunfile(runDir, RUN(19407), { stateDir: state });
+	server = identityServer(19407, {
+		token: "99".repeat(16),
+		runDir: "/somewhere/else/.offbook",
+		projectDir: "/elsewhere",
+	});
+	try {
+		const res = await resolveInstance({ cwd: proj, stateDir: state });
+		expect(res.resolved).toBeUndefined();
+		expect(res.skipped[0]?.reason).toBe("wrong-token");
+	} finally {
+		server.stop();
+		rmSync(state, { recursive: true, force: true });
+		rmSync(proj, { recursive: true, force: true });
+	}
+});
+
 test("row 10 on the explicit path: a foreign-host runfile refuses with the wrote-on-host message, exit 2", async () => {
 	const state = scratch("offbook-res-state-");
 	const proj = scratch("offbook-res-proj-");
@@ -189,6 +255,7 @@ test("row 10 on the explicit path: a foreign-host runfile refuses with the wrote
 		await resolveInstance({ cwd: "/tmp", runDirFlag: runDir, stateDir: state });
 	} catch (cause) {
 		expect((cause as CliError).exitCode).toBe(2);
+		expect(cause).toBeInstanceOf(WrongHostError);
 	}
 	rmSync(state, { recursive: true, force: true });
 	rmSync(proj, { recursive: true, force: true });
