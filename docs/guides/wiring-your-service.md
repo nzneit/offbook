@@ -53,6 +53,13 @@ offbook up
 offbook topics
 ```
 
+(From the app repo root: `offbook up mock`. Management verbs find the
+running offbook anywhere on this machine; if more than one is running,
+offbook lists them and asks you to pick with `--run-dir` — `--run-dir` and
+`--ctrl-port` always pin exactly. Instances started before this offbook
+build stay invisible to machine-wide discovery until restarted, or managed
+once from their own directory; `offbook doctor` notes them.)
+
 `up` fetches each spec at its branch tip, records exactly what it fetched
 (commit SHA + content hash) to `specs.lock`, compiles the merged contract,
 and boots. `offbook topics` shows what got ingested — check the directions
