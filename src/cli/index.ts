@@ -5,9 +5,10 @@
 // (contracts §5) — never HTTP. `demo` and the no-server `topics` fallback
 // boot/read the bundled demo spec locally (M0's zero-config discovery floor).
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
-import { join } from "node:path";
+import { hostname } from "node:os";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { compose } from "#src/compose/index.ts";
@@ -33,13 +34,17 @@ import type { Api } from "./client.ts";
 import { api, CliError, resolveCtrlPort } from "./client.ts";
 import type { CheckStatus, DoctorCtx } from "./doctor.ts";
 import { runDoctor } from "./doctor.ts";
+import { guarded } from "./guard.ts";
+import { M17 } from "./messages.ts";
 import { stateDirFromEnv } from "./registry.ts";
+import type { Runfile, ServerProbe } from "./runfile.ts";
 import {
 	clearRunfile,
 	logPath,
 	logSafeEnv,
 	pidAlive,
 	probeOffbook,
+	probeServer,
 	readRunfile,
 	resolveRunning,
 	writeRunfile,
@@ -1008,6 +1013,26 @@ async function preflightPorts(config: Config): Promise<void> {
 	);
 }
 
+// guarded site #4's precondition, extracted pure so its race semantics are
+// testable without racing a real boot: the failed-boot clear fires only
+// when the runfile still names OUR spawn AND no other launch answers the
+// port — a concurrent up's winner (repointed runfile, or a different token
+// on the port) must survive the clear
+export function shouldClearFailedBoot(
+	spawned: { pid: number; token: string },
+	seen: { run: Runfile | undefined; probe: ServerProbe },
+): boolean {
+	return (
+		seen.run !== undefined &&
+		seen.run.pid === spawned.pid &&
+		seen.run.token === spawned.token &&
+		!(
+			seen.probe.kind === "server" &&
+			seen.probe.identity.token !== spawned.token
+		)
+	);
+}
+
 // shared by `up` and `demo --serve` (G14): guards, preflight, boot file,
 // detached spawn with the log APPENDED, runfile, readiness probe.
 // Returns the child pid, or null after printing the refusal/failure.
@@ -1039,9 +1064,10 @@ async function launchDetached(
 		clearRunfile(runDir, { stateDir });
 	}
 	await preflightPorts(config);
+	const token = randomBytes(16).toString("hex"); // the launch lineage id (R-044)
 	mkdirSync(runDir, { recursive: true });
 	const bootFile = join(runDir, "offbook.boot.json");
-	await Bun.write(bootFile, JSON.stringify(spec.boot, null, 2));
+	await Bun.write(bootFile, JSON.stringify({ ...spec.boot, token }, null, 2));
 	const logFd = openSync(logPath(runDir), "a");
 	const serveEntry = fileURLToPath(new URL("./serve.ts", import.meta.url));
 	const child = spawn(process.execPath, [serveEntry, bootFile], {
@@ -1053,7 +1079,7 @@ async function launchDetached(
 	child.unref();
 	const pid = child.pid;
 	if (pid === undefined) throw new CliError("up: failed to spawn the server");
-	await writeRunfile(
+	const reg = await writeRunfile(
 		runDir,
 		{
 			pid,
@@ -1061,13 +1087,19 @@ async function launchDetached(
 			brokerTcpPort: config.brokerTcpPort,
 			controlPlanePort: config.controlPlanePort,
 			startedAt: new Date().toISOString(),
+			token,
+			host: hostname(),
 		},
 		{ stateDir },
 	);
+	if (!reg.registered) io.err(M17(spec.boot.projectDir, runDir));
 	const deadline = Date.now() + 30_000;
 	let ready = false;
 	while (Date.now() < deadline) {
-		if (await probeOffbook(config.controlPlanePort, 300)) {
+		// readiness IS identity (R-044): only THIS launch's token counts —
+		// an old instance still draining the port must not green a new up
+		const probe = await probeServer(config.controlPlanePort, 300);
+		if (probe.kind === "server" && probe.identity.token === token) {
 			ready = true;
 			break;
 		}
@@ -1075,7 +1107,17 @@ async function launchDetached(
 		await sleep(100);
 	}
 	if (!ready) {
-		clearRunfile(runDir, { stateDir });
+		// guarded site #4: clear only if the runfile still names OUR spawn
+		// and no OTHER launch answers the port (a concurrent up's winner —
+		// or a late riser of ours — must survive this clear)
+		await guarded({
+			read: async () => ({
+				run: await readRunfile(runDir),
+				probe: await probeServer(config.controlPlanePort, 300),
+			}),
+			expect: (seen) => shouldClearFailedBoot({ pid, token }, seen),
+			act: () => clearRunfile(runDir, { stateDir }),
+		});
 		io.err(`offbook up: server failed to start — ${logPath(runDir)} ends:`);
 		const tail = (
 			await Bun.file(logPath(runDir))
@@ -1106,7 +1148,7 @@ async function cmdUp(rest: string[], io: Io): Promise<number> {
 		"tcp-port": { type: "string" },
 		"ctrl-port": { type: "string" },
 	});
-	const runDir = runDirOf(values);
+	const runDir = resolve(process.cwd(), runDirOf(values));
 
 	// two boot profiles: interactive default vs --ci (co-set, EH1/F10);
 	// --strict stays an independent flag (--frozen is v2)
@@ -1187,7 +1229,7 @@ async function cmdDemoServe(rest: string[], io: Io): Promise<number> {
 		"tcp-port": { type: "string" },
 		"ctrl-port": { type: "string" },
 	});
-	const runDir = runDirOf(values);
+	const runDir = resolve(process.cwd(), runDirOf(values));
 	// interactive profile — the demo should feel alive (wall-clock, autonomous)
 	const overrides: Partial<Config> = {
 		runDir,
