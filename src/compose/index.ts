@@ -13,6 +13,7 @@ import { resolveEmit } from "#src/engine/resolve-emit.ts";
 import type {
 	Config,
 	InboundEvent,
+	ServerIdentity,
 	SpecInfo,
 	SpecRegistry,
 	StateEntry,
@@ -38,6 +39,7 @@ export interface ComposeParts {
 	// registry + SpecInfo[]; the root hot-swaps the thunk (F19 keeps L3
 	// bindings and validation on the current channel set)
 	resolveSpecs?: () => Promise<{ registry: SpecRegistry; specs: SpecInfo[] }>;
+	server?: ServerIdentity; // R-044: serve.ts's identity; absent in-process
 	log?: (line: string) => void;
 }
 
@@ -110,6 +112,8 @@ export async function compose(parts: ComposeParts) {
 	// D-015: every connect/subscribe/publish fingerprint becomes a structured
 	// log line (the R-007 capture surface) — offbook.log via serve.ts's sink
 	broker.onFingerprint((event) => log(fingerprintLine(event)));
+
+	const serverIdentity = parts.server;
 
 	const caps: ControlPlaneCaps = {
 		registry: () => registry,
@@ -265,6 +269,8 @@ export async function compose(parts: ComposeParts) {
 		seed: () => seed,
 
 		lastResetSeq: () => lastResetBaseline,
+
+		server: serverIdentity === undefined ? undefined : () => serverIdentity,
 
 		warn: (line) => log(line),
 	};
