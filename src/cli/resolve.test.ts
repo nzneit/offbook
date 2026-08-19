@@ -305,6 +305,7 @@ test("rows 6-8: registry scan verifies by token, skips the silent, reaps the dea
 		expect(res.resolved?.runDir).toBe(liveRun); // sole verified candidate
 		expect(res.resolved?.source).toBe("registry");
 		expect(res.skipped.map((s) => s.runDir)).toEqual([silentRun]);
+		expect(res.skipped[0]?.reason).toBe("silent");
 		expect(existsSync(pointerPath(state, deadRun))).toBe(false);
 		expect(existsSync(pointerPath(state, silentRun))).toBe(true); // live-pid: kept
 	} finally {
@@ -360,6 +361,31 @@ test("row 9: pointer whose runfile is missing — self-heal from a served identi
 });
 
 // [utest->R-045]
+test("row 9 heals the cwd's OWN dangling pointer", async () => {
+	const state = scratch("offbook-res-state-");
+	const proj = scratch("offbook-res-cwdheal-");
+	const runDir = join(proj, ".offbook");
+	const token = "b1".repeat(16);
+	await writeRunfile(runDir, RUN(19424, token), { stateDir: state });
+	rmSync(join(runDir, "offbook.run")); // de-runfiled while standing in its own project
+	const server = identityServer(19424, { token, runDir, projectDir: proj });
+	try {
+		const res = await resolveInstance({
+			cwd: proj,
+			stateDir: state,
+			selfHealProbePort: 19424,
+		});
+		expect(res.resolved?.runDir).toBe(runDir);
+		expect(existsSync(join(runDir, "offbook.run"))).toBe(true); // rewritten
+		expect((await readRunfile(runDir))?.token).toBe(token);
+	} finally {
+		server.stop();
+		rmSync(state, { recursive: true, force: true });
+		rmSync(proj, { recursive: true, force: true });
+	}
+});
+
+// [utest->R-045]
 test("tiebreak: ancestor-or-equal beats descendant beats sole-non-demo; prefix siblings never match; ambiguity refuses nothing here (resolver reports)", async () => {
 	const state = scratch("offbook-res-state-");
 	const base = scratch("offbook-res-tie-");
@@ -400,6 +426,44 @@ test("tiebreak: ancestor-or-equal beats descendant beats sole-non-demo; prefix s
 		bSrv.stop();
 		rmSync(state, { recursive: true, force: true });
 		rmSync(base, { recursive: true, force: true });
+	}
+});
+
+// [utest->R-045]
+test("tiebreak stage 2: the sole strict descendant wins from a parent cwd", async () => {
+	const state = scratch("offbook-res-state-");
+	const base = scratch("offbook-res-stage2-");
+	const cwd = join(base, "app");
+	mkdirSync(cwd, { recursive: true });
+	const descProj = join(base, "app", "mock"); // a strict DESCENDANT of cwd
+	mkdirSync(descProj, { recursive: true });
+	const descRun = join(descProj, ".offbook");
+	const otherProj = scratch("offbook-res-stage2other-"); // unrelated to cwd
+	const otherRun = join(otherProj, ".offbook");
+	const descTok = "b2".repeat(16);
+	const otherTok = "b3".repeat(16);
+	await writeRunfile(descRun, RUN(19425, descTok), { stateDir: state });
+	await writeRunfile(otherRun, RUN(19426, otherTok), { stateDir: state });
+	const descSrv = identityServer(19425, {
+		token: descTok,
+		runDir: descRun,
+		projectDir: descProj,
+	});
+	const otherSrv = identityServer(19426, {
+		token: otherTok,
+		runDir: otherRun,
+		projectDir: otherProj,
+	});
+	try {
+		// neither candidate is an ancestor-or-equal of cwd → stage 1 is empty;
+		// only the descendant is contained BY cwd → stage 2's sole winner
+		const res = await resolveInstance({ cwd, stateDir: state });
+		expect(res.resolved?.projectDir).toBe(descProj);
+	} finally {
+		descSrv.stop();
+		otherSrv.stop();
+		for (const d of [state, base, otherProj])
+			rmSync(d, { recursive: true, force: true });
 	}
 });
 
@@ -603,4 +667,52 @@ test("an unreadable registry degrades to cwd-scoped behavior with the could-not-
 	).toBe(true);
 	rmSync(state, { recursive: true, force: true });
 	rmSync(cwd, { recursive: true, force: true });
+});
+
+// [utest->R-045] — per-pointer failure isolation (each pointer's mapper body
+// now has its own try/catch): a genuinely THROWING mapper is hard to force
+// portably (rmSync EPERM etc.), so this pins the observable contract instead
+// — a malformed pointer whose runDir is a FILE, not a directory (so its
+// runfile path can never exist, forcing row 9's branch), must not stop a
+// healthy live+verified pointer scanned in the same Promise.all from
+// resolving.
+test("a weird pointer never sinks the healthy candidate scanned alongside it", async () => {
+	const state = scratch("offbook-res-state-");
+	const cwd = scratch("offbook-res-emptycwd-");
+	// healthy: live + verified
+	const healthyProj = scratch("offbook-res-healthy-");
+	const healthyRun = join(healthyProj, ".offbook");
+	const token = "b4".repeat(16);
+	await writeRunfile(healthyRun, RUN(19427, token), { stateDir: state });
+	const server = identityServer(19427, {
+		token,
+		runDir: healthyRun,
+		projectDir: healthyProj,
+	});
+	// weird: a pointer whose runDir is a FILE — runfilePath(runDir) can never
+	// exist, so the scan takes row 9's branch for it; hand-write the pointer
+	// JSON directly (writePointer's canonicalPath still resolves through it
+	// fine since the path DOES exist, just as a file, not a directory)
+	const weirdBase = scratch("offbook-res-weird-");
+	const weirdRunDir = join(weirdBase, "notadir");
+	await Bun.write(weirdRunDir, "not a directory");
+	mkdirSync(join(state, "instances"), { recursive: true });
+	const weirdRaw = `${JSON.stringify({
+		v: 1,
+		runDir: canonicalPath(weirdRunDir),
+		host: hostname(),
+	})}\n`;
+	await Bun.write(pointerPath(state, weirdRunDir), weirdRaw);
+	try {
+		const res = await resolveInstance({
+			cwd,
+			stateDir: state,
+			selfHealProbePort: 19429, // silent: the weird pointer takes the reap path
+		});
+		expect(res.resolved?.runDir).toBe(healthyRun);
+	} finally {
+		server.stop();
+		for (const d of [state, cwd, healthyProj, weirdBase])
+			rmSync(d, { recursive: true, force: true });
+	}
 });

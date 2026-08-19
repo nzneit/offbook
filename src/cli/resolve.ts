@@ -247,12 +247,29 @@ export async function resolveInstance(opts: {
 	const candidates: ResolvedInstance[] = [];
 	const selfHealPort =
 		opts.selfHealProbePort ?? DEFAULT_CONFIG.controlPlanePort;
+	let scanned: Awaited<ReturnType<typeof scanPointers>>;
 	try {
-		const pointers = (await scanPointers(stateDir)).filter(
-			(p) => p.pointer.runDir !== canonicalPath(cwdRunDir), // rows 1-5 covered cwd's own
-		);
-		await Promise.all(
-			pointers.map(async ({ path, raw, pointer }) => {
+		scanned = await scanPointers(stateDir);
+	} catch {
+		// M17 is the catalog's degradation message; its recovery selector
+		// points at the cwd run dir (the only instance still addressable)
+		notes.push(M17(opts.cwd, cwdRunDir));
+		return { candidates: [], skipped, notes, foreignSeen };
+	}
+	// row 9's primary case: the cwd's OWN pointer can dangle too (its
+	// runfile deleted while a server still answers the default port, cwd
+	// standing in its own project) — keep it in the scan exactly when the
+	// cwd runfile is MISSING, so self-heal/reap applies to it same as any
+	// other pointer; when the cwd runfile exists, rows 1-5 already handled
+	// it and it must stay excluded here.
+	const cwdRunfileExists = existsSync(runfilePath(cwdRunDir));
+	const cwdCanonical = canonicalPath(cwdRunDir);
+	const pointers = scanned.filter(
+		(p) => !cwdRunfileExists || p.pointer.runDir !== cwdCanonical,
+	);
+	await Promise.all(
+		pointers.map(async ({ path, raw, pointer }) => {
+			try {
 				if (pointer.host !== hostname()) {
 					foreignSeen = true; // row 10: inert
 					return;
@@ -265,7 +282,8 @@ export async function resolveInstance(opts: {
 					const probe = await probeServer(selfHealPort);
 					if (
 						probe.kind === "server" &&
-						canonicalPath(probe.identity.runDir) === pointer.runDir
+						canonicalPath(probe.identity.runDir) === pointer.runDir &&
+						probe.identity.host === hostname() // never heal from a foreign identity
 					) {
 						const id = probe.identity;
 						const healedRun: Runfile = {
@@ -317,14 +335,13 @@ export async function resolveInstance(opts: {
 				if (out.foreign === true) foreignSeen = true;
 				if (out.skipped !== undefined) skipped.push(out.skipped);
 				if (out.resolved !== undefined) candidates.push(out.resolved);
-			}),
-		);
-	} catch {
-		// M17 is the catalog's degradation message; its recovery selector
-		// points at the cwd run dir (the only instance still addressable)
-		notes.push(M17(opts.cwd, cwdRunDir));
-		return { candidates: [], skipped, notes, foreignSeen };
-	}
+			} catch {
+				// one pointer's failure never fails the scan; the record is
+				// simply not considered this pass (best-effort, deletion law
+				// stays conservative)
+			}
+		}),
+	);
 
 	if (candidates.length === 1)
 		return { resolved: candidates[0], candidates, skipped, notes, foreignSeen };
