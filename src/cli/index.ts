@@ -38,7 +38,11 @@ import { guarded } from "./guard.ts";
 import type { InstanceRow } from "./messages.ts";
 import {
 	instanceTable,
+	M5,
+	M6,
 	M8,
+	M9,
+	M10,
 	M11,
 	M11s,
 	M12,
@@ -48,15 +52,16 @@ import {
 	M16,
 	M17,
 	M18,
+	M22,
 	refusalEnvelope,
 } from "./messages.ts";
-import { stateDirFromEnv } from "./registry.ts";
+import { canonicalPath, stateDirFromEnv } from "./registry.ts";
 import type {
 	Resolution,
 	ResolvedInstance,
 	SkippedInstance,
 } from "./resolve.ts";
-import { resolveInstance, WrongHostError } from "./resolve.ts";
+import { containsOrEqual, resolveInstance, WrongHostError } from "./resolve.ts";
 import type { Runfile, ServerProbe } from "./runfile.ts";
 import {
 	clearRunfile,
@@ -1510,24 +1515,160 @@ async function cmdDemoServe(rest: string[], io: Io): Promise<number> {
 
 async function cmdDown(rest: string[], io: Io): Promise<number> {
 	const { values } = parseFlags(rest, { "run-dir": { type: "string" } });
-	const runDir = runDirOf(values);
 	const stateDir = stateDirFromEnv();
-	const run = await readRunfile(runDir);
-	// idempotent (P7): dead/absent pid cleans the runfile and exits 0
-	if (!run || !pidAlive(run.pid)) {
-		clearRunfile(runDir, { stateDir });
+	const explicit = str(values["run-dir"]);
+	// the foreign-host refusal (M10) renders verbatim on stderr, exit 2
+	const res = await resolveOrRefuse(
+		{ cwd: process.cwd(), runDirFlag: explicit, stateDir },
+		io,
+		false,
+	);
+	if (typeof res === "number") return res;
+	for (const n of res.notes) io.err(n);
+	if (res.resolved !== undefined) {
+		const inst = res.resolved;
+		if (explicit === undefined && inst.source === "registry") {
+			// however it was resolved — the demo stage included — an instance
+			// unrelated to cwd is never auto-signaled (FM-025)
+			const projectDir = canonicalPath(inst.projectDir ?? dirname(inst.runDir));
+			const cwdReal = canonicalPath(process.cwd());
+			const related =
+				containsOrEqual(projectDir, cwdReal) ||
+				containsOrEqual(cwdReal, projectDir);
+			if (!related) {
+				if (res.skipped.length > 0) {
+					// one verified + others not answering: the skipped may be
+					// the intended target — refuse with the table (M9, exit 2)
+					for (const s of res.skipped) io.err(skippedNote(s));
+					io.err(M9());
+					for (const line of instanceTable(rowsOf(res.candidates), "down"))
+						io.err(line);
+					return 2;
+				}
+				// nothing of yours: deterministic no-op — the table makes
+				// choosing one paste (M6, exit 0)
+				io.out(M6());
+				for (const line of instanceTable(rowsOf(res.candidates), "down"))
+					io.out(line);
+				return 0;
+			}
+		}
+		return signalInstance(inst, stateDir, io);
+	}
+	if (res.candidates.length > 1) {
+		io.err(M8());
+		for (const line of instanceTable(rowsOf(res.candidates), "down"))
+			io.err(line);
+		return 2;
+	}
+	// row 3, the wedged-server path: cwd's own SILENT instance is still
+	// signalable pid-only (M12 promises `offbook down` stops it); a
+	// wrong-token skip is never signaled — the pid may be reused (row 4)
+	const ownRunDir =
+		explicit !== undefined
+			? (res.skipped[0]?.runDir ?? resolve(process.cwd(), explicit))
+			: resolve(process.cwd(), DEFAULT_CONFIG.runDir);
+	const own = res.skipped.find(
+		(s) => s.runDir === ownRunDir && s.reason === "silent",
+	);
+	if (own !== undefined) {
+		const run = await readRunfile(own.runDir);
+		if (run !== undefined)
+			return signalInstance(
+				{
+					runDir: own.runDir,
+					run,
+					projectDir: own.projectDir,
+					demo: false,
+					source: "cwd",
+				},
+				stateDir,
+				io,
+			);
+	}
+	// explicit-path dead runfile: down has ALWAYS cleaned these up (P7
+	// idempotence) — the resolver's reclaimDead:false left it for us so
+	// read verbs could keep reporting it as stale
+	const deadOwn = res.skipped.find(
+		(s) => s.runDir === ownRunDir && s.reason === "dead",
+	);
+	if (deadOwn !== undefined) {
+		await guarded({
+			read: () => readRunfile(deadOwn.runDir),
+			expect: (cur) => cur !== undefined && cur.pid === deadOwn.pid,
+			act: () => clearRunfile(deadOwn.runDir, { stateDir }),
+		});
 		io.out("offbook: not running");
 		return 0;
 	}
-	process.kill(run.pid, "SIGTERM");
+	if (res.foreignSeen && explicit === undefined) {
+		// row 10 on the pid-only path: never signal into a foreign pid table
+		const cwdRunDir = resolve(process.cwd(), DEFAULT_CONFIG.runDir);
+		const run = await readRunfile(cwdRunDir);
+		if (run?.host !== undefined && run.host !== hostname()) {
+			io.err(M10(run.host, cwdRunDir));
+			return 2;
+		}
+	}
+	for (const s of res.skipped) io.err(skippedNote(s));
+	io.out("offbook: not running");
+	return 0;
+}
+
+// The signal path (guarded sites #3 and #2), exported so the site pins can
+// drive it directly. The TOKEN identifies the lineage; the PID identifies
+// the incarnation — compare-and-signal checks the pid, because signaling
+// the wrong incarnation is exactly the race being guarded.
+export async function signalInstance(
+	inst: ResolvedInstance,
+	stateDir: string,
+	io: Io,
+): Promise<number> {
+	const { runDir, run } = inst;
+	const lineage = run.token;
+	// site #3: the runfile must still name the verified pid at signal time
+	const signaled = await guarded({
+		read: () => readRunfile(runDir),
+		expect: (cur) => cur !== undefined && cur.pid === run.pid,
+		act: () => {
+			process.kill(run.pid, "SIGTERM");
+		},
+	});
+	if (!signaled) {
+		io.err(M22());
+		return 1;
+	}
 	const deadline = Date.now() + 5_000;
 	while (pidAlive(run.pid) && Date.now() < deadline) await sleep(50);
 	if (pidAlive(run.pid)) {
+		// the SIGKILL escalation re-verifies BOTH granularities: the runfile
+		// still names this pid, AND the port is silent or answers with the
+		// signaled lineage — a new port owner is never killed
+		const cur = await readRunfile(runDir);
+		const probe = await probeServer(run.controlPlanePort, 300);
+		const portIsOurs =
+			probe.kind === "silent" ||
+			(probe.kind === "server" &&
+				lineage !== undefined &&
+				probe.identity.token === lineage) ||
+			(probe.kind === "legacy" && lineage === undefined);
+		if (cur === undefined || cur.pid !== run.pid || !portIsOurs) {
+			io.err(M22());
+			return 1;
+		}
 		process.kill(run.pid, "SIGKILL");
 		await sleep(100);
 	}
-	clearRunfile(runDir, { stateDir });
-	io.out(`offbook down — stopped (pid ${run.pid})`);
+	// site #2: clear only while the runfile still names the signaled pid —
+	// a --watch successor's registration survives this clear
+	await guarded({
+		read: () => readRunfile(runDir),
+		expect: (cur) => cur !== undefined && cur.pid === run.pid,
+		act: () => clearRunfile(runDir, { stateDir }),
+	});
+	if (inst.identity !== undefined)
+		io.out(M5(run.pid, inst.projectDir ?? dirname(runDir), inst.demo));
+	else io.out(`offbook down — stopped (pid ${run.pid})`); // unverified: claim only what was proven
 	return 0;
 }
 

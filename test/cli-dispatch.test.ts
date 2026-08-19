@@ -23,6 +23,7 @@ import {
 	clientsFromLog,
 	renderTopicList,
 	run,
+	signalInstance,
 	specsStalenessWarning,
 } from "#src/cli/index.ts";
 import { readRunfile, writeRunfile } from "#src/cli/runfile.ts";
@@ -1937,3 +1938,298 @@ test("status with nothing anywhere: the not-running clause covers the whole mach
 	});
 	rmSync(cwd, { recursive: true, force: true });
 });
+
+// [itest->R-045]
+test("down, unrelated sole instance: unconditional exit-0 no-op printing the live-instance table; the instance survives", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-downsafe-"));
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	await inDiscoveryWorld(cwd, async () => {
+		const inst = await fakeInstance({ port: 19458, projectDir: proj });
+		try {
+			const x = io();
+			expect(await run(["down"], x.io)).toBe(0);
+			const out = x.out.join("\n");
+			expect(out).toContain(
+				"offbook: not running (in this project) — running elsewhere on this machine:",
+			);
+			expect(out).toContain(`offbook down --run-dir ${join(proj, ".offbook")}`);
+			// the unrelated instance was NOT signaled: its identity still answers
+			const still = await fetch("http://localhost:19458/v1/server");
+			expect(still.status).toBe(200);
+			// and its runfile survives
+			expect(await readRunfile(join(proj, ".offbook"))).toBeDefined();
+		} finally {
+			inst.stop();
+		}
+	});
+	rmSync(proj, { recursive: true, force: true });
+	rmSync(cwd, { recursive: true, force: true });
+});
+
+// [utest->R-045]
+test("signalInstance, guarded site #3: a repointed runfile aborts with the restarted-underneath message; nothing is signaled", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-sig-"));
+	const runDir = join(proj, ".offbook");
+	const state = mkdtempSync(join(tmpdir(), "offbook-vp-state-"));
+	// a real, harmless victim process the runfile CURRENTLY names
+	const victim = Bun.spawn([
+		process.execPath,
+		"-e",
+		"setInterval(() => {}, 1000)",
+	]);
+	await writeRunfile(
+		runDir,
+		{
+			pid: victim.pid,
+			brokerWsPort: 1,
+			brokerTcpPort: 2,
+			controlPlanePort: 19459,
+			startedAt: "t",
+		},
+		{ stateDir: state },
+	);
+	try {
+		const dead = Bun.spawnSync(["true"]); // the pid the CALLER verified — now stale
+		const x = io();
+		const code = await signalInstance(
+			{
+				runDir,
+				run: {
+					pid: dead.pid ?? 4_193_995,
+					brokerWsPort: 1,
+					brokerTcpPort: 2,
+					controlPlanePort: 19459,
+					startedAt: "t",
+				},
+				demo: false,
+				source: "cwd",
+			},
+			state,
+			x.io,
+		);
+		expect(code).toBe(1);
+		expect(x.err.join("\n")).toContain("restarted underneath");
+		expect(victim.killed).toBe(false); // the successor was never signaled
+		expect(await readRunfile(runDir)).toBeDefined(); // its registration survives
+	} finally {
+		victim.kill();
+		await victim.exited;
+		rmSync(proj, { recursive: true, force: true });
+		rmSync(state, { recursive: true, force: true });
+	}
+});
+
+// [itest->R-045]
+test("down, related descendant instance: signals it and reports where it was started", async () => {
+	const parent = mkdtempSync(join(tmpdir(), "offbook-vp-parent-"));
+	const proj = join(parent, "mock");
+	mkdirSync(proj, { recursive: true });
+	await inDiscoveryWorld(parent, async () => {
+		// a real victim that exits on SIGTERM, with a live identity server
+		const victim = Bun.spawn([
+			process.execPath,
+			"-e",
+			"setInterval(() => {}, 1000)",
+		]);
+		const runDir = join(proj, ".offbook");
+		const token = "cd".repeat(16);
+		await writeRunfile(
+			runDir,
+			{
+				pid: victim.pid,
+				brokerWsPort: 1,
+				brokerTcpPort: 2,
+				controlPlanePort: 19460,
+				startedAt: "t",
+				token,
+				host: hostname(),
+			},
+			{ stateDir: process.env.OFFBOOK_STATE_DIR ?? "" },
+		);
+		const identity = {
+			pid: victim.pid,
+			token,
+			host: hostname(),
+			projectDir: proj,
+			runDir,
+			startedAt: "t",
+			demo: false,
+			ports: { brokerWsPort: 1, brokerTcpPort: 2, controlPlanePort: 19460 },
+		};
+		const server = Bun.serve({
+			port: 19460,
+			fetch: (req) =>
+				new URL(req.url).pathname === "/v1/server"
+					? Response.json(identity)
+					: new Response("nope", { status: 404 }),
+		});
+		try {
+			const x = io();
+			expect(await run(["down"], x.io)).toBe(0); // cwd = parent → descendant wins containment
+			expect(x.out.join("\n")).toContain(
+				`stopped (pid ${victim.pid}, started in ${proj})`,
+			);
+			await victim.exited;
+			expect(await readRunfile(runDir)).toBeUndefined(); // cleared + unregistered
+		} finally {
+			server.stop(true);
+			try {
+				victim.kill();
+			} catch {}
+		}
+	});
+	rmSync(parent, { recursive: true, force: true });
+}, 20_000);
+
+// [itest->R-045]
+test("down, row 4: a wrong-token cwd runfile is never signaled — naming-both note + not running, exit 0", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-row4down-"));
+	await inDiscoveryWorld(cwd, async () => {
+		await writeRunfile(
+			join(cwd, ".offbook"),
+			{
+				pid: process.pid, // signaling this would hit the TEST RUNNER
+				brokerWsPort: 1,
+				brokerTcpPort: 2,
+				controlPlanePort: 19466,
+				startedAt: "t",
+				token: "b1".repeat(16),
+				host: hostname(),
+			},
+			{ stateDir: process.env.OFFBOOK_STATE_DIR ?? "" },
+		);
+		const identity = {
+			pid: process.pid,
+			token: "b2".repeat(16), // NOT the runfile's — row 4
+			host: hostname(),
+			projectDir: "/somewhere/else",
+			runDir: "/somewhere/else/.offbook",
+			startedAt: "t",
+			demo: false,
+			ports: { brokerWsPort: 1, brokerTcpPort: 2, controlPlanePort: 19466 },
+		};
+		const server = Bun.serve({
+			port: 19466,
+			fetch: (req) =>
+				new URL(req.url).pathname === "/v1/server"
+					? Response.json(identity)
+					: new Response("nope", { status: 404 }),
+		});
+		try {
+			const x = io();
+			expect(await run(["down"], x.io)).toBe(0); // reached = nothing was signaled
+			expect(x.out).toContain("offbook: not running");
+			expect(x.err.join("\n")).toContain(
+				"no longer answers for control port 19466",
+			);
+			expect(await readRunfile(join(cwd, ".offbook"))).toBeDefined(); // kept
+		} finally {
+			server.stop(true);
+		}
+	});
+	rmSync(cwd, { recursive: true, force: true });
+});
+
+// [itest->R-045]
+test("down, one verified unrelated + one silent skipped: refuses with the pick-one table (M9), exit 2", async () => {
+	const projA = mkdtempSync(join(tmpdir(), "offbook-vp-m9a-"));
+	const projB = mkdtempSync(join(tmpdir(), "offbook-vp-m9b-"));
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	await inDiscoveryWorld(cwd, async () => {
+		const verified = await fakeInstance({ port: 19467, projectDir: projA });
+		// B: live pid, silent port — a skipped candidate down must not ignore
+		await writeRunfile(
+			join(projB, ".offbook"),
+			{
+				pid: process.pid,
+				brokerWsPort: 1,
+				brokerTcpPort: 2,
+				controlPlanePort: 19468, // nothing listens
+				startedAt: "t",
+				token: "b3".repeat(16),
+				host: hostname(),
+			},
+			{ stateDir: process.env.OFFBOOK_STATE_DIR ?? "" },
+		);
+		try {
+			const x = io();
+			expect(await run(["down"], x.io)).toBe(2);
+			const err = x.err.join("\n");
+			expect(err).toContain(
+				"one instance verified but others are not answering",
+			);
+			expect(err).toContain(
+				`offbook down --run-dir ${join(projA, ".offbook")}`,
+			);
+			// the verified instance was NOT auto-killed
+			expect((await fetch("http://localhost:19467/v1/server")).status).toBe(
+				200,
+			);
+		} finally {
+			verified.stop();
+		}
+	});
+	for (const d of [projA, projB, cwd])
+		rmSync(d, { recursive: true, force: true });
+}, 15_000);
+
+// [utest->R-045]
+test("signalInstance, guarded site #2: a successor registered during shutdown survives the post-kill clear", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-succ-"));
+	const runDir = join(proj, ".offbook");
+	const state = mkdtempSync(join(tmpdir(), "offbook-vp-state-"));
+	mkdirSync(runDir, { recursive: true });
+	const runfile = join(runDir, "offbook.run");
+	const successor = JSON.stringify({
+		pid: 555555,
+		brokerWsPort: 1,
+		brokerTcpPort: 2,
+		controlPlanePort: 19469,
+		startedAt: "successor",
+	});
+	// the victim's SIGTERM handler repoints the runfile (a --watch respawn
+	// finishing its handoff) and exits — exactly the site-#2 race
+	const src = `process.on("SIGTERM", () => { require("node:fs").writeFileSync(${JSON.stringify(runfile)}, ${JSON.stringify(successor)}); process.exit(0); }); setInterval(() => {}, 1000);`;
+	const victim = Bun.spawn([process.execPath, "-e", src]);
+	await writeRunfile(
+		runDir,
+		{
+			pid: victim.pid,
+			brokerWsPort: 1,
+			brokerTcpPort: 2,
+			controlPlanePort: 19469,
+			startedAt: "t",
+		},
+		{ stateDir: state },
+	);
+	try {
+		await Bun.sleep(300); // let the handler install
+		const x = io();
+		expect(
+			await signalInstance(
+				{
+					runDir,
+					run: {
+						pid: victim.pid,
+						brokerWsPort: 1,
+						brokerTcpPort: 2,
+						controlPlanePort: 19469,
+						startedAt: "t",
+					},
+					demo: false,
+					source: "cwd",
+				},
+				state,
+				x.io,
+			),
+		).toBe(0);
+		const kept = await readRunfile(runDir);
+		expect(kept?.pid).toBe(555555); // the successor's registration survived
+	} finally {
+		try {
+			victim.kill();
+		} catch {}
+		rmSync(proj, { recursive: true, force: true });
+		rmSync(state, { recursive: true, force: true });
+	}
+}, 20_000);
