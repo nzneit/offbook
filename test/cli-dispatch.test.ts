@@ -16,7 +16,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Io } from "#src/cli/index.ts";
 import {
@@ -40,6 +40,7 @@ import {
 // 19xxx/129xx: distinct from control-plane (18xxx), ci-settlement (16xxx), m0
 // (this file's other literal ports: 19010-19040/12910-12940, 19045/12945/19845
 // — see each test; kept out of named consts since they're single-use)
+// 19450-19479 + tcp 12496-12499: instance-discovery verb policy
 const WS = 19001;
 const TCP = 12901;
 const CTRL = 19801;
@@ -66,6 +67,78 @@ function io(): { out: string[]; err: string[]; io: Io } {
 	const out: string[] = [];
 	const err: string[] = [];
 	return { out, err, io: { out: (l) => out.push(l), err: (l) => err.push(l) } };
+}
+
+// a fake discovered instance: an identity server + a matching runfile,
+// registered by writeRunfile's pointer write into the CURRENT
+// OFFBOOK_STATE_DIR (set per-test)
+async function fakeInstance(opts: {
+	port: number;
+	projectDir: string;
+	demo?: boolean;
+	routes?: Record<string, unknown>;
+}): Promise<{ runDir: string; token: string; stop(): void }> {
+	const token = crypto.randomUUID().replaceAll("-", "");
+	const runDir = join(opts.projectDir, ".offbook");
+	await writeRunfile(
+		runDir,
+		{
+			pid: process.pid,
+			brokerWsPort: 1,
+			brokerTcpPort: 2,
+			controlPlanePort: opts.port,
+			startedAt: "t",
+			token,
+			host: hostname(),
+		},
+		{ stateDir: process.env.OFFBOOK_STATE_DIR ?? "" },
+	);
+	const identity = {
+		pid: process.pid,
+		token,
+		host: hostname(),
+		projectDir: opts.projectDir,
+		runDir,
+		startedAt: "t",
+		demo: opts.demo === true,
+		ports: { brokerWsPort: 1, brokerTcpPort: 2, controlPlanePort: opts.port },
+	};
+	const server = Bun.serve({
+		port: opts.port,
+		fetch: (req) => {
+			const p = new URL(req.url).pathname;
+			if (p === "/v1/server") return Response.json(identity);
+			const body = opts.routes?.[p];
+			if (body !== undefined) return Response.json(body);
+			return new Response("nope", { status: 404 });
+		},
+	});
+	return { runDir, token, stop: () => server.stop(true) };
+}
+
+// pin the state dir + cwd for one discovery test; restores both
+async function inDiscoveryWorld<T>(
+	cwd: string,
+	fn: () => Promise<T>,
+): Promise<T> {
+	const prevState = process.env.OFFBOOK_STATE_DIR;
+	const prevCwd = process.cwd();
+	process.env.OFFBOOK_STATE_DIR = mkdtempSync(
+		join(tmpdir(), "offbook-vp-state-"),
+	);
+	process.chdir(cwd);
+	try {
+		return await fn();
+	} finally {
+		process.chdir(prevCwd);
+		rmSync(process.env.OFFBOOK_STATE_DIR ?? "", {
+			recursive: true,
+			force: true,
+		});
+		// assigning undefined would store the STRING "undefined" — delete instead
+		if (prevState === undefined) delete process.env.OFFBOOK_STATE_DIR;
+		else process.env.OFFBOOK_STATE_DIR = prevState;
+	}
 }
 
 beforeAll(async () => {
@@ -1566,4 +1639,152 @@ test("specsStalenessWarning: skips gracefully on no boot line, malformed JSON, o
 	);
 	expect(await specsStalenessWarning(dir3)).toContain("restart to apply");
 	rmSync(dir3, { recursive: true, force: true });
+});
+
+// --- D-032: verb policy over the resolver (instance discovery) ---
+
+// [itest->R-045]
+test("read verb, registry-resolved: the M16 header names the instance; cwd-resolved output is byte-identical (no header)", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-proj-"));
+	const elsewhere = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	await inDiscoveryWorld(elsewhere, async () => {
+		const inst = await fakeInstance({
+			port: 19450,
+			projectDir: proj,
+			routes: { "/v1/state": { state: [] } },
+		});
+		try {
+			const away = io();
+			expect(await run(["state"], away.io)).toBe(0);
+			expect(away.out[0]).toBe(`offbook @ ${proj} (ws 1 · http 19450)`);
+			expect(away.out[1]).toBe("(no retained state)");
+			// same verb from the project dir itself: no header, byte-identical
+			process.chdir(proj);
+			const home = io();
+			expect(await run(["state"], home.io)).toBe(0);
+			expect(home.out).toEqual(["(no retained state)"]);
+		} finally {
+			inst.stop();
+		}
+	});
+	rmSync(proj, { recursive: true, force: true });
+	rmSync(elsewhere, { recursive: true, force: true });
+});
+
+// [itest->R-045]
+test("object-shaped --json carries the server block on registry resolution only", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-jsonid-"));
+	const elsewhere = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	const diagnostics = {
+		diagnostics: [],
+		summary: { errors: 0, warnings: 0, info: 0, byKind: {} },
+	};
+	await inDiscoveryWorld(elsewhere, async () => {
+		const inst = await fakeInstance({
+			port: 19465,
+			projectDir: proj,
+			routes: { "/v1/diagnostics": diagnostics },
+		});
+		try {
+			const away = io();
+			expect(await run(["diagnostics", "--json"], away.io)).toBe(0);
+			expect(away.out).toHaveLength(1);
+			const doc = JSON.parse(away.out[0]) as {
+				server?: { projectDir: string };
+			};
+			expect(doc.server?.projectDir).toBe(proj);
+			// cwd-resolved: byte-identical round-trip, no server block
+			process.chdir(proj);
+			const home = io();
+			expect(await run(["diagnostics", "--json"], home.io)).toBe(0);
+			expect(JSON.parse(home.out[0])).toEqual(diagnostics);
+		} finally {
+			inst.stop();
+		}
+	});
+	rmSync(proj, { recursive: true, force: true });
+	rmSync(elsewhere, { recursive: true, force: true });
+});
+
+// [itest->R-045]
+test("ambiguity: two live instances refuse with the M8 table (exit 2); --json emits exactly one envelope on stdout", async () => {
+	const projA = mkdtempSync(join(tmpdir(), "offbook-vp-a-"));
+	const projB = mkdtempSync(join(tmpdir(), "offbook-vp-b-"));
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	await inDiscoveryWorld(cwd, async () => {
+		const a = await fakeInstance({ port: 19451, projectDir: projA });
+		const b = await fakeInstance({ port: 19452, projectDir: projB });
+		try {
+			const human = io();
+			expect(await run(["scenarios"], human.io)).toBe(2);
+			const err = human.err.join("\n");
+			expect(err).toContain(
+				"offbook: several instances are running — pick one:",
+			);
+			expect(err).toContain(
+				`offbook scenarios --run-dir ${join(projA, ".offbook")}`,
+			);
+			expect(human.out).toEqual([]);
+
+			const json = io();
+			expect(await run(["scenarios", "--json"], json.io)).toBe(2);
+			expect(json.out).toHaveLength(1); // exactly one stdout document
+			const envelope = JSON.parse(json.out[0]) as {
+				error: { code: string };
+				candidates: unknown[];
+			};
+			expect(envelope.error.code).toBe("ambiguous");
+			expect(envelope.candidates).toHaveLength(2);
+		} finally {
+			a.stop();
+			b.stop();
+		}
+	});
+	for (const d of [projA, projB, cwd])
+		rmSync(d, { recursive: true, force: true });
+});
+
+// [itest->R-045]
+test("M12 replaces M11 and M13 when the only skipped instance is cwd's own wedged one", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-wedged-"));
+	await inDiscoveryWorld(cwd, async () => {
+		// live pid, silent port: row 3
+		await writeRunfile(
+			join(cwd, ".offbook"),
+			{
+				pid: process.pid,
+				brokerWsPort: 1,
+				brokerTcpPort: 2,
+				controlPlanePort: 19453, // nothing listens here
+				startedAt: "t",
+				token: "ab".repeat(16),
+				host: hostname(),
+			},
+			{ stateDir: process.env.OFFBOOK_STATE_DIR ?? "" },
+		);
+		const x = io();
+		expect(await run(["scenarios"], x.io)).toBe(1);
+		const err = x.err.join("\n");
+		expect(err).toContain("offbook is not answering here");
+		expect(err).not.toContain("offbook is not running"); // M11 replaced
+		expect(err).not.toContain("(offbook: an instance in"); // M13 replaced
+	});
+	rmSync(cwd, { recursive: true, force: true });
+}, 15_000);
+
+// [itest->R-045]
+test("zero live, nothing skipped: M11 with its automation anchor, exit 1", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-empty-"));
+	await inDiscoveryWorld(cwd, async () => {
+		const x = io();
+		expect(await run(["scenarios"], x.io)).toBe(1);
+		expect(
+			x.err.some((l) =>
+				l.includes(
+					"offbook is not running (no runfile in .offbook, and nothing else is running on this machine)",
+				),
+			),
+		).toBe(true);
+	});
+	rmSync(cwd, { recursive: true, force: true });
 });

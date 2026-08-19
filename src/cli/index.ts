@@ -8,7 +8,7 @@ import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { hostname } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { compose } from "#src/compose/index.ts";
@@ -35,8 +35,26 @@ import { api, CliError, resolveCtrlPort } from "./client.ts";
 import type { CheckStatus, DoctorCtx } from "./doctor.ts";
 import { runDoctor } from "./doctor.ts";
 import { guarded } from "./guard.ts";
-import { M17 } from "./messages.ts";
+import type { InstanceRow } from "./messages.ts";
+import {
+	instanceTable,
+	M8,
+	M11,
+	M12,
+	M13,
+	M13wrongToken,
+	M15,
+	M16,
+	M17,
+	refusalEnvelope,
+} from "./messages.ts";
 import { stateDirFromEnv } from "./registry.ts";
+import type {
+	Resolution,
+	ResolvedInstance,
+	SkippedInstance,
+} from "./resolve.ts";
+import { resolveInstance, WrongHostError } from "./resolve.ts";
 import type { Runfile, ServerProbe } from "./runfile.ts";
 import {
 	clearRunfile,
@@ -118,6 +136,162 @@ const runDirOf = (values: FlagValues): string =>
 
 async function clientFor(values: FlagValues): Promise<Api> {
 	return api(await resolveCtrlPort(runDirOf(values), str(values["ctrl-port"])));
+}
+
+// --- D-032: the verb-policy front door over the shared resolver ---
+
+type VerbKind = "read" | "mutate";
+interface Target {
+	api: Api;
+	inst?: ResolvedInstance;
+	res?: Resolution;
+}
+
+function rowsOf(candidates: ResolvedInstance[]): InstanceRow[] {
+	return candidates.map((c) => ({
+		projectDir: c.projectDir ?? dirname(c.runDir),
+		demo: c.demo,
+		ws: c.run.brokerWsPort,
+		tcp: c.run.brokerTcpPort,
+		http: c.run.controlPlanePort,
+		pid: c.run.pid,
+		runDir: c.runDir,
+	}));
+}
+
+// row 4's skip note names BOTH sides (the port answered — as a different
+// offbook); every other skip gets the plain not-answering M13
+function skippedNote(s: SkippedInstance): string {
+	return s.reason === "wrong-token" && s.answeringProjectDir !== undefined
+		? M13wrongToken(s.projectDir, s.pid, s.ctrlPort, s.answeringProjectDir)
+		: M13(s.projectDir, s.pid, s.ctrlPort);
+}
+
+// the one place the wrong-host refusal (M10) is rendered: verbatim catalog
+// wording on stderr (never re-prefixed by run()'s renderer), or the
+// wrong-host envelope under --json; exit 2 either way
+async function resolveOrRefuse(
+	opts: Parameters<typeof resolveInstance>[0],
+	io: Io,
+	json: boolean,
+): Promise<Resolution | number> {
+	try {
+		return await resolveInstance(opts);
+	} catch (cause) {
+		if (cause instanceof WrongHostError) {
+			if (json) io.out(refusalEnvelope("wrong-host", cause.message));
+			else io.err(cause.message);
+			return 2;
+		}
+		throw cause;
+	}
+}
+
+// registry-resolved object-shaped --json documents carry identity in-band
+// (the spec's "other shapes gain the same fields where their envelope
+// allows"); cwd-resolved output stays byte-identical, so the pinned
+// round-trip shapes only grow the block when discovery actually engaged.
+// Array-shaped documents (topics/state/scenarios --json) are exempt — their
+// envelope does not allow it; scripts pin those with --run-dir.
+function withServer(
+	doc: Record<string, unknown>,
+	t: Target,
+): Record<string, unknown> {
+	if (t.inst === undefined || t.inst.source !== "registry") return doc;
+	return {
+		...doc,
+		server: {
+			projectDir: t.inst.projectDir,
+			runDir: t.inst.runDir,
+			source: t.inst.source,
+			demo: t.inst.demo,
+		},
+	};
+}
+
+// Resolves for one verb invocation and applies the naming/refusal policy
+// (spec "Verb policy" + "Naming and notes"): prints resolver notes, M13
+// skips, and the registry-resolution naming duty (M16 header for reads on
+// stdout, M15 note for mutations on stderr — human mode only; a quiet
+// cwd day stays byte-identical). Returns the exit code when it refused:
+// 2 = refused-with-selector (M8), 1 = not running (M11/M12).
+async function targetFor(
+	values: FlagValues,
+	io: Io,
+	kind: VerbKind,
+	verb: string,
+): Promise<Target | number> {
+	if (values["ctrl-port"] !== undefined)
+		return { api: await clientFor(values) };
+	const json = values.json === true;
+	const res = await resolveOrRefuse(
+		{
+			cwd: process.cwd(),
+			runDirFlag: str(values["run-dir"]),
+			stateDir: stateDirFromEnv(),
+		},
+		io,
+		json,
+	);
+	if (typeof res === "number") return res;
+	for (const n of res.notes) io.err(n);
+	if (res.resolved !== undefined) {
+		const inst = res.resolved;
+		for (const s of res.skipped) io.err(skippedNote(s));
+		if (inst.source === "registry" && !json) {
+			const projectDir = inst.projectDir ?? dirname(inst.runDir);
+			if (kind === "read")
+				io.out(
+					M16(
+						projectDir,
+						inst.run.brokerWsPort,
+						inst.run.controlPlanePort,
+						inst.demo,
+					),
+				);
+			else io.err(M15(projectDir, inst.demo));
+		}
+		return { api: api(inst.run.controlPlanePort), inst, res };
+	}
+	if (res.candidates.length > 1) {
+		if (json)
+			io.out(refusalEnvelope("ambiguous", M8(), rowsOf(res.candidates)));
+		else {
+			io.err(M8());
+			for (const line of instanceTable(rowsOf(res.candidates), verb))
+				io.err(line);
+		}
+		return 2;
+	}
+	// zero live. Explicit --run-dir keeps the pre-D-032 wordings byte for
+	// byte (the scripting escape hatch) — note a dead-pid runfile was
+	// already reclaimed above (row 5), surfacing as no-runfile plus the M14 note.
+	const runDirFlag = str(values["run-dir"]);
+	if (runDirFlag !== undefined) {
+		const s = res.skipped[0];
+		const message =
+			s === undefined
+				? `offbook is not running (no runfile in ${runDirFlag}) — run \`offbook up\`, or pass --ctrl-port`
+				: `offbook is not running (stale runfile in ${runDirFlag}, pid ${s.pid}) — run \`offbook up\``;
+		if (json) io.out(refusalEnvelope("not-running", message));
+		else io.err(message);
+		return 1;
+	}
+	const own =
+		res.skipped.length === 1 &&
+		res.skipped[0].runDir === resolve(process.cwd(), DEFAULT_CONFIG.runDir)
+			? res.skipped[0]
+			: undefined;
+	if (own !== undefined) {
+		// M12 REPLACES M11 and M13 — never printed alongside them
+		if (json) io.out(refusalEnvelope("not-running", M12(own.pid)));
+		else io.err(M12(own.pid));
+		return 1;
+	}
+	for (const s of res.skipped) io.err(skippedNote(s));
+	if (json) io.out(refusalEnvelope("not-running", M11()));
+	else io.err(M11());
+	return 1;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -417,7 +591,9 @@ async function cmdState(rest: string[], io: Io): Promise<number> {
 		json: { type: "boolean" },
 		topic: { type: "string" },
 	});
-	const a = await clientFor(values);
+	const t = await targetFor(values, io, "read", "state");
+	if (typeof t === "number") return t;
+	const a = t.api;
 	const qs = values.topic
 		? `?topic=${encodeURIComponent(str(values.topic) ?? "")}`
 		: "";
@@ -439,7 +615,9 @@ async function cmdScenarios(rest: string[], io: Io): Promise<number> {
 		...COMMON,
 		json: { type: "boolean" },
 	});
-	const a = await clientFor(values);
+	const t = await targetFor(values, io, "read", "scenarios");
+	if (typeof t === "number") return t;
+	const a = t.api;
 	const { scenarios } = (await a.get("/v1/scenarios")) as {
 		scenarios: ScenarioInfo[];
 	};
@@ -507,7 +685,9 @@ async function cmdValidation(rest: string[], io: Io): Promise<number> {
 	});
 	if (values.watch === true && values.json === true)
 		throw new CliError("validation: --watch and --json are mutually exclusive");
-	const a = await clientFor(values);
+	const t = await targetFor(values, io, "read", "validation");
+	if (typeof t === "number") return t;
+	const a = t.api;
 	const since =
 		values.since !== undefined
 			? toInt(str(values.since) ?? "", "--since")
@@ -527,7 +707,13 @@ async function cmdValidation(rest: string[], io: Io): Promise<number> {
 	};
 	if (values.json) {
 		// --json round-trips GET /v1/validation exactly (raw errors[] intact)
-		io.out(JSON.stringify(res, null, 2));
+		io.out(
+			JSON.stringify(
+				withServer(res as unknown as Record<string, unknown>, t),
+				null,
+				2,
+			),
+		);
 		return 0;
 	}
 	// one line per DISTINCT violation, repeats collapsed to ×N (design §5)
@@ -609,13 +795,21 @@ async function cmdDiagnostics(rest: string[], io: Io): Promise<number> {
 		throw new CliError(
 			"diagnostics: --watch and --json are mutually exclusive",
 		);
-	const a = await clientFor(values);
+	const t = await targetFor(values, io, "read", "diagnostics");
+	if (typeof t === "number") return t;
+	const a = t.api;
 	const res = (await a.get("/v1/diagnostics")) as {
 		diagnostics: Diagnostic[];
 		summary: DiagnosticSummary;
 	};
 	if (values.json) {
-		io.out(JSON.stringify(res, null, 2));
+		io.out(
+			JSON.stringify(
+				withServer(res as unknown as Record<string, unknown>, t),
+				null,
+				2,
+			),
+		);
 		return 0;
 	}
 	for (const d of res.diagnostics) io.out(diagnosticLine(d));
@@ -714,7 +908,9 @@ async function cmdSpecs(rest: string[], io: Io): Promise<number> {
 		...COMMON,
 		json: { type: "boolean" },
 	});
-	const a = await clientFor(values);
+	const t = await targetFor(values, io, update ? "mutate" : "read", "specs");
+	if (typeof t === "number") return t;
+	const a = t.api;
 	if (update) {
 		const { specs } = (await a.post("/v1/specs/refresh")) as {
 			specs: SpecInfo[];
@@ -737,7 +933,13 @@ async function cmdSpecs(rest: string[], io: Io): Promise<number> {
 		warnings?: string[];
 	};
 	if (values.json) {
-		io.out(JSON.stringify(res, null, 2));
+		io.out(
+			JSON.stringify(
+				withServer(res as unknown as Record<string, unknown>, t),
+				null,
+				2,
+			),
+		);
 		return 0;
 	}
 	renderSpecs(io, res.specs, res.resolutionMode, res.warnings);
@@ -749,13 +951,27 @@ async function cmdMode(rest: string[], io: Io): Promise<number> {
 		...COMMON,
 		json: { type: "boolean" },
 	});
-	const a = await clientFor(values);
+	const t = await targetFor(
+		values,
+		io,
+		positionals.length > 0 ? "mutate" : "read",
+		"mode",
+	);
+	if (typeof t === "number") return t;
+	const a = t.api;
 	const res = (
 		positionals.length > 0
 			? await a.post("/v1/mode", { mode: positionals[0] })
 			: await a.get("/v1/mode")
 	) as { mode: string; seed: number };
-	if (values.json) io.out(JSON.stringify(res, null, 2));
+	if (values.json)
+		io.out(
+			JSON.stringify(
+				withServer(res as unknown as Record<string, unknown>, t),
+				null,
+				2,
+			),
+		);
 	else io.out(`mode: ${res.mode} · seed ${res.seed}`);
 	return 0;
 }
@@ -941,7 +1157,9 @@ async function cmdCheck(rest: string[], io: Io): Promise<number> {
 		...COMMON,
 		since: { type: "string" },
 	});
-	const a = await clientFor(values);
+	const t = await targetFor(values, io, "read", "check");
+	if (typeof t === "number") return t;
+	const a = t.api;
 	// default window = the server-retained last-reset baseline (P8, D-014)
 	const since =
 		values.since !== undefined
