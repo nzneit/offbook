@@ -22,7 +22,7 @@ import {
 	writeRunfile,
 } from "./runfile.ts";
 
-// ports for this file (repo convention: unique per file): 19960-19968
+// ports for this file (repo convention: unique per file): 19960-19971
 
 test("probeOffbook: a listener answering non-mode JSON is not attributed as offbook", async () => {
 	const server = Bun.serve({
@@ -78,6 +78,20 @@ test("probeOffbook: a {mode: autonomous} responder is also attributed as live", 
 
 test("probeOffbook: nothing listening (connection refused) is not attributed as offbook", async () => {
 	expect(await probeOffbook(19964)).toBe(false);
+});
+
+test("probeOffbook: a non-2xx answer is not attributed, even when its body is offbook-shaped", async () => {
+	// a server erroring out (or a proxy answering 503 for a dead upstream) may
+	// still echo an offbook-shaped body; only a 2xx proves someone is serving
+	const server = Bun.serve({
+		port: 19969,
+		fetch: () => Response.json({ mode: "passive" }, { status: 503 }),
+	});
+	try {
+		expect(await probeOffbook(19969)).toBe(false);
+	} finally {
+		server.stop(true);
+	}
 });
 
 test("logSafeEnv: strips the color-forcing vars, asserts NO_COLOR, passes the rest through", () => {
@@ -188,6 +202,33 @@ test("probeServer: classifies an identity answer, a legacy /v1/mode answer, and 
 });
 
 // [utest->R-044]
+test("probeServer: a 200 /v1/server body that is not identity-shaped is silent, and so is a server that 404s both paths", async () => {
+	// a 200 from something that is not offbook must never be read as an
+	// identity — trusting the answer would let a stray dev server claim an
+	// instance's runDir and drive the resolver's heal/skip decisions
+	const shapeless = Bun.serve({
+		port: 19970,
+		fetch: () => Response.json({ hello: "world" }),
+	});
+	try {
+		expect((await probeServer(19970)).kind).toBe("silent");
+	} finally {
+		shapeless.stop(true);
+	}
+	// 404 on /v1/server AND on /v1/mode: an unrelated HTTP server on the port,
+	// not a pre-D-032 offbook (which is what "legacy" is reserved for)
+	const notOffbook = Bun.serve({
+		port: 19971,
+		fetch: () => new Response("nope", { status: 404 }),
+	});
+	try {
+		expect((await probeServer(19971)).kind).toBe("silent");
+	} finally {
+		notOffbook.stop(true);
+	}
+});
+
+// [utest->R-044]
 test("pidAlive: EPERM counts as alive-but-unsignalable, ESRCH as dead", () => {
 	// pid 1 is init: alive, and signaling it as non-root raises EPERM
 	expect(pidAlive(1)).toBe(true);
@@ -213,6 +254,60 @@ test("readRunfile tolerates and returns token/host fields", async () => {
 	const run = await readRunfile(dir);
 	expect(run?.token).toBe("ff".repeat(16));
 	expect(run?.host).toBe("devbox");
+	rmSync(dir, { recursive: true, force: true });
+});
+
+// [utest->R-044]
+test("readRunfile: a corrupt or wrong-shaped runfile reads as absent (the caller reclaims it)", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "offbook-runfile-shape-"));
+	const path = join(dir, "offbook.run");
+	const base = { brokerWsPort: 1, brokerTcpPort: 2, startedAt: "t" };
+	await Bun.write(path, "{not json");
+	expect(await readRunfile(dir)).toBeUndefined();
+	// a non-number pid would be signalled (or compared) as garbage — the
+	// liveness read must reject it, not hand it to pidAlive
+	await Bun.write(
+		path,
+		JSON.stringify({ ...base, pid: "4242", controlPlanePort: 3 }),
+	);
+	expect(await readRunfile(dir)).toBeUndefined();
+	// same for the control port: the identity probe would fetch a garbage URL
+	await Bun.write(
+		path,
+		JSON.stringify({ ...base, pid: 4242, controlPlanePort: "3" }),
+	);
+	expect(await readRunfile(dir)).toBeUndefined();
+	// both numbers: accepted
+	await Bun.write(
+		path,
+		JSON.stringify({ ...base, pid: 4242, controlPlanePort: 3 }),
+	);
+	expect((await readRunfile(dir))?.pid).toBe(4242);
+	rmSync(dir, { recursive: true, force: true });
+});
+
+// [utest->R-045]
+test("clearRunfile is idempotent when there is nothing to clear (down's idempotence)", async () => {
+	const state = mkdtempSync(join(tmpdir(), "offbook-state-"));
+	const dir = mkdtempSync(join(tmpdir(), "offbook-runfile-clear-"));
+	clearRunfile(dir, { stateDir: state }); // no runfile, no pointer: not an error
+	expect(existsSync(join(dir, "offbook.run"))).toBe(false);
+	await writeRunfile(
+		dir,
+		{
+			pid: 1,
+			brokerWsPort: 1,
+			brokerTcpPort: 2,
+			controlPlanePort: 3,
+			startedAt: "t",
+		},
+		{ stateDir: state },
+	);
+	clearRunfile(dir, { stateDir: state });
+	clearRunfile(dir, { stateDir: state }); // and again, on the now-empty dir
+	expect(existsSync(join(dir, "offbook.run"))).toBe(false);
+	expect(existsSync(pointerPath(state, dir))).toBe(false);
+	rmSync(state, { recursive: true, force: true });
 	rmSync(dir, { recursive: true, force: true });
 });
 

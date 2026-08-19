@@ -4,6 +4,7 @@ import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import {
 	existsSync,
+	mkdirSync,
 	mkdtempSync,
 	readdirSync,
 	rmSync,
@@ -87,6 +88,81 @@ test("scanPointers: ignores non-hash names, reaps corrupt pointers, dedupes stri
 	expect(entries[0].path.endsWith(goodName)).toBe(true);
 	expect(existsSync(join(dir, `${"b".repeat(64)}.json`))).toBe(false);
 	expect(existsSync(join(dir, `${"c".repeat(64)}.json`))).toBe(false);
+	// ignored means INERT, not reaped: the name filter is what makes a
+	// crash-leaked temp (and anything else a user drops here) survive a scan
+	expect(existsSync(join(dir, `${"a".repeat(64)}.json.tmp999`))).toBe(true);
+	expect(existsSync(join(dir, "README"))).toBe(true);
+	rmSync(state, { recursive: true, force: true });
+	rmSync(runDir, { recursive: true, force: true });
+});
+
+test("scanPointers: a state dir that has never registered anything scans empty, and the scan creates nothing", async () => {
+	const state = scratch();
+	expect(await scanPointers(state)).toEqual([]);
+	// a read verb resolving on a fresh machine must not materialize state
+	expect(existsSync(join(state, "instances"))).toBe(false);
+	rmSync(state, { recursive: true, force: true });
+});
+
+test("scanPointers: valid JSON of the wrong SHAPE is reaped like a corrupt pointer, per field", async () => {
+	const state = scratch();
+	const runDir = mkdtempSync(join(tmpdir(), "offbook-rundir-"));
+	await writePointer(state, runDir);
+	const dir = join(state, "instances");
+	// one file per field of the shape check: a future v, a non-string runDir
+	// (which would be joined into a filesystem path), a non-string host (which
+	// would be compared against hostname() and pass nothing)
+	const malformed = {
+		[`${"1".repeat(64)}.json`]: { v: 2, runDir: "/x/.offbook", host: "h" },
+		[`${"2".repeat(64)}.json`]: { v: 1, runDir: 42, host: "h" },
+		[`${"3".repeat(64)}.json`]: { v: 1, runDir: "/y/.offbook", host: 42 },
+	};
+	for (const [name, body] of Object.entries(malformed))
+		await Bun.write(join(dir, name), JSON.stringify(body));
+	const entries = await scanPointers(state);
+	expect(entries.map((e) => e.pointer.runDir)).toEqual([canonicalPath(runDir)]);
+	for (const name of Object.keys(malformed))
+		expect(existsSync(join(dir, name))).toBe(false);
+	rmSync(state, { recursive: true, force: true });
+	rmSync(runDir, { recursive: true, force: true });
+});
+
+test("scanPointers: the realpath-keyed pointer wins even when the twin is scanned after it", async () => {
+	const state = scratch();
+	const runDir = mkdtempSync(join(tmpdir(), "offbook-rundir-"));
+	await writePointer(state, runDir);
+	const dir = join(state, "instances");
+	const canonical = canonicalPath(runDir);
+	const goodName = `${createHash("sha256").update(canonical).digest("hex")}.json`;
+	const twinRaw = `${JSON.stringify({ v: 1, runDir: canonical, host: "twin" })}\n`;
+	// Which file the dedupe DELETES is only observable when the twin is scanned
+	// AFTER the canonical pointer, and scan order is the filesystem's (creation
+	// order on ext4, reverse creation order on tmpfs, name-hash order on
+	// btrfs/xfs) — so arrange that order explicitly instead of inheriting
+	// whichever one the filesystem hands this run.
+	const arrange = async (): Promise<string> => {
+		for (const twinFirst of [true, false])
+			for (let i = 0; i < 32; i++) {
+				rmSync(dir, { recursive: true, force: true });
+				mkdirSync(dir, { recursive: true });
+				const candidate = `${i.toString(16).padStart(64, "0")}.json`;
+				if (twinFirst) await Bun.write(join(dir, candidate), twinRaw);
+				await writePointer(state, runDir);
+				if (!twinFirst) await Bun.write(join(dir, candidate), twinRaw);
+				const names = readdirSync(dir);
+				if (names.indexOf(candidate) > names.indexOf(goodName))
+					return candidate;
+			}
+		return "";
+	};
+	const twinName = await arrange();
+	expect(twinName).not.toBe("");
+	const entries = await scanPointers(state);
+	expect(entries).toHaveLength(1);
+	expect(entries[0].path).toBe(join(dir, goodName));
+	expect(entries[0].pointer.host).not.toBe("twin");
+	expect(existsSync(join(dir, goodName))).toBe(true); // the kept entry is the surviving FILE
+	expect(existsSync(join(dir, twinName))).toBe(false);
 	rmSync(state, { recursive: true, force: true });
 	rmSync(runDir, { recursive: true, force: true });
 });
