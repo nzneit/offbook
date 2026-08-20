@@ -23,7 +23,7 @@ import {
 	writeRunfile,
 } from "./runfile.ts";
 
-// Port bases for this file (repo convention: unique per file): 19960-19972.
+// Port bases for this file (repo convention: unique per file): 19960-19978.
 // Those are BASE literals, not necessarily the bound ports — every one is
 // band-mapped at runtime by port() (test/ports.ts). Band 0, the single-process
 // local case, is the identity map, so a plain `bun test` still binds exactly
@@ -251,6 +251,103 @@ test("probeServer: a listener that accepts but never answers is silent within th
 		expect(Date.now() - start).toBeLessThan(1000);
 	} finally {
 		listener.stop(true);
+	}
+});
+
+// [utest->R-044]
+test("probeServer: an identity is trusted only when EVERY field is the right type", async () => {
+	// one field wrong per body, the other two right: a shape check that ANDs
+	// its clauses rejects all three, one that ORs them accepts all three. A
+	// stray dev server answering /v1/server must never be read as an offbook
+	// identity — the resolver drives heal/skip decisions off exactly this.
+	const cases = [
+		{ at: port(19973), body: { token: 42, runDir: "/x/.offbook", pid: 7 } },
+		{ at: port(19974), body: { token: "t".repeat(32), runDir: 42, pid: 7 } },
+		{
+			at: port(19975),
+			body: { token: "t".repeat(32), runDir: "/x/.offbook", pid: "7" },
+		},
+	];
+	for (const { at, body } of cases) {
+		const server = Bun.serve({ port: at, fetch: () => Response.json(body) });
+		try {
+			expect((await probeServer(at, 60)).kind).toBe("silent");
+		} finally {
+			server.stop(true);
+		}
+	}
+});
+
+// [utest->R-044]
+test("probeServer: a silent first answer is retried exactly once, and a good first answer is not", async () => {
+	// the retry is D-032's slow-machine allowance: a first answer that times
+	// out must not read as wedged. Pin both halves — that the retry HAPPENS
+	// (or a loaded server is misjudged) and that it does NOT happen after a
+	// good answer (or every probe pays a second round trip).
+	const identity = {
+		token: "a".repeat(32),
+		runDir: "/x/.offbook",
+		pid: 7,
+		ports: { brokerWsPort: 1, brokerTcpPort: 2, controlPlanePort: 3 },
+	};
+	let calls = 0;
+	const slowFirst = Bun.serve({
+		port: port(19976),
+		fetch: async () => {
+			calls += 1;
+			if (calls === 1) await Bun.sleep(400); // aborted by the 60ms budget
+			return Response.json(identity);
+		},
+	});
+	try {
+		const probe = await probeServer(port(19976), 60);
+		expect(probe.kind).toBe("server"); // the retry rescued it
+		expect(calls).toBe(2);
+	} finally {
+		slowFirst.stop(true);
+	}
+
+	let answered = 0;
+	const promptly = Bun.serve({
+		port: port(19977),
+		fetch: () => {
+			answered += 1;
+			return Response.json(identity);
+		},
+	});
+	try {
+		expect((await probeServer(port(19977), 60)).kind).toBe("server");
+		expect(answered).toBe(1); // no retry after a good answer
+	} finally {
+		promptly.stop(true);
+	}
+});
+
+// [utest->R-044]
+test("probeServer: the retry gets a DOUBLED budget, not the first one over again", async () => {
+	// the second attempt waits 2t: an answer that lands between t and 2t must
+	// be caught. Halving or reusing t would abort it, so the delay below sits
+	// deliberately outside the first budget and inside the doubled one.
+	const t = 400;
+	let calls = 0;
+	const server = Bun.serve({
+		port: port(19978),
+		fetch: async () => {
+			calls += 1;
+			// 1.4t: past the first budget, comfortably inside the doubled one
+			await Bun.sleep(calls === 1 ? t * 3 : Math.round(t * 1.4));
+			return Response.json({
+				token: "b".repeat(32),
+				runDir: "/x/.offbook",
+				pid: 7,
+			});
+		},
+	});
+	try {
+		expect((await probeServer(port(19978), t)).kind).toBe("server");
+		expect(calls).toBe(2);
+	} finally {
+		server.stop(true);
 	}
 });
 
