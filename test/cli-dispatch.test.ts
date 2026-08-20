@@ -16,16 +16,17 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Io } from "#src/cli/index.ts";
 import {
 	clientsFromLog,
 	renderTopicList,
 	run,
+	signalInstance,
 	specsStalenessWarning,
 } from "#src/cli/index.ts";
-import { readRunfile, writeRunfile } from "#src/cli/runfile.ts";
+import { pidAlive, readRunfile, writeRunfile } from "#src/cli/runfile.ts";
 import type { Composed } from "#src/compose/index.ts";
 import { compose } from "#src/compose/index.ts";
 import { loadConfig } from "#src/config/index.ts";
@@ -40,10 +41,12 @@ import {
 // 19xxx/129xx: distinct from control-plane (18xxx), ci-settlement (16xxx), m0
 // (this file's other literal ports: 19010-19040/12910-12940, 19045/12945/19845
 // — see each test; kept out of named consts since they're single-use)
+// 19450-19479 + tcp 12496-12499: instance-discovery verb policy
 const WS = 19001;
 const TCP = 12901;
 const CTRL = 19801;
 const CTRL_FLAG = ["--ctrl-port", String(CTRL)];
+const STATE = process.env.OFFBOOK_STATE_DIR ?? "";
 
 const SCENARIO = `
 - name: accept-set
@@ -65,6 +68,78 @@ function io(): { out: string[]; err: string[]; io: Io } {
 	const out: string[] = [];
 	const err: string[] = [];
 	return { out, err, io: { out: (l) => out.push(l), err: (l) => err.push(l) } };
+}
+
+// a fake discovered instance: an identity server + a matching runfile,
+// registered by writeRunfile's pointer write into the CURRENT
+// OFFBOOK_STATE_DIR (set per-test)
+async function fakeInstance(opts: {
+	port: number;
+	projectDir: string;
+	demo?: boolean;
+	routes?: Record<string, unknown>;
+}): Promise<{ runDir: string; token: string; stop(): void }> {
+	const token = crypto.randomUUID().replaceAll("-", "");
+	const runDir = join(opts.projectDir, ".offbook");
+	await writeRunfile(
+		runDir,
+		{
+			pid: process.pid,
+			brokerWsPort: 1,
+			brokerTcpPort: 2,
+			controlPlanePort: opts.port,
+			startedAt: "t",
+			token,
+			host: hostname(),
+		},
+		{ stateDir: process.env.OFFBOOK_STATE_DIR ?? "" },
+	);
+	const identity = {
+		pid: process.pid,
+		token,
+		host: hostname(),
+		projectDir: opts.projectDir,
+		runDir,
+		startedAt: "t",
+		demo: opts.demo === true,
+		ports: { brokerWsPort: 1, brokerTcpPort: 2, controlPlanePort: opts.port },
+	};
+	const server = Bun.serve({
+		port: opts.port,
+		fetch: (req) => {
+			const p = new URL(req.url).pathname;
+			if (p === "/v1/server") return Response.json(identity);
+			const body = opts.routes?.[p];
+			if (body !== undefined) return Response.json(body);
+			return new Response("nope", { status: 404 });
+		},
+	});
+	return { runDir, token, stop: () => server.stop(true) };
+}
+
+// pin the state dir + cwd for one discovery test; restores both
+async function inDiscoveryWorld<T>(
+	cwd: string,
+	fn: () => Promise<T>,
+): Promise<T> {
+	const prevState = process.env.OFFBOOK_STATE_DIR;
+	const prevCwd = process.cwd();
+	process.env.OFFBOOK_STATE_DIR = mkdtempSync(
+		join(tmpdir(), "offbook-vp-state-"),
+	);
+	process.chdir(cwd);
+	try {
+		return await fn();
+	} finally {
+		process.chdir(prevCwd);
+		rmSync(process.env.OFFBOOK_STATE_DIR ?? "", {
+			recursive: true,
+			force: true,
+		});
+		// assigning undefined would store the STRING "undefined" — delete instead
+		if (prevState === undefined) delete process.env.OFFBOOK_STATE_DIR;
+		else process.env.OFFBOOK_STATE_DIR = prevState;
+	}
 }
 
 beforeAll(async () => {
@@ -618,13 +693,17 @@ test("check with no --since gates on the window since the LAST RESET (server-ret
 
 test("status prints the caught-N-distinct-breaks scoreboard, diagnostics counts, and the connect target", async () => {
 	const dir = join(base, "run-live-status");
-	await writeRunfile(dir, {
-		pid: process.pid,
-		brokerWsPort: WS,
-		brokerTcpPort: TCP,
-		controlPlanePort: CTRL,
-		startedAt: "t",
-	});
+	await writeRunfile(
+		dir,
+		{
+			pid: process.pid,
+			brokerWsPort: WS,
+			brokerTcpPort: TCP,
+			controlPlanePort: CTRL,
+			startedAt: "t",
+		},
+		{ stateDir: STATE },
+	);
 	const st = io();
 	expect(await run(["status", "--run-dir", dir], st.io)).toBe(0);
 	const text = st.out.join("\n");
@@ -637,13 +716,17 @@ test("status prints the caught-N-distinct-breaks scoreboard, diagnostics counts,
 
 test("client verbs resolve the runfile: live pid+port works, stale pid errors, no runfile errors", async () => {
 	const liveDir = join(base, "run-live");
-	await writeRunfile(liveDir, {
-		pid: process.pid, // alive, and CTRL answers as offbook
-		brokerWsPort: WS,
-		brokerTcpPort: TCP,
-		controlPlanePort: CTRL,
-		startedAt: "t",
-	});
+	await writeRunfile(
+		liveDir,
+		{
+			pid: process.pid, // alive, and CTRL answers as offbook
+			brokerWsPort: WS,
+			brokerTcpPort: TCP,
+			controlPlanePort: CTRL,
+			startedAt: "t",
+		},
+		{ stateDir: STATE },
+	);
 	const live = io();
 	expect(await run(["mode", "--run-dir", liveDir], live.io)).toBe(0);
 	expect(live.out.join("\n")).toContain("mode:");
@@ -651,13 +734,17 @@ test("client verbs resolve the runfile: live pid+port works, stale pid errors, n
 	// a pid that is definitely dead: a spawned-and-exited child
 	const dead = Bun.spawnSync(["true"]);
 	const staleDir = join(base, "run-stale");
-	await writeRunfile(staleDir, {
-		pid: dead.pid ?? 4_193_999,
-		brokerWsPort: WS,
-		brokerTcpPort: TCP,
-		controlPlanePort: CTRL,
-		startedAt: "t",
-	});
+	await writeRunfile(
+		staleDir,
+		{
+			pid: dead.pid ?? 4_193_999,
+			brokerWsPort: WS,
+			brokerTcpPort: TCP,
+			controlPlanePort: CTRL,
+			startedAt: "t",
+		},
+		{ stateDir: STATE },
+	);
 	const stale = io();
 	expect(await run(["state", "--run-dir", staleDir], stale.io)).toBe(1);
 	expect(stale.err.join("\n")).toContain("stale runfile");
@@ -680,31 +767,53 @@ test("topics falls back to the bundled demo spec when nothing is running (M0 dis
 	expect(t.err).toEqual([]);
 });
 
-// [itest->R-043]
-test("topics --json with no live server refuses (exit 1, run-dir-qualified); human fallback stays", async () => {
+// [itest->R-045]
+test("topics --json with no live server refuses with the not-running envelope (exit 1); human fallback stays", async () => {
 	const empty = mkdtempSync(join(tmpdir(), "no-server-"));
 	const refused = io();
 	expect(await run(["topics", "--json", "--run-dir", empty], refused.io)).toBe(
 		1,
 	);
-	expect(refused.err.join("\n")).toContain(
-		"bundled-demo fallback is human-only",
-	);
+	expect(refused.out).toHaveLength(1);
+	expect(
+		(JSON.parse(refused.out[0]) as { error: { code: string } }).error.code,
+	).toBe("not-running");
 	const human = io();
 	expect(await run(["topics", "--run-dir", empty], human.io)).toBe(0);
 	expect(human.out[0]).toContain("showing the bundled demo spec"); // pinned note survives
 });
 
+// [itest->R-045] — `--run-dir` never scans the registry, so the refusal may
+// name only the directory actually checked: M11's machine-wide clause would
+// be a claim nobody verified (the same carve-out every other read verb has)
+test("topics --json --run-dir names the directory checked and claims nothing machine-wide", async () => {
+	const empty = mkdtempSync(join(tmpdir(), "no-server-pinned-"));
+	const refused = io();
+	expect(await run(["topics", "--json", "--run-dir", empty], refused.io)).toBe(
+		1,
+	);
+	const { message } = (
+		JSON.parse(refused.out[0]) as { error: { message: string } }
+	).error;
+	expect(message).toContain(`no runfile in ${empty}`);
+	expect(message).not.toContain("nothing else is running on this machine");
+	expect(message).not.toContain(".offbook)"); // never M11's unchecked directory
+});
+
 test("down is idempotent on a dead/absent runfile; status exits nonzero when down; logs reads the log file", async () => {
 	const deadPid = Bun.spawnSync(["true"]).pid ?? 4_193_998;
 	const dir = join(base, "run-down");
-	await writeRunfile(dir, {
-		pid: deadPid,
-		brokerWsPort: 1,
-		brokerTcpPort: 2,
-		controlPlanePort: 3,
-		startedAt: "t",
-	});
+	await writeRunfile(
+		dir,
+		{
+			pid: deadPid,
+			brokerWsPort: 1,
+			brokerTcpPort: 2,
+			controlPlanePort: 3,
+			startedAt: "t",
+		},
+		{ stateDir: STATE },
+	);
 	const d1 = io();
 	expect(await run(["down", "--run-dir", dir], d1.io)).toBe(0);
 	expect(d1.out.join("\n")).toContain("not running");
@@ -968,13 +1077,17 @@ test("up spawns the detached server from a local-git project, status/specs/logs 
 test("up preflights the ports in the foreground (named fix, no detached EADDRINUSE) and auto-reclaims a stale runfile", async () => {
 	const dir = join(base, "run-preflight");
 	const dead = Bun.spawnSync(["true"]).pid ?? 4_193_997;
-	await writeRunfile(dir, {
-		pid: dead,
-		brokerWsPort: 1,
-		brokerTcpPort: 2,
-		controlPlanePort: 3,
-		startedAt: "t",
-	});
+	await writeRunfile(
+		dir,
+		{
+			pid: dead,
+			brokerWsPort: 1,
+			brokerTcpPort: 2,
+			controlPlanePort: 3,
+			startedAt: "t",
+		},
+		{ stateDir: STATE },
+	);
 	// CTRL is held by the suite-A server, so preflight must fail fast — after
 	// reclaiming the stale runfile, before anything spawns
 	const up = io();
@@ -1066,6 +1179,39 @@ test("up against a ctrl port held by a foreign listener falls back to the generi
 	} finally {
 		foreign.stop(true);
 	}
+});
+
+// [itest->R-045]
+test("up preflight: an attributable control-port owner is named with the from-anywhere down command", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-owner-"));
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	await inDiscoveryWorld(cwd, async () => {
+		const inst = await fakeInstance({ port: 19463, projectDir: proj });
+		try {
+			const x = io();
+			expect(
+				await run(
+					[
+						"up",
+						"--ws-port",
+						"19464",
+						"--tcp-port",
+						"12496",
+						"--ctrl-port",
+						"19463",
+					],
+					x.io,
+				),
+			).toBe(1);
+			const err = x.err.join("\n");
+			expect(err).toContain(`(started in ${proj})`);
+			expect(err).toContain(`offbook down --run-dir ${join(proj, ".offbook")}`);
+		} finally {
+			inst.stop();
+		}
+	});
+	rmSync(proj, { recursive: true, force: true });
+	rmSync(cwd, { recursive: true, force: true });
 });
 
 test("interactive default boots lenient-loud past a bad scenario (autonomous, strict=false); up --strict makes it fatal", async () => {
@@ -1545,4 +1691,777 @@ test("specsStalenessWarning: skips gracefully on no boot line, malformed JSON, o
 	);
 	expect(await specsStalenessWarning(dir3)).toContain("restart to apply");
 	rmSync(dir3, { recursive: true, force: true });
+});
+
+// --- D-032: verb policy over the resolver (instance discovery) ---
+
+// [itest->R-045]
+test("read verb, registry-resolved: the M16 header names the instance; cwd-resolved output is byte-identical (no header)", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-proj-"));
+	const elsewhere = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	await inDiscoveryWorld(elsewhere, async () => {
+		const inst = await fakeInstance({
+			port: 19450,
+			projectDir: proj,
+			routes: { "/v1/state": { state: [] } },
+		});
+		try {
+			const away = io();
+			expect(await run(["state"], away.io)).toBe(0);
+			expect(away.out[0]).toBe(`offbook @ ${proj} (ws 1 · http 19450)`);
+			expect(away.out[1]).toBe("(no retained state)");
+			// same verb from the project dir itself: no header, byte-identical
+			process.chdir(proj);
+			const home = io();
+			expect(await run(["state"], home.io)).toBe(0);
+			expect(home.out).toEqual(["(no retained state)"]);
+		} finally {
+			inst.stop();
+		}
+	});
+	rmSync(proj, { recursive: true, force: true });
+	rmSync(elsewhere, { recursive: true, force: true });
+});
+
+// [itest->R-045]
+test("object-shaped --json carries the server block on registry resolution only", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-jsonid-"));
+	const elsewhere = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	const diagnostics = {
+		diagnostics: [],
+		summary: { errors: 0, warnings: 0, info: 0, byKind: {} },
+	};
+	await inDiscoveryWorld(elsewhere, async () => {
+		const inst = await fakeInstance({
+			port: 19465,
+			projectDir: proj,
+			routes: { "/v1/diagnostics": diagnostics },
+		});
+		try {
+			const away = io();
+			expect(await run(["diagnostics", "--json"], away.io)).toBe(0);
+			expect(away.out).toHaveLength(1);
+			const doc = JSON.parse(away.out[0]) as {
+				server?: { projectDir: string };
+			};
+			expect(doc.server?.projectDir).toBe(proj);
+			// cwd-resolved: byte-identical round-trip, no server block
+			process.chdir(proj);
+			const home = io();
+			expect(await run(["diagnostics", "--json"], home.io)).toBe(0);
+			expect(JSON.parse(home.out[0])).toEqual(diagnostics);
+		} finally {
+			inst.stop();
+		}
+	});
+	rmSync(proj, { recursive: true, force: true });
+	rmSync(elsewhere, { recursive: true, force: true });
+});
+
+// [itest->R-045]
+test("ambiguity: two live instances refuse with the M8 table (exit 2); --json emits exactly one envelope on stdout", async () => {
+	const projA = mkdtempSync(join(tmpdir(), "offbook-vp-a-"));
+	const projB = mkdtempSync(join(tmpdir(), "offbook-vp-b-"));
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	await inDiscoveryWorld(cwd, async () => {
+		const a = await fakeInstance({ port: 19451, projectDir: projA });
+		const b = await fakeInstance({ port: 19452, projectDir: projB });
+		try {
+			const human = io();
+			expect(await run(["scenarios"], human.io)).toBe(2);
+			const err = human.err.join("\n");
+			expect(err).toContain(
+				"offbook: several instances are running — pick one:",
+			);
+			expect(err).toContain(
+				`offbook scenarios --run-dir ${join(projA, ".offbook")}`,
+			);
+			expect(human.out).toEqual([]);
+
+			const json = io();
+			expect(await run(["scenarios", "--json"], json.io)).toBe(2);
+			expect(json.out).toHaveLength(1); // exactly one stdout document
+			const envelope = JSON.parse(json.out[0]) as {
+				error: { code: string };
+				candidates: unknown[];
+			};
+			expect(envelope.error.code).toBe("ambiguous");
+			expect(envelope.candidates).toHaveLength(2);
+			expect(json.err.join("\n")).not.toContain("--run-dir");
+		} finally {
+			a.stop();
+			b.stop();
+		}
+	});
+	for (const d of [projA, projB, cwd])
+		rmSync(d, { recursive: true, force: true });
+});
+
+// [itest->R-045]
+test("M12 replaces M11 and M13 when the only skipped instance is cwd's own wedged one", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-wedged-"));
+	await inDiscoveryWorld(cwd, async () => {
+		// live pid, silent port: row 3
+		await writeRunfile(
+			join(cwd, ".offbook"),
+			{
+				pid: process.pid,
+				brokerWsPort: 1,
+				brokerTcpPort: 2,
+				controlPlanePort: 19453, // nothing listens here
+				startedAt: "t",
+				token: "ab".repeat(16),
+				host: hostname(),
+			},
+			{ stateDir: process.env.OFFBOOK_STATE_DIR ?? "" },
+		);
+		const x = io();
+		expect(await run(["scenarios"], x.io)).toBe(1);
+		const err = x.err.join("\n");
+		expect(err).toContain("offbook is not answering here");
+		expect(err).not.toContain("offbook is not running"); // M11 replaced
+		expect(err).not.toContain("(offbook: an instance in"); // M13 replaced
+	});
+	rmSync(cwd, { recursive: true, force: true });
+}, 15_000);
+
+// [itest->R-045]
+test("zero live, nothing skipped: M11 with its automation anchor, exit 1", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-empty-"));
+	await inDiscoveryWorld(cwd, async () => {
+		const x = io();
+		expect(await run(["scenarios"], x.io)).toBe(1);
+		expect(
+			x.err.some((l) =>
+				l.includes(
+					"offbook is not running (no runfile in .offbook, and nothing else is running on this machine)",
+				),
+			),
+		).toBe(true);
+	});
+	rmSync(cwd, { recursive: true, force: true });
+});
+
+// [itest->R-045]
+test("mutating verb, registry-resolved: M15 stderr note, never an M16 header", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-mut-"));
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	await inDiscoveryWorld(cwd, async () => {
+		const inst = await fakeInstance({
+			port: 19454,
+			projectDir: proj,
+			routes: { "/v1/reset": { reset: true, seed: 7, sinceSeq: 3 } },
+		});
+		try {
+			const x = io();
+			expect(await run(["reset"], x.io)).toBe(0);
+			expect(x.err).toContain(
+				`(offbook: using the offbook started in ${proj})`,
+			);
+			expect(x.out.some((l) => l.startsWith("offbook @"))).toBe(false);
+			expect(x.out).toContain("reset — seed 7 · violation baseline #3");
+		} finally {
+			inst.stop();
+		}
+	});
+	rmSync(proj, { recursive: true, force: true });
+	rmSync(cwd, { recursive: true, force: true });
+});
+
+// [itest->R-045]
+test("specs update reads the RESOLVED instance's boot record for the staleness warning", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-stale-"));
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	await Bun.write(join(proj, "services.yaml"), "services: {}\n"); // current content
+	await inDiscoveryWorld(cwd, async () => {
+		const inst = await fakeInstance({
+			port: 19455,
+			projectDir: proj,
+			routes: { "/v1/specs/refresh": { specs: [] } },
+		});
+		// the instance's boot record + a boot line hashing DIFFERENT content
+		await Bun.write(
+			join(inst.runDir, "offbook.boot.json"),
+			JSON.stringify({ projectDir: proj, config: {}, token: inst.token }),
+		);
+		const staleHash = new Bun.CryptoHasher("sha256")
+			.update("older content")
+			.digest("hex");
+		await Bun.write(
+			join(inst.runDir, "offbook.log"),
+			`[offbook] 2026-08-19T00:00:00.000Z boot: services.yaml sha256:${staleHash}\n`,
+		);
+		try {
+			const x = io();
+			expect(await run(["specs", "update"], x.io)).toBe(0);
+			expect(
+				x.out.some((l) =>
+					l.includes(
+						"services.yaml changed since `offbook up` — restart to apply",
+					),
+				),
+			).toBe(true);
+		} finally {
+			inst.stop();
+		}
+	});
+	rmSync(proj, { recursive: true, force: true });
+	rmSync(cwd, { recursive: true, force: true });
+});
+
+// [itest->R-045]
+test("status, registry-resolved: first line names the instance; --json carries the server block + skipped array", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-status-"));
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	await inDiscoveryWorld(cwd, async () => {
+		const inst = await fakeInstance({
+			port: 19456,
+			projectDir: proj,
+			routes: {
+				"/v1/mode": { mode: "autonomous", seed: 1, lastResetSeq: 0 },
+				"/v1/specs": { specs: [], resolutionMode: "branch" },
+				"/v1/validation": {
+					violations: [],
+					summary: {
+						byOrigin: { client: 0, mock: 0 },
+						distinct: { total: 0, client: 0, mock: 0 },
+					},
+				},
+				"/v1/diagnostics": {
+					diagnostics: [],
+					summary: { errors: 0, warnings: 0, info: 0, byKind: {} },
+				},
+			},
+		});
+		try {
+			const human = io();
+			expect(await run(["status"], human.io)).toBe(0);
+			expect(human.out[0]).toBe(`offbook @ ${proj} (ws 1 · http 19456)`);
+
+			const json = io();
+			expect(await run(["status", "--json"], json.io)).toBe(0);
+			expect(json.out).toHaveLength(1);
+			const doc = JSON.parse(json.out[0]) as {
+				server: { projectDir: string; source: string; demo: boolean };
+				skipped: unknown[];
+			};
+			expect(doc.server).toMatchObject({
+				projectDir: proj,
+				source: "registry",
+				demo: false,
+			});
+			expect(doc.skipped).toEqual([]);
+		} finally {
+			inst.stop();
+		}
+	});
+	rmSync(proj, { recursive: true, force: true });
+	rmSync(cwd, { recursive: true, force: true });
+});
+
+// [itest->R-045]
+test("status --ctrl-port against a pre-upgrade (legacy) server refuses with the older-build message, exit 2", async () => {
+	const legacy = Bun.serve({
+		port: 19457,
+		fetch: (req) =>
+			new URL(req.url).pathname === "/v1/mode"
+				? Response.json({ mode: "passive" })
+				: new Response("nope", { status: 404 }),
+	});
+	try {
+		const x = io();
+		expect(await run(["status", "--ctrl-port", "19457"], x.io)).toBe(2);
+		expect(x.err.join("\n")).toContain("started by an older offbook build");
+	} finally {
+		legacy.stop(true);
+	}
+});
+
+// [itest->R-045]
+test("status with nothing anywhere: the not-running clause covers the whole machine, exit 1", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	await inDiscoveryWorld(cwd, async () => {
+		const x = io();
+		expect(await run(["status"], x.io)).toBe(1);
+		expect(x.err.join("\n")).toContain(
+			"offbook: not running (no runfile in .offbook, and nothing else is running on this machine)",
+		);
+	});
+	rmSync(cwd, { recursive: true, force: true });
+});
+
+// [itest->R-045]
+test("down, unrelated sole instance: unconditional exit-0 no-op printing the live-instance table; the instance survives", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-downsafe-"));
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	await inDiscoveryWorld(cwd, async () => {
+		const inst = await fakeInstance({ port: 19458, projectDir: proj });
+		try {
+			const x = io();
+			expect(await run(["down"], x.io)).toBe(0);
+			const out = x.out.join("\n");
+			expect(out).toContain(
+				"offbook: not running (in this project) — running elsewhere on this machine:",
+			);
+			expect(out).toContain(`offbook down --run-dir ${join(proj, ".offbook")}`);
+			// the unrelated instance was NOT signaled: its identity still answers
+			const still = await fetch("http://localhost:19458/v1/server");
+			expect(still.status).toBe(200);
+			// and its runfile survives
+			expect(await readRunfile(join(proj, ".offbook"))).toBeDefined();
+		} finally {
+			inst.stop();
+		}
+	});
+	rmSync(proj, { recursive: true, force: true });
+	rmSync(cwd, { recursive: true, force: true });
+});
+
+// [utest->R-045]
+test("signalInstance, guarded site #3: a repointed runfile aborts with the restarted-underneath message; nothing is signaled", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-sig-"));
+	const runDir = join(proj, ".offbook");
+	const state = mkdtempSync(join(tmpdir(), "offbook-vp-state-"));
+	// a real, harmless victim process the runfile CURRENTLY names
+	const victim = Bun.spawn([
+		process.execPath,
+		"-e",
+		"setInterval(() => {}, 1000)",
+	]);
+	await writeRunfile(
+		runDir,
+		{
+			pid: victim.pid,
+			brokerWsPort: 1,
+			brokerTcpPort: 2,
+			controlPlanePort: 19459,
+			startedAt: "t",
+		},
+		{ stateDir: state },
+	);
+	try {
+		const dead = Bun.spawnSync(["true"]); // the pid the CALLER verified — now stale
+		const x = io();
+		const code = await signalInstance(
+			{
+				runDir,
+				run: {
+					pid: dead.pid ?? 4_193_995,
+					brokerWsPort: 1,
+					brokerTcpPort: 2,
+					controlPlanePort: 19459,
+					startedAt: "t",
+				},
+				demo: false,
+				source: "cwd",
+			},
+			state,
+			x.io,
+		);
+		expect(code).toBe(1);
+		expect(x.err.join("\n")).toContain("restarted underneath");
+		expect(pidAlive(victim.pid)).toBe(true); // still alive = never signaled
+		expect(await readRunfile(runDir)).toBeDefined(); // its registration survives
+	} finally {
+		victim.kill();
+		await victim.exited;
+		rmSync(proj, { recursive: true, force: true });
+		rmSync(state, { recursive: true, force: true });
+	}
+});
+
+// [itest->R-045]
+test("down, related descendant instance: signals it and reports where it was started", async () => {
+	const parent = mkdtempSync(join(tmpdir(), "offbook-vp-parent-"));
+	const proj = join(parent, "mock");
+	mkdirSync(proj, { recursive: true });
+	await inDiscoveryWorld(parent, async () => {
+		// a real victim that exits on SIGTERM, with a live identity server
+		const victim = Bun.spawn([
+			process.execPath,
+			"-e",
+			"setInterval(() => {}, 1000)",
+		]);
+		const runDir = join(proj, ".offbook");
+		const token = "cd".repeat(16);
+		await writeRunfile(
+			runDir,
+			{
+				pid: victim.pid,
+				brokerWsPort: 1,
+				brokerTcpPort: 2,
+				controlPlanePort: 19460,
+				startedAt: "t",
+				token,
+				host: hostname(),
+			},
+			{ stateDir: process.env.OFFBOOK_STATE_DIR ?? "" },
+		);
+		const identity = {
+			pid: victim.pid,
+			token,
+			host: hostname(),
+			projectDir: proj,
+			runDir,
+			startedAt: "t",
+			demo: false,
+			ports: { brokerWsPort: 1, brokerTcpPort: 2, controlPlanePort: 19460 },
+		};
+		const server = Bun.serve({
+			port: 19460,
+			fetch: (req) =>
+				new URL(req.url).pathname === "/v1/server"
+					? Response.json(identity)
+					: new Response("nope", { status: 404 }),
+		});
+		try {
+			const x = io();
+			expect(await run(["down"], x.io)).toBe(0); // cwd = parent → descendant wins containment
+			expect(x.out.join("\n")).toContain(
+				`stopped (pid ${victim.pid}, started in ${proj})`,
+			);
+			await victim.exited;
+			expect(await readRunfile(runDir)).toBeUndefined(); // cleared + unregistered
+		} finally {
+			server.stop(true);
+			try {
+				victim.kill();
+				await victim.exited;
+			} catch {}
+		}
+	});
+	rmSync(parent, { recursive: true, force: true });
+}, 20_000);
+
+// [itest->R-045]
+test("down, row 4: a wrong-token cwd runfile is never signaled — naming-both note + not running, exit 0", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-row4down-"));
+	await inDiscoveryWorld(cwd, async () => {
+		await writeRunfile(
+			join(cwd, ".offbook"),
+			{
+				pid: process.pid, // signaling this would hit the TEST RUNNER
+				brokerWsPort: 1,
+				brokerTcpPort: 2,
+				controlPlanePort: 19466,
+				startedAt: "t",
+				token: "b1".repeat(16),
+				host: hostname(),
+			},
+			{ stateDir: process.env.OFFBOOK_STATE_DIR ?? "" },
+		);
+		const identity = {
+			pid: process.pid,
+			token: "b2".repeat(16), // NOT the runfile's — row 4
+			host: hostname(),
+			projectDir: "/somewhere/else",
+			runDir: "/somewhere/else/.offbook",
+			startedAt: "t",
+			demo: false,
+			ports: { brokerWsPort: 1, brokerTcpPort: 2, controlPlanePort: 19466 },
+		};
+		const server = Bun.serve({
+			port: 19466,
+			fetch: (req) =>
+				new URL(req.url).pathname === "/v1/server"
+					? Response.json(identity)
+					: new Response("nope", { status: 404 }),
+		});
+		try {
+			const x = io();
+			expect(await run(["down"], x.io)).toBe(0); // reached = nothing was signaled
+			expect(x.out).toContain("offbook: not running");
+			expect(x.err.join("\n")).toContain(
+				"no longer answers for control port 19466",
+			);
+			expect(await readRunfile(join(cwd, ".offbook"))).toBeDefined(); // kept
+		} finally {
+			server.stop(true);
+		}
+	});
+	rmSync(cwd, { recursive: true, force: true });
+});
+
+// [itest->R-045]
+test("down, one verified unrelated + one silent skipped: refuses with the pick-one table (M9), exit 2", async () => {
+	const projA = mkdtempSync(join(tmpdir(), "offbook-vp-m9a-"));
+	const projB = mkdtempSync(join(tmpdir(), "offbook-vp-m9b-"));
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	await inDiscoveryWorld(cwd, async () => {
+		const verified = await fakeInstance({ port: 19467, projectDir: projA });
+		// B: live pid, silent port — a skipped candidate down must not ignore
+		await writeRunfile(
+			join(projB, ".offbook"),
+			{
+				pid: process.pid,
+				brokerWsPort: 1,
+				brokerTcpPort: 2,
+				controlPlanePort: 19468, // nothing listens
+				startedAt: "t",
+				token: "b3".repeat(16),
+				host: hostname(),
+			},
+			{ stateDir: process.env.OFFBOOK_STATE_DIR ?? "" },
+		);
+		try {
+			const x = io();
+			expect(await run(["down"], x.io)).toBe(2);
+			const err = x.err.join("\n");
+			expect(err).toContain(
+				"one instance verified but others are not answering",
+			);
+			expect(err).toContain(
+				`offbook down --run-dir ${join(projA, ".offbook")}`,
+			);
+			// the verified instance was NOT auto-killed
+			expect((await fetch("http://localhost:19467/v1/server")).status).toBe(
+				200,
+			);
+		} finally {
+			verified.stop();
+		}
+	});
+	for (const d of [projA, projB, cwd])
+		rmSync(d, { recursive: true, force: true });
+}, 15_000);
+
+// [utest->R-045]
+test("signalInstance, guarded site #2: a successor registered during shutdown survives the post-kill clear", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-succ-"));
+	const runDir = join(proj, ".offbook");
+	const state = mkdtempSync(join(tmpdir(), "offbook-vp-state-"));
+	mkdirSync(runDir, { recursive: true });
+	const runfile = join(runDir, "offbook.run");
+	const successor = JSON.stringify({
+		pid: 555555,
+		brokerWsPort: 1,
+		brokerTcpPort: 2,
+		controlPlanePort: 19469,
+		startedAt: "successor",
+	});
+	// the victim's SIGTERM handler repoints the runfile (a --watch respawn
+	// finishing its handoff) and exits — exactly the site-#2 race
+	const src = `process.on("SIGTERM", () => { require("node:fs").writeFileSync(${JSON.stringify(runfile)}, ${JSON.stringify(successor)}); process.exit(0); }); setInterval(() => {}, 1000);`;
+	const victim = Bun.spawn([process.execPath, "-e", src]);
+	await writeRunfile(
+		runDir,
+		{
+			pid: victim.pid,
+			brokerWsPort: 1,
+			brokerTcpPort: 2,
+			controlPlanePort: 19469,
+			startedAt: "t",
+		},
+		{ stateDir: state },
+	);
+	try {
+		await Bun.sleep(300); // let the handler install
+		const x = io();
+		expect(
+			await signalInstance(
+				{
+					runDir,
+					run: {
+						pid: victim.pid,
+						brokerWsPort: 1,
+						brokerTcpPort: 2,
+						controlPlanePort: 19469,
+						startedAt: "t",
+					},
+					demo: false,
+					source: "cwd",
+				},
+				state,
+				x.io,
+			),
+		).toBe(0);
+		const kept = await readRunfile(runDir);
+		expect(kept?.pid).toBe(555555); // the successor's registration survived
+	} finally {
+		try {
+			victim.kill();
+		} catch {}
+		rmSync(proj, { recursive: true, force: true });
+		rmSync(state, { recursive: true, force: true });
+	}
+}, 20_000);
+
+// [utest->R-045]
+test("signalInstance escalates on a token-less runfile whose current-build server claims the runDir", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-i3-"));
+	const runDir = join(proj, ".offbook");
+	const state = mkdtempSync(join(tmpdir(), "offbook-vp-i3-state-"));
+	// ignores SIGTERM — forces the 5s wait loop to time out into escalation
+	const victim = Bun.spawn([
+		process.execPath,
+		"-e",
+		'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000);',
+	]);
+	const runfile = {
+		pid: victim.pid,
+		brokerWsPort: 1,
+		brokerTcpPort: 2,
+		controlPlanePort: 19470,
+		startedAt: "t",
+	}; // NO token field — pre-D-032/pre-R-044 runfile shape
+	await writeRunfile(runDir, runfile, { stateDir: state });
+	const identity = {
+		pid: victim.pid,
+		token: "aa".repeat(16),
+		host: hostname(),
+		projectDir: proj,
+		runDir,
+		startedAt: "t",
+		demo: false,
+		ports: { brokerWsPort: 1, brokerTcpPort: 2, controlPlanePort: 19470 },
+	};
+	const server = Bun.serve({
+		port: 19470,
+		fetch: (req) =>
+			new URL(req.url).pathname === "/v1/server"
+				? Response.json(identity)
+				: new Response("nope", { status: 404 }),
+	});
+	try {
+		await Bun.sleep(300); // let the identity handler come up
+		const code = await signalInstance(
+			{ runDir, run: runfile, projectDir: proj, demo: false, source: "cwd" },
+			state,
+			io().io,
+		);
+		// SIGTERM ignored → 5s wait → escalation now fires via the new
+		// token-less + current-build-server clause → SIGKILL
+		expect(code).toBe(0);
+		await victim.exited;
+		expect(await readRunfile(runDir)).toBeUndefined(); // post-kill clear ran
+	} finally {
+		server.stop(true);
+		try {
+			victim.kill();
+		} catch {}
+		rmSync(proj, { recursive: true, force: true });
+		rmSync(state, { recursive: true, force: true });
+	}
+}, 20_000);
+
+// [itest->R-045]
+test("logs: a local stopped log wins for output with the divergence banner; with no local log the resolved instance's log prints under its header", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-logs-"));
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	mkdirSync(join(cwd, ".offbook"), { recursive: true });
+	await Bun.write(join(cwd, ".offbook", "offbook.log"), "old local line\n");
+	await inDiscoveryWorld(cwd, async () => {
+		const inst = await fakeInstance({ port: 19461, projectDir: proj });
+		await Bun.write(join(inst.runDir, "offbook.log"), "live remote line\n");
+		try {
+			// local log exists: printed, with the banner naming the live one
+			const local = io();
+			expect(await run(["logs"], local.io)).toBe(0);
+			expect(local.out).toContain("old local line");
+			expect(
+				local.err.some(
+					(l) =>
+						l.startsWith("(offbook: showing the local stopped log at") &&
+						l.includes(proj),
+				),
+			).toBe(true);
+			// no local log: the resolved instance's log prints under its header
+			rmSync(join(cwd, ".offbook", "offbook.log"));
+			const remote = io();
+			expect(await run(["logs"], remote.io)).toBe(0);
+			expect(remote.out[0]).toBe(`offbook @ ${proj} (ws 1 · http 19461)`);
+			expect(remote.out).toContain("live remote line");
+		} finally {
+			inst.stop();
+		}
+	});
+	rmSync(proj, { recursive: true, force: true });
+	rmSync(cwd, { recursive: true, force: true });
+});
+
+// [itest->R-045]
+test("logs -f: the divergence banner prints before the follow loop starts", async () => {
+	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-logsf-"));
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	mkdirSync(join(cwd, ".offbook"), { recursive: true });
+	await Bun.write(join(cwd, ".offbook", "offbook.log"), "old local line\n");
+	await inDiscoveryWorld(cwd, async () => {
+		const inst = await fakeInstance({ port: 19471, projectDir: proj });
+		// -f never returns in-process: drive the real bin (same pattern as
+		// the existing follow tests), inheriting the pinned state-dir env
+		const proc = Bun.spawn([BIN, "logs", "-f"], {
+			cwd,
+			env: { ...process.env },
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		try {
+			await pause(1200);
+			proc.kill();
+			await proc.exited;
+			const err = await new Response(proc.stderr).text();
+			const out = await new Response(proc.stdout).text();
+			expect(err).toContain("(offbook: showing the local stopped log at");
+			expect(err).toContain(proj);
+			expect(out).toContain("old local line");
+		} finally {
+			inst.stop();
+		}
+	});
+	rmSync(proj, { recursive: true, force: true });
+	rmSync(cwd, { recursive: true, force: true });
+}, 20_000);
+
+// [itest->R-045]
+test("topics --json: a registry-resolved DEMO refuses with the demo-only envelope (exit 1); human mode serves it under a demo-marked header", async () => {
+	const demoDir = mkdtempSync(join(tmpdir(), "offbook-vp-demo-"));
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
+	await inDiscoveryWorld(cwd, async () => {
+		const inst = await fakeInstance({
+			port: 19462,
+			projectDir: demoDir,
+			demo: true,
+			routes: { "/v1/topics": { topics: [] } },
+		});
+		try {
+			const json = io();
+			expect(await run(["topics", "--json"], json.io)).toBe(1);
+			expect(json.out).toHaveLength(1);
+			const envelope = JSON.parse(json.out[0]) as {
+				error: { code: string; message: string };
+			};
+			expect(envelope.error.code).toBe("demo-only");
+			expect(envelope.error.message).toContain(
+				"the only running offbook is the bundled demo",
+			);
+			const human = io();
+			expect(await run(["topics", "--compact"], human.io)).toBe(0);
+			expect(human.out[0]).toBe(
+				`offbook @ ${demoDir} (ws 1 · http 19462) — the bundled demo`,
+			);
+		} finally {
+			inst.stop();
+		}
+	});
+	rmSync(demoDir, { recursive: true, force: true });
+	rmSync(cwd, { recursive: true, force: true });
+});
+
+// [itest->R-045]
+test("topics with nothing live: --json refuses with the not-running envelope; human keeps the bundled-demo fallback + note", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-nofall-"));
+	await inDiscoveryWorld(cwd, async () => {
+		const json = io();
+		expect(await run(["topics", "--json"], json.io)).toBe(1);
+		expect(json.out).toHaveLength(1);
+		expect(
+			(JSON.parse(json.out[0]) as { error: { code: string } }).error.code,
+		).toBe("not-running");
+		const human = io();
+		expect(await run(["topics", "--compact"], human.io)).toBe(0);
+		expect(human.out[0]).toBe(
+			"(no running offbook — showing the bundled demo spec; `offbook up` serves your project's topics)",
+		);
+	});
+	rmSync(cwd, { recursive: true, force: true });
 });

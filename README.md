@@ -50,7 +50,7 @@ Open <http://localhost:9090>: a thermostat dashboard driven entirely by a
 mocked service. Send a command and watch state chain back. Click **Break the
 schema** and watch the violation land in the feed within a second.
 
-Done? Ctrl-C the demo-app, then `offbook down`.
+Done? Ctrl-C the demo-app, then `offbook down` (works from any directory).
 
 If anything fails: `offbook doctor` — it checks your runtime, dependencies,
 config, spec reachability, and ports, and tells you the next step.
@@ -61,7 +61,15 @@ config, spec reachability, and ports, and tells you the next step.
 offbook init
 # edit services.yaml — point it at your service's AsyncAPI spec repo
 offbook up
+# management verbs (status/down/logs/topics…) then work from any directory on this machine
 ```
+
+Management verbs find the running offbook anywhere on this machine; if more
+than one is running, offbook lists them and asks you to pick with
+`--run-dir`. `--run-dir` and `--ctrl-port` always pin exactly. (Instances
+started before this build stay invisible to machine-wide discovery until
+restarted, or managed once from their own directory; `offbook doctor` notes
+them.)
 
 Full walkthrough: [wiring your service](docs/guides/wiring-your-service.md).
 

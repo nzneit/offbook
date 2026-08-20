@@ -16,6 +16,7 @@ import type {
 	DiagnosticSummary,
 	ErrorCode,
 	ScenarioInfo,
+	ServerIdentity,
 	SpecInfo,
 	SpecRegistry,
 	StateEntry,
@@ -81,6 +82,10 @@ export interface ControlPlaneCaps {
 	lastResetSeq(): number;
 	// the §4 tier-3 divergence warn-log sink (off-spec never silent)
 	warn(line: string): void;
+	// R-044/D-032 — the /v1/server identity read; absent (undefined) on
+	// identity-less boots (in-process tests, `offbook demo` one-shot): the
+	// route then 404s plainly, which a prober reads as not-a-candidate
+	server?: () => ServerIdentity;
 }
 
 function envelope(code: ErrorCode, message: string, details?: unknown) {
@@ -202,6 +207,10 @@ export function createServer(_config: Config, caps: ControlPlaneCaps) {
 			seed: caps.seed(),
 			lastResetSeq: caps.lastResetSeq(),
 		}),
+	);
+
+	app.get("/v1/server", (c) =>
+		caps.server === undefined ? c.notFound() : c.json(caps.server()),
 	);
 
 	app.get("/v1/pending", async (c) => {

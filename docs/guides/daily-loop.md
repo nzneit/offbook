@@ -11,8 +11,8 @@ to your dev entry:
 ```json
 {
 	"scripts": {
-		"mock:up": "cd mock && offbook up",
-		"mock:down": "cd mock && offbook down"
+		"mock:up": "offbook up mock",
+		"mock:down": "offbook down"
 	}
 }
 ```
@@ -20,6 +20,14 @@ to your dev entry:
 `offbook up` is detached: run `mock:up` once in the morning; your app then
 connects to `ws://localhost:9001` whenever it starts. `offbook status` tells
 you what's running and on which ports.
+
+Management verbs find the running offbook anywhere on this machine; if more
+than one is running, offbook lists them and asks you to pick with
+`--run-dir`. `--run-dir` and `--ctrl-port` always pin exactly.
+
+(Instances started before this offbook build stay invisible to machine-wide
+discovery until restarted, or managed once from their own directory;
+`offbook doctor` notes them.)
 
 ## While developing
 
@@ -41,6 +49,12 @@ offbook up --ci        # passive mode: no autonomous emissions
 offbook check          # fails the job on client contract breaks
 offbook down
 ```
+
+Scripts and CI that must pin one instance pass `--run-dir mock/.offbook` on
+every verb: pinned addressing always means that one instance, on every
+offbook build, and never another. Gate on the exit code (and, under `--json`,
+the refusal envelope's `error.code`) rather than on refusal wording, which
+can change between builds.
 
 ## When something is off
 

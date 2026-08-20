@@ -135,6 +135,7 @@ test("scenario scaffold: fenced example(s) satisfy doctor's real scenario-shape 
 		offline: true,
 		bunVersion: "1.0.0",
 		ports: { ws: 0, tcp: 0, ctrl: 0 },
+		stateDir: shapeDir,
 	};
 	const report = await runDoctor(ctx, [scenariosCheck]);
 	expect(report.checks[0].status).toBe("pass");

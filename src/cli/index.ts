@@ -5,9 +5,10 @@
 // (contracts §5) — never HTTP. `demo` and the no-server `topics` fallback
 // boot/read the bundled demo spec locally (M0's zero-config discovery floor).
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
-import { join } from "node:path";
+import { createHash, randomBytes } from "node:crypto";
+import { closeSync, existsSync, mkdirSync, openSync, statSync } from "node:fs";
+import { hostname } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { compose } from "#src/compose/index.ts";
@@ -30,15 +31,55 @@ import { DEFAULT_CONFIG } from "#src/model/index.ts";
 import { buildRegistry } from "#src/registry/index.ts";
 import { checkoutCommit, checkoutOrigin, repoRoot } from "./checkout.ts";
 import type { Api } from "./client.ts";
-import { api, CliError, resolveCtrlPort } from "./client.ts";
+import { api, CliError } from "./client.ts";
 import type { CheckStatus, DoctorCtx } from "./doctor.ts";
 import { runDoctor } from "./doctor.ts";
+import { guarded } from "./guard.ts";
+import type { InstanceRow } from "./messages.ts";
+import {
+	instanceTable,
+	M2,
+	M3,
+	M5,
+	M6,
+	M8,
+	M9,
+	M10,
+	M11,
+	M11s,
+	M12,
+	M13,
+	M13wrongToken,
+	M15,
+	M16,
+	M17,
+	M18,
+	M19,
+	M20,
+	M22,
+	M23,
+	refusalEnvelope,
+} from "./messages.ts";
+import { canonicalPath, stateDirFromEnv } from "./registry.ts";
+import type {
+	Resolution,
+	ResolvedInstance,
+	SkippedInstance,
+} from "./resolve.ts";
+import {
+	attributeCtrlPort,
+	containsOrEqual,
+	resolveInstance,
+	WrongHostError,
+} from "./resolve.ts";
+import type { Runfile, ServerProbe } from "./runfile.ts";
 import {
 	clearRunfile,
 	logPath,
 	logSafeEnv,
 	pidAlive,
 	probeOffbook,
+	probeServer,
 	readRunfile,
 	resolveRunning,
 	writeRunfile,
@@ -110,8 +151,167 @@ function parseJson(value: string, flag: string): unknown {
 const runDirOf = (values: FlagValues): string =>
 	str(values["run-dir"]) ?? DEFAULT_CONFIG.runDir;
 
-async function clientFor(values: FlagValues): Promise<Api> {
-	return api(await resolveCtrlPort(runDirOf(values), str(values["ctrl-port"])));
+// --- D-032: the verb-policy front door over the shared resolver ---
+
+type VerbKind = "read" | "mutate";
+interface Target {
+	api: Api;
+	inst?: ResolvedInstance;
+	res?: Resolution;
+}
+
+function rowsOf(candidates: ResolvedInstance[]): InstanceRow[] {
+	return candidates.map((c) => ({
+		projectDir: c.projectDir ?? dirname(c.runDir),
+		demo: c.demo,
+		ws: c.run.brokerWsPort,
+		tcp: c.run.brokerTcpPort,
+		http: c.run.controlPlanePort,
+		pid: c.run.pid,
+		runDir: c.runDir,
+	}));
+}
+
+// row 4's skip note names BOTH sides (the port answered — as a different
+// offbook); every other skip gets the plain not-answering M13
+function skippedNote(s: SkippedInstance): string {
+	return s.reason === "wrong-token" && s.answeringProjectDir !== undefined
+		? M13wrongToken(s.projectDir, s.pid, s.ctrlPort, s.answeringProjectDir)
+		: M13(s.projectDir, s.pid, s.ctrlPort);
+}
+
+// where the management verbs' wrong-host refusal (M10) is rendered: verbatim
+// catalog wording on stderr (never re-prefixed by run()'s renderer), or the
+// wrong-host envelope under --json; exit 2 either way. launchDetached renders
+// its own M10 at the up/demo seam — same wording, same exit code.
+async function resolveOrRefuse(
+	opts: Parameters<typeof resolveInstance>[0],
+	io: Io,
+	json: boolean,
+): Promise<Resolution | number> {
+	try {
+		return await resolveInstance(opts);
+	} catch (cause) {
+		if (cause instanceof WrongHostError) {
+			if (json) io.out(refusalEnvelope("wrong-host", cause.message));
+			else io.err(cause.message);
+			return 2;
+		}
+		throw cause;
+	}
+}
+
+// registry-resolved object-shaped --json documents carry identity in-band
+// (the spec's "other shapes gain the same fields where their envelope
+// allows"); cwd-resolved output stays byte-identical, so the pinned
+// round-trip shapes only grow the block when discovery actually engaged.
+// Array-shaped documents (topics/state/scenarios --json) are exempt — their
+// envelope does not allow it; scripts pin those with --run-dir.
+function withServer(
+	doc: Record<string, unknown>,
+	t: Target,
+): Record<string, unknown> {
+	if (t.inst === undefined || t.inst.source !== "registry") return doc;
+	return {
+		...doc,
+		server: {
+			projectDir: t.inst.projectDir,
+			runDir: t.inst.runDir,
+			source: t.inst.source,
+			demo: t.inst.demo,
+		},
+	};
+}
+
+// The explicit-path refusal, shared by targetFor and cmdTopics: `--run-dir`
+// never scans the registry, so the message may name only the directory
+// actually checked and must make NO machine-wide claim (M11/M12 answer cwd
+// resolution). Pre-D-032 wordings, byte for byte.
+function runDirRefusal(runDirFlag: string, skipped?: { pid: number }): string {
+	return skipped === undefined
+		? `offbook is not running (no runfile in ${runDirFlag}) — run \`offbook up\`, or pass --ctrl-port`
+		: `offbook is not running (stale runfile in ${runDirFlag}, pid ${skipped.pid}) — run \`offbook up\``;
+}
+
+// Resolves for one verb invocation and applies the naming/refusal policy
+// (spec "Verb policy" + "Naming and notes"): prints resolver notes, M13
+// skips, and the registry-resolution naming duty (M16 header for reads on
+// stdout, M15 note for mutations on stderr — human mode only; a quiet
+// cwd day stays byte-identical). Returns the exit code when it refused:
+// 2 = refused-with-selector (M8), 1 = not running (M11/M12).
+async function targetFor(
+	values: FlagValues,
+	io: Io,
+	kind: VerbKind,
+	verb: string,
+): Promise<Target | number> {
+	if (values["ctrl-port"] !== undefined)
+		return { api: api(toInt(str(values["ctrl-port"]) ?? "", "--ctrl-port")) };
+	const json = values.json === true;
+	const res = await resolveOrRefuse(
+		{
+			cwd: process.cwd(),
+			runDirFlag: str(values["run-dir"]),
+			stateDir: stateDirFromEnv(),
+		},
+		io,
+		json,
+	);
+	if (typeof res === "number") return res;
+	for (const n of res.notes) io.err(n);
+	if (res.resolved !== undefined) {
+		const inst = res.resolved;
+		for (const s of res.skipped) io.err(skippedNote(s));
+		if (inst.source === "registry" && !json) {
+			const projectDir = inst.projectDir ?? dirname(inst.runDir);
+			if (kind === "read")
+				io.out(
+					M16(
+						projectDir,
+						inst.run.brokerWsPort,
+						inst.run.controlPlanePort,
+						inst.demo,
+					),
+				);
+			else io.err(M15(projectDir, inst.demo));
+		}
+		return { api: api(inst.run.controlPlanePort), inst, res };
+	}
+	if (res.candidates.length > 1) {
+		if (json)
+			io.out(refusalEnvelope("ambiguous", M8(), rowsOf(res.candidates)));
+		else {
+			io.err(M8());
+			for (const line of instanceTable(rowsOf(res.candidates), verb))
+				io.err(line);
+		}
+		return 2;
+	}
+	// zero live. Explicit --run-dir keeps the pre-D-032 wordings byte for
+	// byte (the scripting escape hatch) — note a dead-pid runfile was
+	// already reclaimed above (row 5), surfacing as no-runfile plus the M14 note.
+	const runDirFlag = str(values["run-dir"]);
+	if (runDirFlag !== undefined) {
+		const message = runDirRefusal(runDirFlag, res.skipped[0]);
+		if (json) io.out(refusalEnvelope("not-running", message));
+		else io.err(message);
+		return 1;
+	}
+	const own =
+		res.skipped.length === 1 &&
+		res.skipped[0].runDir === resolve(process.cwd(), DEFAULT_CONFIG.runDir)
+			? res.skipped[0]
+			: undefined;
+	if (own !== undefined) {
+		// M12 REPLACES M11 and M13 — never printed alongside them
+		if (json) io.out(refusalEnvelope("not-running", M12(own.pid)));
+		else io.err(M12(own.pid));
+		return 1;
+	}
+	for (const s of res.skipped) io.err(skippedNote(s));
+	if (json) io.out(refusalEnvelope("not-running", M11()));
+	else io.err(M11());
+	return 1;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -320,20 +520,74 @@ async function cmdTopics(rest: string[], io: Io): Promise<number> {
 	let topics: TopicInfo[];
 	let note: string | undefined;
 	if (values["ctrl-port"] !== undefined) {
-		const a = await clientFor(values);
+		const a = api(toInt(str(values["ctrl-port"]) ?? "", "--ctrl-port"));
 		topics = ((await a.get(`/v1/topics${query}`)) as { topics: TopicInfo[] })
 			.topics;
 	} else {
-		const running = await resolveRunning(runDirOf(values));
-		if (running?.live) {
-			const a = api(running.run.controlPlanePort);
+		const res = await resolveOrRefuse(
+			{
+				cwd: process.cwd(),
+				runDirFlag: str(values["run-dir"]),
+				stateDir: stateDirFromEnv(),
+			},
+			io,
+			values.json === true,
+		);
+		if (typeof res === "number") return res;
+		for (const n of res.notes) io.err(n);
+		if (res.resolved !== undefined) {
+			const inst = res.resolved;
+			for (const s of res.skipped) io.err(skippedNote(s));
+			const projectDir = inst.projectDir ?? dirname(inst.runDir);
+			if (values.json === true && inst.source === "registry" && inst.demo) {
+				// the agent path must never mistake demo topics for ingestion
+				// (a cwd-resolved demo is deliberate; a discovered one is not)
+				io.out(refusalEnvelope("demo-only", M20(projectDir)));
+				return 1;
+			}
+			if (inst.source === "registry" && values.json !== true)
+				io.out(
+					M16(
+						projectDir,
+						inst.run.brokerWsPort,
+						inst.run.controlPlanePort,
+						inst.demo,
+					),
+				);
+			const a = api(inst.run.controlPlanePort);
 			topics = ((await a.get(`/v1/topics${query}`)) as { topics: TopicInfo[] })
 				.topics;
-		} else {
+		} else if (res.candidates.length > 1) {
 			if (values.json === true)
-				throw new CliError(
-					"no running offbook in this run-dir — run `offbook up` here, or pass --ctrl-port; the bundled-demo fallback is human-only",
-				);
+				io.out(refusalEnvelope("ambiguous", M8(), rowsOf(res.candidates)));
+			else {
+				io.err(M8());
+				for (const line of instanceTable(rowsOf(res.candidates), "topics"))
+					io.err(line);
+			}
+			return 2;
+		} else {
+			// zero live anywhere
+			const runDirFlag = str(values["run-dir"]);
+			const own =
+				res.skipped.length === 1 &&
+				res.skipped[0].runDir === resolve(process.cwd(), DEFAULT_CONFIG.runDir)
+					? res.skipped[0]
+					: undefined;
+			if (values.json === true) {
+				// targetFor's explicit-path carve-out: under --run-dir nothing
+				// machine-wide was scanned, so nothing machine-wide is claimed
+				const message =
+					runDirFlag !== undefined
+						? runDirRefusal(runDirFlag, res.skipped[0])
+						: own !== undefined
+							? M12(own.pid)
+							: M11();
+				io.out(refusalEnvelope("not-running", message));
+				return 1;
+			}
+			// the M0 human fallback survives — with the skips disclosed
+			for (const s of res.skipped) io.err(skippedNote(s));
 			topics = (await demoTopicInfo()).filter(
 				(t) => direction === undefined || t.direction === direction,
 			);
@@ -411,7 +665,9 @@ async function cmdState(rest: string[], io: Io): Promise<number> {
 		json: { type: "boolean" },
 		topic: { type: "string" },
 	});
-	const a = await clientFor(values);
+	const t = await targetFor(values, io, "read", "state");
+	if (typeof t === "number") return t;
+	const a = t.api;
 	const qs = values.topic
 		? `?topic=${encodeURIComponent(str(values.topic) ?? "")}`
 		: "";
@@ -433,7 +689,9 @@ async function cmdScenarios(rest: string[], io: Io): Promise<number> {
 		...COMMON,
 		json: { type: "boolean" },
 	});
-	const a = await clientFor(values);
+	const t = await targetFor(values, io, "read", "scenarios");
+	if (typeof t === "number") return t;
+	const a = t.api;
 	const { scenarios } = (await a.get("/v1/scenarios")) as {
 		scenarios: ScenarioInfo[];
 	};
@@ -501,7 +759,9 @@ async function cmdValidation(rest: string[], io: Io): Promise<number> {
 	});
 	if (values.watch === true && values.json === true)
 		throw new CliError("validation: --watch and --json are mutually exclusive");
-	const a = await clientFor(values);
+	const t = await targetFor(values, io, "read", "validation");
+	if (typeof t === "number") return t;
+	const a = t.api;
 	const since =
 		values.since !== undefined
 			? toInt(str(values.since) ?? "", "--since")
@@ -521,7 +781,13 @@ async function cmdValidation(rest: string[], io: Io): Promise<number> {
 	};
 	if (values.json) {
 		// --json round-trips GET /v1/validation exactly (raw errors[] intact)
-		io.out(JSON.stringify(res, null, 2));
+		io.out(
+			JSON.stringify(
+				withServer(res as unknown as Record<string, unknown>, t),
+				null,
+				2,
+			),
+		);
 		return 0;
 	}
 	// one line per DISTINCT violation, repeats collapsed to ×N (design §5)
@@ -603,13 +869,21 @@ async function cmdDiagnostics(rest: string[], io: Io): Promise<number> {
 		throw new CliError(
 			"diagnostics: --watch and --json are mutually exclusive",
 		);
-	const a = await clientFor(values);
+	const t = await targetFor(values, io, "read", "diagnostics");
+	if (typeof t === "number") return t;
+	const a = t.api;
 	const res = (await a.get("/v1/diagnostics")) as {
 		diagnostics: Diagnostic[];
 		summary: DiagnosticSummary;
 	};
 	if (values.json) {
-		io.out(JSON.stringify(res, null, 2));
+		io.out(
+			JSON.stringify(
+				withServer(res as unknown as Record<string, unknown>, t),
+				null,
+				2,
+			),
+		);
 		return 0;
 	}
 	for (const d of res.diagnostics) io.out(diagnosticLine(d));
@@ -708,7 +982,15 @@ async function cmdSpecs(rest: string[], io: Io): Promise<number> {
 		...COMMON,
 		json: { type: "boolean" },
 	});
-	const a = await clientFor(values);
+	// the selector must reproduce the refused invocation — "specs" alone would read, not refresh
+	const t = await targetFor(
+		values,
+		io,
+		update ? "mutate" : "read",
+		update ? "specs update" : "specs",
+	);
+	if (typeof t === "number") return t;
+	const a = t.api;
 	if (update) {
 		const { specs } = (await a.post("/v1/specs/refresh")) as {
 			specs: SpecInfo[];
@@ -719,8 +1001,11 @@ async function cmdSpecs(rest: string[], io: Io): Promise<number> {
 		}
 		io.out(`specs refreshed (${specs.length} service(s))`);
 		renderSpecs(io, specs);
-		if (str(values["ctrl-port"]) === undefined) {
-			const warn = await specsStalenessWarning(runDirOf(values));
+		// R-043 semantics under D-032: the staleness warning reads the
+		// RESOLVED instance's boot record (skipped under --ctrl-port, where
+		// run-dir correspondence stays unverified)
+		if (str(values["ctrl-port"]) === undefined && t.inst !== undefined) {
+			const warn = await specsStalenessWarning(t.inst.runDir);
 			if (warn !== undefined) io.out(warn);
 		}
 		return 0;
@@ -731,7 +1016,13 @@ async function cmdSpecs(rest: string[], io: Io): Promise<number> {
 		warnings?: string[];
 	};
 	if (values.json) {
-		io.out(JSON.stringify(res, null, 2));
+		io.out(
+			JSON.stringify(
+				withServer(res as unknown as Record<string, unknown>, t),
+				null,
+				2,
+			),
+		);
 		return 0;
 	}
 	renderSpecs(io, res.specs, res.resolutionMode, res.warnings);
@@ -743,13 +1034,27 @@ async function cmdMode(rest: string[], io: Io): Promise<number> {
 		...COMMON,
 		json: { type: "boolean" },
 	});
-	const a = await clientFor(values);
+	const t = await targetFor(
+		values,
+		io,
+		positionals.length > 0 ? "mutate" : "read",
+		"mode",
+	);
+	if (typeof t === "number") return t;
+	const a = t.api;
 	const res = (
 		positionals.length > 0
 			? await a.post("/v1/mode", { mode: positionals[0] })
 			: await a.get("/v1/mode")
 	) as { mode: string; seed: number };
-	if (values.json) io.out(JSON.stringify(res, null, 2));
+	if (values.json)
+		io.out(
+			JSON.stringify(
+				withServer(res as unknown as Record<string, unknown>, t),
+				null,
+				2,
+			),
+		);
 	else io.out(`mode: ${res.mode} · seed ${res.seed}`);
 	return 0;
 }
@@ -829,7 +1134,9 @@ async function cmdPublish(rest: string[], io: Io): Promise<number> {
 		body.qos = toInt(str(values.qos) ?? "", "--qos");
 	if (values.retain) body.retain = true;
 
-	const a = await clientFor(values);
+	const t = await targetFor(values, io, "mutate", "publish");
+	if (typeof t === "number") return t;
+	const a = t.api;
 	const res = (await a.post("/v1/publish", body)) as {
 		topic: string;
 		direction: TopicInfo["direction"] | null;
@@ -884,7 +1191,9 @@ async function cmdScenario(rest: string[], io: Io): Promise<number> {
 	// EQ4: the same --payload* family as publish; bare = seed-faked inbound
 	const fromFlags = await payloadBody(values, { bareIsExample: false });
 	if ("payload" in fromFlags) body.payload = fromFlags.payload;
-	const a = await clientFor(values);
+	const t = await targetFor(values, io, "mutate", "scenario");
+	if (typeof t === "number") return t;
+	const a = t.api;
 	let res: { scenario: string; fired: boolean; sinceSeq: number };
 	try {
 		res = (await a.post(`/v1/trigger/${encodeURIComponent(name)}`, body)) as {
@@ -916,7 +1225,9 @@ async function cmdReset(rest: string[], io: Io): Promise<number> {
 		...COMMON,
 		seed: { type: "string" },
 	});
-	const a = await clientFor(values);
+	const t = await targetFor(values, io, "mutate", "reset");
+	if (typeof t === "number") return t;
+	const a = t.api;
 	const body =
 		values.seed !== undefined
 			? { seed: toInt(str(values.seed) ?? "", "--seed") }
@@ -935,7 +1246,9 @@ async function cmdCheck(rest: string[], io: Io): Promise<number> {
 		...COMMON,
 		since: { type: "string" },
 	});
-	const a = await clientFor(values);
+	const t = await targetFor(values, io, "read", "check");
+	if (typeof t === "number") return t;
+	const a = t.api;
 	// default window = the server-retained last-reset baseline (P8, D-014)
 	const since =
 		values.since !== undefined
@@ -989,21 +1302,53 @@ async function preflightPorts(config: Config): Promise<void> {
 	];
 	const busy = candidates.filter((c) => !portListenable(c.port));
 	if (busy.length === 0) return;
-	if (
-		busy.some((b) => b.label === "ctrl") &&
-		(await probeOffbook(config.controlPlanePort))
-	) {
+	if (busy.some((b) => b.label === "ctrl")) {
 		const others = busy.filter((b) => b.label !== "ctrl");
 		const alsoBusy =
 			others.length > 0
 				? `; also busy: ${others.map((b) => `${b.label} ${b.port}`).join(", ")}`
 				: "";
-		throw new CliError(
-			`another offbook owns the control port ${config.controlPlanePort}${alsoBusy} — \`offbook down\` in that project's directory frees the control port; check the others separately if they persist`,
-		);
+		// D-032: name the owner when the port's claim is PROVEN (the served
+		// identity matches the claimed runfile's token); a bare offbook-shaped
+		// answer keeps the pre-D-032 generic attribution — never a guess
+		const owner = await attributeCtrlPort(config.controlPlanePort);
+		if (owner !== undefined)
+			throw new CliError(
+				M3({
+					port: config.controlPlanePort,
+					projectDir: owner.projectDir,
+					runDir: owner.runDir,
+					demo: owner.demo,
+					alsoBusy,
+				}),
+			);
+		if (await probeOffbook(config.controlPlanePort))
+			throw new CliError(
+				`another offbook owns the control port ${config.controlPlanePort}${alsoBusy} — \`offbook down\` in that project's directory frees the control port; check the others separately if they persist`,
+			);
 	}
 	throw new CliError(
 		`port(s) in use: ${busy.map((b) => `${b.label} ${b.port}`).join(", ")} — another broker/server? set ${busy.map((b) => b.flag).join("/")} (P7); \`offbook doctor\` checks all three ports`,
+	);
+}
+
+// guarded site #4's precondition, extracted pure so its race semantics are
+// testable without racing a real boot: the failed-boot clear fires only
+// when the runfile still names OUR spawn AND no other launch answers the
+// port — a concurrent up's winner (repointed runfile, or a different token
+// on the port) must survive the clear
+export function shouldClearFailedBoot(
+	spawned: { pid: number; token: string },
+	seen: { run: Runfile | undefined; probe: ServerProbe },
+): boolean {
+	return (
+		seen.run !== undefined &&
+		seen.run.pid === spawned.pid &&
+		seen.run.token === spawned.token &&
+		!(
+			seen.probe.kind === "server" &&
+			seen.probe.identity.token !== spawned.token
+		)
 	);
 }
 
@@ -1023,45 +1368,79 @@ async function launchDetached(
 		};
 	},
 	io: Io,
-): Promise<number | null> {
+): Promise<number | "wrong-host" | null> {
 	const { runDir, config } = spec;
+	const stateDir = stateDirFromEnv();
 	const existing = await resolveRunning(runDir);
-	if (existing?.live) {
-		io.err(
-			`offbook: already running (pid ${existing.run.pid}, ports ws ${existing.run.brokerWsPort} / tcp ${existing.run.brokerTcpPort} / http ${existing.run.controlPlanePort}) — run \`offbook down\` first`,
-		);
-		return null;
-	}
-	if (existing) {
-		io.out(`(reclaiming stale runfile — pid ${existing.run.pid} is gone)`);
-		clearRunfile(runDir);
+	if (existing !== undefined) {
+		const { run } = existing;
+		// the deletion law (§5): only a provably dead pid on THIS host is
+		// reclaimed. Rows 10 and 3 refuse instead — deleting their records
+		// would strand an instance `offbook down` can still stop. (Row 4 —
+		// another offbook answering the port — lands in the live branch
+		// below: refused as already-running, records untouched either way.)
+		if (run.host !== undefined && run.host !== hostname()) {
+			io.err(M10(run.host, runDir)); // row 10: inert, never touched
+			return "wrong-host"; // M10 is a refusal — exit 2, like every verb
+		}
+		if (existing.live) {
+			io.err(
+				`offbook: already running (pid ${run.pid}, ports ws ${run.brokerWsPort} / tcp ${run.brokerTcpPort} / http ${run.controlPlanePort}) — run \`offbook down\` first`,
+			);
+			return null;
+		}
+		if (pidAlive(run.pid)) {
+			io.err(M23(run.pid, runDir)); // row 3: booting or wedged
+			return null;
+		}
+		// row 5, guarded site #2: the runfile must still name the pid just
+		// judged dead — a concurrent up's winner must survive this clear
+		const reclaimed = await guarded({
+			read: () => readRunfile(runDir),
+			expect: (cur) => cur !== undefined && cur.pid === run.pid,
+			act: () => clearRunfile(runDir, { stateDir }),
+		});
+		if (reclaimed)
+			io.out(`(reclaiming stale runfile — pid ${run.pid} is gone)`);
 	}
 	await preflightPorts(config);
+	const token = randomBytes(16).toString("hex"); // the launch lineage id (R-044)
 	mkdirSync(runDir, { recursive: true });
 	const bootFile = join(runDir, "offbook.boot.json");
-	await Bun.write(bootFile, JSON.stringify(spec.boot, null, 2));
+	await Bun.write(bootFile, JSON.stringify({ ...spec.boot, token }, null, 2));
 	const logFd = openSync(logPath(runDir), "a");
 	const serveEntry = fileURLToPath(new URL("./serve.ts", import.meta.url));
 	const child = spawn(process.execPath, [serveEntry, bootFile], {
 		detached: true,
 		stdio: ["ignore", logFd, logFd],
+		cwd: runDir, // explicit cwd: never inherit a possibly-deleted launch cwd (D-032)
 		env: logSafeEnv(), // D-030 — the log must stay ANSI-clean
 	});
 	closeSync(logFd);
 	child.unref();
 	const pid = child.pid;
 	if (pid === undefined) throw new CliError("up: failed to spawn the server");
-	await writeRunfile(runDir, {
-		pid,
-		brokerWsPort: config.brokerWsPort,
-		brokerTcpPort: config.brokerTcpPort,
-		controlPlanePort: config.controlPlanePort,
-		startedAt: new Date().toISOString(),
-	});
+	const reg = await writeRunfile(
+		runDir,
+		{
+			pid,
+			brokerWsPort: config.brokerWsPort,
+			brokerTcpPort: config.brokerTcpPort,
+			controlPlanePort: config.controlPlanePort,
+			startedAt: new Date().toISOString(),
+			token,
+			host: hostname(),
+		},
+		{ stateDir },
+	);
+	if (!reg.registered) io.err(M17(spec.boot.projectDir, runDir));
 	const deadline = Date.now() + 30_000;
 	let ready = false;
 	while (Date.now() < deadline) {
-		if (await probeOffbook(config.controlPlanePort, 300)) {
+		// readiness IS identity (R-044): only THIS launch's token counts —
+		// an old instance still draining the port must not green a new up
+		const probe = await probeServer(config.controlPlanePort, 300);
+		if (probe.kind === "server" && probe.identity.token === token) {
 			ready = true;
 			break;
 		}
@@ -1069,7 +1448,17 @@ async function launchDetached(
 		await sleep(100);
 	}
 	if (!ready) {
-		clearRunfile(runDir);
+		// guarded site #4: clear only if the runfile still names OUR spawn
+		// and no OTHER launch answers the port (a concurrent up's winner —
+		// or a late riser of ours — must survive this clear)
+		await guarded({
+			read: async () => ({
+				run: await readRunfile(runDir),
+				probe: await probeServer(config.controlPlanePort, 300),
+			}),
+			expect: (seen) => shouldClearFailedBoot({ pid, token }, seen),
+			act: () => clearRunfile(runDir, { stateDir }),
+		});
 		io.err(`offbook up: server failed to start — ${logPath(runDir)} ends:`);
 		const tail = (
 			await Bun.file(logPath(runDir))
@@ -1089,7 +1478,7 @@ async function launchDetached(
 }
 
 async function cmdUp(rest: string[], io: Io): Promise<number> {
-	const { values } = parseFlags(rest, {
+	const { values, positionals } = parseFlags(rest, {
 		"run-dir": { type: "string" },
 		ci: { type: "boolean" },
 		strict: { type: "boolean" },
@@ -1100,7 +1489,20 @@ async function cmdUp(rest: string[], io: Io): Promise<number> {
 		"tcp-port": { type: "string" },
 		"ctrl-port": { type: "string" },
 	});
-	const runDir = runDirOf(values);
+	// R-046: `offbook up [dir]` — the project directory positional, default
+	// `.`. Preflight FIRST: refuse before any mkdir, boot-file, or
+	// registration write.
+	const projectDir = resolve(process.cwd(), positionals[0] ?? ".");
+	if (!existsSync(projectDir) || !statSync(projectDir).isDirectory()) {
+		io.err(M2(projectDir));
+		return 1;
+	}
+	// default runDir lives under the PROJECT dir; explicit --run-dir stays
+	// cwd-relative (§1a, D-032)
+	const runDir =
+		values["run-dir"] !== undefined
+			? resolve(process.cwd(), str(values["run-dir"]) ?? "")
+			: join(projectDir, DEFAULT_CONFIG.runDir);
 
 	// two boot profiles: interactive default vs --ci (co-set, EH1/F10);
 	// --strict stays an independent flag (--frozen is v2)
@@ -1135,7 +1537,7 @@ async function cmdUp(rest: string[], io: Io): Promise<number> {
 			runDir,
 			config,
 			boot: {
-				projectDir: process.cwd(),
+				projectDir,
 				config: overrides,
 				environment: str(values.env),
 				watch,
@@ -1143,6 +1545,7 @@ async function cmdUp(rest: string[], io: Io): Promise<number> {
 		},
 		io,
 	);
+	if (pid === "wrong-host") return 2;
 	if (pid === null) return 1;
 
 	io.out(
@@ -1161,7 +1564,7 @@ async function cmdUp(rest: string[], io: Io): Promise<number> {
 	const { scenarios } = (await api(config.controlPlanePort).get(
 		"/v1/scenarios",
 	)) as { scenarios: unknown[] };
-	const handlersDir = join(process.cwd(), "handlers");
+	const handlersDir = join(projectDir, "handlers");
 	const handlerFiles = existsSync(handlersDir)
 		? [...new Bun.Glob("**/*.ts").scanSync({ cwd: handlersDir })]
 		: [];
@@ -1181,7 +1584,7 @@ async function cmdDemoServe(rest: string[], io: Io): Promise<number> {
 		"tcp-port": { type: "string" },
 		"ctrl-port": { type: "string" },
 	});
-	const runDir = runDirOf(values);
+	const runDir = resolve(process.cwd(), runDirOf(values));
 	// interactive profile — the demo should feel alive (wall-clock, autonomous)
 	const overrides: Partial<Config> = {
 		runDir,
@@ -1212,6 +1615,7 @@ async function cmdDemoServe(rest: string[], io: Io): Promise<number> {
 		},
 		io,
 	);
+	if (pid === "wrong-host") return 2;
 	if (pid === null) return 1;
 	io.out(
 		`offbook demo --serve — pid ${pid} · bundled thermostat spec · mode ${config.mode} · seed ${config.seed}`,
@@ -1227,43 +1631,238 @@ async function cmdDemoServe(rest: string[], io: Io): Promise<number> {
 
 async function cmdDown(rest: string[], io: Io): Promise<number> {
 	const { values } = parseFlags(rest, { "run-dir": { type: "string" } });
-	const runDir = runDirOf(values);
-	const run = await readRunfile(runDir);
-	// idempotent (P7): dead/absent pid cleans the runfile and exits 0
-	if (!run || !pidAlive(run.pid)) {
-		clearRunfile(runDir);
+	const stateDir = stateDirFromEnv();
+	const explicit = str(values["run-dir"]);
+	// the foreign-host refusal (M10) renders verbatim on stderr, exit 2
+	const res = await resolveOrRefuse(
+		{ cwd: process.cwd(), runDirFlag: explicit, stateDir },
+		io,
+		false,
+	);
+	if (typeof res === "number") return res;
+	for (const n of res.notes) io.err(n);
+	if (res.resolved !== undefined) {
+		const inst = res.resolved;
+		if (explicit === undefined && inst.source === "registry") {
+			// however it was resolved — the demo stage included — an instance
+			// unrelated to cwd is never auto-signaled (FM-025)
+			const projectDir = canonicalPath(inst.projectDir ?? dirname(inst.runDir));
+			const cwdReal = canonicalPath(process.cwd());
+			const related =
+				containsOrEqual(projectDir, cwdReal) ||
+				containsOrEqual(cwdReal, projectDir);
+			if (!related) {
+				if (res.skipped.length > 0) {
+					// one verified + others not answering: the skipped may be
+					// the intended target — refuse with the table (M9, exit 2)
+					for (const s of res.skipped) io.err(skippedNote(s));
+					io.err(M9());
+					for (const line of instanceTable(rowsOf(res.candidates), "down"))
+						io.err(line);
+					return 2;
+				}
+				// nothing of yours: deterministic no-op — the table makes
+				// choosing one paste (M6, exit 0)
+				io.out(M6());
+				for (const line of instanceTable(rowsOf(res.candidates), "down"))
+					io.out(line);
+				return 0;
+			}
+		}
+		return signalInstance(inst, stateDir, io);
+	}
+	if (res.candidates.length > 1) {
+		io.err(M8());
+		for (const line of instanceTable(rowsOf(res.candidates), "down"))
+			io.err(line);
+		return 2;
+	}
+	// row 3, the wedged-server path: cwd's own SILENT instance is still
+	// signalable pid-only (M12 promises `offbook down` stops it); a
+	// wrong-token skip is never signaled — the pid may be reused (row 4)
+	const ownRunDir =
+		explicit !== undefined
+			? res.skipped[0]?.runDir
+			: resolve(process.cwd(), DEFAULT_CONFIG.runDir);
+	const own = res.skipped.find(
+		(s) => s.runDir === ownRunDir && s.reason === "silent",
+	);
+	if (own !== undefined) {
+		const run = await readRunfile(own.runDir);
+		if (run !== undefined)
+			return signalInstance(
+				{
+					runDir: own.runDir,
+					run,
+					projectDir: own.projectDir,
+					demo: false,
+					source: "cwd",
+				},
+				stateDir,
+				io,
+			);
+	}
+	// explicit-path dead runfile: down has ALWAYS cleaned these up (P7
+	// idempotence) — the resolver's reclaimDead:false left it for us so
+	// read verbs could keep reporting it as stale
+	const deadOwn = res.skipped.find(
+		(s) => s.runDir === ownRunDir && s.reason === "dead",
+	);
+	if (deadOwn !== undefined) {
+		await guarded({
+			read: () => readRunfile(deadOwn.runDir),
+			expect: (cur) => cur !== undefined && cur.pid === deadOwn.pid,
+			act: () => clearRunfile(deadOwn.runDir, { stateDir }),
+		});
 		io.out("offbook: not running");
 		return 0;
 	}
-	process.kill(run.pid, "SIGTERM");
+	if (res.foreignSeen && explicit === undefined) {
+		// row 10 on the pid-only path: never signal into a foreign pid table
+		const cwdRunDir = resolve(process.cwd(), DEFAULT_CONFIG.runDir);
+		const run = await readRunfile(cwdRunDir);
+		if (run?.host !== undefined && run.host !== hostname()) {
+			io.err(M10(run.host, cwdRunDir));
+			return 2;
+		}
+	}
+	for (const s of res.skipped) io.err(skippedNote(s));
+	io.out("offbook: not running");
+	return 0;
+}
+
+// The signal path (guarded sites #3 and #2), exported so the site pins can
+// drive it directly. The TOKEN identifies the lineage; the PID identifies
+// the incarnation — compare-and-signal checks the pid, because signaling
+// the wrong incarnation is exactly the race being guarded.
+export async function signalInstance(
+	inst: ResolvedInstance,
+	stateDir: string,
+	io: Io,
+): Promise<number> {
+	const { runDir, run } = inst;
+	const lineage = run.token;
+	// site #3: the runfile must still name the verified pid at signal time
+	const signaled = await guarded({
+		read: () => readRunfile(runDir),
+		expect: (cur) => cur !== undefined && cur.pid === run.pid,
+		act: () => {
+			try {
+				process.kill(run.pid, "SIGTERM");
+			} catch (cause) {
+				// ESRCH inside the guard's race window = already dead — that IS success
+				if ((cause as NodeJS.ErrnoException).code !== "ESRCH") throw cause;
+			}
+		},
+	});
+	if (!signaled) {
+		io.err(M22());
+		return 1;
+	}
 	const deadline = Date.now() + 5_000;
 	while (pidAlive(run.pid) && Date.now() < deadline) await sleep(50);
 	if (pidAlive(run.pid)) {
-		process.kill(run.pid, "SIGKILL");
+		// the SIGKILL escalation re-verifies BOTH granularities: the runfile
+		// must still name this pid, and the port must not answer as a
+		// DIFFERENT offbook. NB the port check only excludes other offbooks —
+		// a non-offbook squatter reads as "silent" — so the runfile pid
+		// re-read is the real gate on this escalation.
+		const cur = await readRunfile(runDir);
+		const probe = await probeServer(run.controlPlanePort, 300);
+		const portIsOurs =
+			probe.kind === "silent" ||
+			(probe.kind === "server" &&
+				lineage !== undefined &&
+				probe.identity.token === lineage) ||
+			(probe.kind === "server" &&
+				lineage === undefined &&
+				canonicalPath(probe.identity.runDir) === canonicalPath(runDir)) ||
+			(probe.kind === "legacy" && lineage === undefined);
+		if (cur === undefined || cur.pid !== run.pid || !portIsOurs) {
+			io.err(M22());
+			return 1;
+		}
+		try {
+			process.kill(run.pid, "SIGKILL");
+		} catch (cause) {
+			// ESRCH inside the guard's race window = already dead — that IS success
+			if ((cause as NodeJS.ErrnoException).code !== "ESRCH") throw cause;
+		}
 		await sleep(100);
 	}
-	clearRunfile(runDir);
-	io.out(`offbook down — stopped (pid ${run.pid})`);
+	// site #2: clear only while the runfile still names the signaled pid —
+	// a --watch successor's registration survives this clear
+	await guarded({
+		read: () => readRunfile(runDir),
+		expect: (cur) => cur !== undefined && cur.pid === run.pid,
+		act: () => clearRunfile(runDir, { stateDir }),
+	});
+	if (inst.identity !== undefined)
+		io.out(M5(run.pid, inst.projectDir ?? dirname(runDir), inst.demo));
+	else io.out(`offbook down — stopped (pid ${run.pid})`); // unverified: claim only what was proven
 	return 0;
 }
 
 async function cmdStatus(rest: string[], io: Io): Promise<number> {
 	const { values } = parseFlags(rest, {
 		"run-dir": { type: "string" },
+		"ctrl-port": { type: "string" },
 		json: { type: "boolean" },
 	});
-	const runDir = runDirOf(values);
-	const resolved = await resolveRunning(runDir);
-	if (!resolved?.live) {
-		io.err(
-			`offbook: not running${resolved ? ` (stale runfile, pid ${resolved.run.pid})` : ` (no runfile in ${runDir})`}`,
-		);
+	if (values["ctrl-port"] !== undefined) return statusByCtrlPort(values, io);
+	const json = values.json === true;
+	const res = await resolveOrRefuse(
+		{
+			cwd: process.cwd(),
+			runDirFlag: str(values["run-dir"]),
+			stateDir: stateDirFromEnv(),
+		},
+		io,
+		json,
+	);
+	if (typeof res === "number") return res;
+	for (const n of res.notes) io.err(n);
+	if (res.resolved === undefined) {
+		if (res.candidates.length > 1) {
+			if (json)
+				io.out(refusalEnvelope("ambiguous", M8(), rowsOf(res.candidates)));
+			else {
+				io.err(M8());
+				for (const line of instanceTable(rowsOf(res.candidates), "status"))
+					io.err(line);
+			}
+			return 2;
+		}
+		const runDirFlag = str(values["run-dir"]);
+		if (runDirFlag !== undefined) {
+			// explicit addressing keeps status's pre-D-032 wordings
+			const s = res.skipped[0];
+			io.err(
+				`offbook: not running${s !== undefined ? ` (stale runfile, pid ${s.pid})` : ` (no runfile in ${runDirFlag})`}`,
+			);
+			return 1;
+		}
+		const own =
+			res.skipped.length === 1 &&
+			res.skipped[0].runDir === resolve(process.cwd(), DEFAULT_CONFIG.runDir)
+				? res.skipped[0]
+				: undefined;
+		if (own !== undefined) {
+			if (json) io.out(refusalEnvelope("not-running", M12(own.pid)));
+			else io.err(M12(own.pid));
+			return 1;
+		}
+		for (const s of res.skipped) io.err(skippedNote(s));
+		if (json) io.out(refusalEnvelope("not-running", M11s()));
+		else io.err(M11s());
 		return 1;
 	}
-	const run = resolved.run;
+	const inst = res.resolved;
+	for (const s of res.skipped) io.err(skippedNote(s));
+	const run = inst.run;
 	const a = api(run.controlPlanePort);
 	const clients = clientsFromLog(
-		await Bun.file(logPath(runDir))
+		await Bun.file(logPath(inst.runDir))
 			.text()
 			.catch(() => ""),
 	);
@@ -1278,10 +1877,17 @@ async function cmdStatus(rest: string[], io: Io): Promise<number> {
 		{ summary: ValidationSummary },
 		{ summary: DiagnosticSummary },
 	];
-	if (values.json) {
+	if (json) {
 		io.out(
 			JSON.stringify(
 				{
+					server: {
+						projectDir: inst.projectDir,
+						runDir: inst.runDir,
+						source: inst.source,
+						demo: inst.demo,
+					},
+					skipped: res.skipped,
 					run,
 					mode: modeRes,
 					specs: specsRes.specs,
@@ -1296,6 +1902,15 @@ async function cmdStatus(rest: string[], io: Io): Promise<number> {
 		return 0;
 	}
 	const v = valRes.summary;
+	if (inst.source === "registry")
+		io.out(
+			M16(
+				inst.projectDir ?? dirname(inst.runDir),
+				run.brokerWsPort,
+				run.controlPlanePort,
+				inst.demo,
+			),
+		);
 	io.out(`offbook: running (pid ${run.pid}, since ${run.startedAt})`);
 	io.out(`  mode ${modeRes.mode} · seed ${modeRes.seed}`);
 	io.out(
@@ -1325,14 +1940,131 @@ async function cmdStatus(rest: string[], io: Io): Promise<number> {
 	return 0;
 }
 
+// status --ctrl-port (D-032): identity-only reporting — the server's own
+// claim, no log- or boot-file-derived extras (their run-dir correspondence
+// is what --ctrl-port cannot verify; the identity CAN, so it is shown).
+// Pre-upgrade servers refuse with M18 (no degraded partial-output mode).
+async function statusByCtrlPort(values: FlagValues, io: Io): Promise<number> {
+	const port = toInt(str(values["ctrl-port"]) ?? "", "--ctrl-port");
+	const json = values.json === true;
+	const probe = await probeServer(port);
+	if (probe.kind === "legacy") {
+		if (json) io.out(refusalEnvelope("version-skew", M18()));
+		else io.err(M18());
+		return 2;
+	}
+	if (probe.kind === "silent")
+		throw new CliError(
+			`could not reach offbook at http://localhost:${port} — is it running?`,
+		);
+	const id = probe.identity;
+	const a = api(port);
+	const [modeRes, specsRes, valRes, diagRes] = (await Promise.all([
+		a.get("/v1/mode"),
+		a.get("/v1/specs"),
+		a.get("/v1/validation"),
+		a.get("/v1/diagnostics"),
+	])) as [
+		{ mode: string; seed: number },
+		{ specs: SpecInfo[]; warnings?: string[] },
+		{ summary: ValidationSummary },
+		{ summary: DiagnosticSummary },
+	];
+	if (json) {
+		io.out(
+			JSON.stringify(
+				{
+					server: {
+						projectDir: id.projectDir,
+						runDir: id.runDir,
+						source: "ctrl-port",
+						demo: id.demo,
+					},
+					skipped: [],
+					mode: modeRes,
+					specs: specsRes.specs,
+					validation: valRes.summary,
+					diagnostics: diagRes.summary,
+				},
+				null,
+				2,
+			),
+		);
+		return 0;
+	}
+	io.out(
+		M16(
+			id.projectDir,
+			id.ports.brokerWsPort,
+			id.ports.controlPlanePort,
+			id.demo,
+		),
+	);
+	io.out(`offbook: running (pid ${id.pid}, since ${id.startedAt})`);
+	io.out(`  mode ${modeRes.mode} · seed ${modeRes.seed}`);
+	io.out(
+		`  ports: ws ${id.ports.brokerWsPort} · tcp ${id.ports.brokerTcpPort} · http ${id.ports.controlPlanePort}`,
+	);
+	io.out(
+		`  violations: client ${valRes.summary.byOrigin.client} / mock ${valRes.summary.byOrigin.mock} — caught ${valRes.summary.distinct.client} distinct client break(s)`,
+	);
+	io.out(
+		`  diagnostics: ${diagRes.summary.errors} error(s) · ${diagRes.summary.warnings} warning(s)`,
+	);
+	return 0;
+}
+
 async function cmdLogs(rest: string[], io: Io): Promise<number> {
 	const { values } = parseFlags(rest, {
 		"run-dir": { type: "string" },
 		follow: { type: "boolean", short: "f" },
 	});
-	const path = logPath(runDirOf(values));
-	if (!existsSync(path))
-		throw new CliError(`no log at ${path} — has \`offbook up\` run here?`);
+	const explicit = str(values["run-dir"]);
+	// logs always runs the resolver — the banner needs its outcome; the
+	// local log merely wins for OUTPUT (post-mortem logs keep working in
+	// the project directory, a stated non-goal boundary)
+	const res = await resolveOrRefuse(
+		{ cwd: process.cwd(), runDirFlag: explicit, stateDir: stateDirFromEnv() },
+		io,
+		false,
+	);
+	if (typeof res === "number") return res;
+	for (const n of res.notes) io.err(n);
+	const localRunDir = resolve(process.cwd(), explicit ?? DEFAULT_CONFIG.runDir);
+	const localPath = logPath(localRunDir);
+	let path = localPath;
+	if (existsSync(localPath)) {
+		if (
+			res.resolved !== undefined &&
+			canonicalPath(res.resolved.runDir) !== canonicalPath(localRunDir)
+		)
+			io.err(
+				M19(
+					localPath,
+					res.resolved.projectDir ?? dirname(res.resolved.runDir),
+					res.resolved.runDir,
+				),
+			);
+	} else if (res.resolved !== undefined) {
+		if (res.resolved.source === "registry")
+			io.out(
+				M16(
+					res.resolved.projectDir ?? dirname(res.resolved.runDir),
+					res.resolved.run.brokerWsPort,
+					res.resolved.run.controlPlanePort,
+					res.resolved.demo,
+				),
+			);
+		path = logPath(res.resolved.runDir);
+	} else if (res.candidates.length > 1) {
+		io.err(M8());
+		for (const line of instanceTable(rowsOf(res.candidates), "logs"))
+			io.err(line);
+		return 2;
+	} else {
+		for (const s of res.skipped) io.err(skippedNote(s));
+		throw new CliError(`no log at ${localPath} — has \`offbook up\` run here?`);
+	}
 	const text = await Bun.file(path).text();
 	if (text.trimEnd() !== "") io.out(text.trimEnd());
 	if (!values.follow) return 0;
@@ -1511,6 +2243,7 @@ async function cmdDoctor(rest: string[], io: Io): Promise<number> {
 		runDir,
 		offline: values.offline === true,
 		bunVersion: Bun.version,
+		stateDir: stateDirFromEnv(),
 		ports: run
 			? {
 					ws: run.brokerWsPort,
@@ -1541,9 +2274,9 @@ export const USAGE = `usage: offbook <command>
   doctor [dir] [--offline] [--json] [--run-dir <dir>]  preflight: runtime, deps, config, spec reachability, ports
   skill install [--dest <dir>] [--force]  install the onboarding skill into this repo's .claude/skills/
   demo [--serve]             bundled demo spec — one-shot catch, or --serve to keep serving
-  up [--ci] [--strict] [--watch] [--seed n] [--ws-port n] [--tcp-port n] [--ctrl-port n] [--env e]
+  up [dir] [--ci] [--strict] [--watch] [--seed n] [--ws-port n] [--tcp-port n] [--ctrl-port n] [--env e]
   down                       stop the running server (idempotent)
-  status [--json]            running/ports/mode/specs/violations at a glance
+  status [--json] [--ctrl-port n]    running/ports/mode/specs/violations at a glance
   logs [-f]                  print (or follow) the server log
   topics [--compact] [--no-examples] [--schema] [--receives|--sends] [--json]
   state [--topic prefix]     retained state

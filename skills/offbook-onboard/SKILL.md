@@ -56,21 +56,22 @@ them, and run the named verification after every step.
    full diff and get approval BEFORE applying it.
 5. **Package scripts.** Add to the app's package.json, mirroring the
    daily-loop guide (`daily-loop.md`):
-   `"mock:up": "cd mock && offbook up"`, `"mock:down": "cd mock && offbook down"`.
-6. **First light.** `cd mock && offbook up`. Confirm ingestion with
-   `offbook topics --json` — keep the `--json`: it refuses if no server is
-   running here (bare `topics` falls back to the bundled demo spec behind
-   a printed note), and that refusal means `up` failed; read its output.
+   `"mock:up": "offbook up mock"`, `"mock:down": "offbook down"`.
+6. **First light.** `offbook up mock` (from the app repo root). Confirm
+   ingestion with `offbook topics --json --run-dir mock/.offbook` — keep
+   the `--json` and the `--run-dir`: pinned to this mock, it refuses unless
+   THIS instance serves (bare `topics` falls back to the bundled demo spec
+   behind a printed note), so a refusal means `up` failed; read its output.
    Run `offbook status` and note the `clients:` count, then start the
    app. **The acceptance test: the app's connect fingerprint appears** —
    `offbook status` again: the count went up and `last` shows the new
    connect (step 4's clientId if the app sets one; generated ids change
    every boot). If the picture is muddy — the count jumped by more than
    one, or `last` is a client you don't recognize — read the fingerprints
-   directly: `offbook logs` prints the whole log; the `ws-connect` lines
-   after the last boot line are this run's connects, every one of them,
-   not just the last. Zero new connects while the app works means the app
-   is still on the real backend: revisit step 4.
+   directly: `offbook logs --run-dir mock/.offbook` prints the whole log;
+   the `ws-connect` lines after the last boot line are this run's connects,
+   every one of them, not just the last. Zero new connects while the app
+   works means the app is still on the real backend: revisit step 4.
    Then run `offbook validation --watch` and show the human a violation
    landing: publish a clean example (`offbook publish <topic> --example`
    on a toClient topic), then copy that topic's `example:` line from
@@ -88,6 +89,9 @@ them, and run the named verification after every step.
   anything worth keeping, then re-run with `offbook skill install --force`
   only once the human approves the clean-replace.
 - `offbook up` reports the control port owned by an offbook in another
-  directory: the error says "another offbook owns the control port `<n>`;
-  also busy: `<other labels>` — `offbook down` in that project's directory
-  frees the control port; check the others separately if they persist".
+  directory: the error says "another offbook owns the control port `<n>`
+  (started in `<projectDir>`) — `offbook down --run-dir <runDir>` stops it
+  from anywhere on this machine" — run the pasted command; when the owner
+  is an older offbook build the message instead says "`offbook down` in
+  that project's directory frees the control port; check the others
+  separately if they persist".

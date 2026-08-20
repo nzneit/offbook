@@ -664,3 +664,32 @@ test("retained residue on an initialState:false channel survives reset and stays
 	const entry = state.state.find((e) => e.topic === "quiet/errors");
 	expect(entry?.payload).toEqual({ level: "warn" }); // NOT overwritten by a floor republish
 });
+
+// [utest->R-044]
+test("GET /v1/server: echoes the injected identity through compose; 404s (plain, no envelope) when identity-less", async () => {
+	const identity = {
+		pid: 4242,
+		token: "ab".repeat(16),
+		host: "devbox",
+		projectDir: "/tmp/proj",
+		runDir: "/tmp/proj/.offbook",
+		startedAt: "2026-08-19T00:00:00.000Z",
+		demo: false,
+		ports: {
+			brokerWsPort: 18091,
+			brokerTcpPort: 12891,
+			controlPlanePort: 18891,
+		},
+	};
+	const withId = await boot(91, { parts: { server: identity } });
+	const res = await withId.req("/v1/server");
+	expect(res.status).toBe(200);
+	expect(await res.json()).toEqual(identity);
+
+	// identity-less (every existing boot): a PLAIN 404 — no §5 error
+	// envelope, the closed ErrorCode union is untouched
+	const without = await boot(92);
+	const miss = await without.req("/v1/server");
+	expect(miss.status).toBe(404);
+	expect((await miss.text()).includes('"error"')).toBe(false);
+});

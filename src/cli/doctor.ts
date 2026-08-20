@@ -3,12 +3,21 @@
 // CLI-local: no /v1 or contract change; imports no transport package (R-030 —
 // dependency sentinels are checked by node_modules presence, never imported).
 import { existsSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { loadEnvironments, loadServices } from "#src/config/index.ts";
 import { resolveRepoUrl } from "#src/ingestion/index.ts";
 import { gitToplevel } from "./checkout.ts";
-import { probeOffbook, resolveRunning } from "./runfile.ts";
+import { M21 } from "./messages.ts";
+import { canonicalPath, pointerPath, scanPointers } from "./registry.ts";
+import { attributeCtrlPort } from "./resolve.ts";
+import {
+	pidAlive,
+	probeOffbook,
+	readRunfile,
+	resolveRunning,
+} from "./runfile.ts";
 import {
 	blockingAncestor,
 	bundledSkillDir,
@@ -30,6 +39,7 @@ export interface DoctorCtx {
 	offline: boolean;
 	bunVersion: string; // injected so tests can fake it
 	ports: { ws: number; tcp: number; ctrl: number };
+	stateDir: string; // D-032: the instance-registry state dir (injected; tests pin a scratch)
 }
 
 export interface DoctorCheck {
@@ -331,18 +341,26 @@ const ports: DoctorCheck = {
 		];
 		for (const [label, port] of labeled)
 			if (!(await portFree(port))) busy.push(`${label} ${port}`);
-		if (
-			busy.some((b) => b.startsWith("ctrl")) &&
-			(await probeOffbook(ctx.ports.ctrl))
-		) {
+		if (busy.some((b) => b.startsWith("ctrl"))) {
 			const others = busy.filter((b) => !b.startsWith("ctrl"));
 			const alsoBusy =
 				others.length > 0 ? `; also busy: ${others.join(", ")}` : "";
-			return {
-				status: "fail",
-				detail: `another offbook owns the control port ${ctx.ports.ctrl}${alsoBusy}`,
-				hint: "`offbook down` in that project's directory frees the control port; check the others separately if they persist",
-			};
+			// D-032: a PROVEN owner (served identity matches its own runfile's
+			// token) is named with a from-anywhere selector; an offbook-shaped
+			// answer without proof keeps the pre-D-032 generic attribution
+			const owner = await attributeCtrlPort(ctx.ports.ctrl);
+			if (owner !== undefined)
+				return {
+					status: "fail",
+					detail: `another offbook owns the control port ${ctx.ports.ctrl}${alsoBusy} (${owner.demo ? `the bundled demo, started in ${owner.projectDir}` : `started in ${owner.projectDir}`})`,
+					hint: `\`offbook down --run-dir ${owner.runDir}\` stops it from anywhere on this machine`,
+				};
+			if (await probeOffbook(ctx.ports.ctrl))
+				return {
+					status: "fail",
+					detail: `another offbook owns the control port ${ctx.ports.ctrl}${alsoBusy}`,
+					hint: "`offbook down` in that project's directory frees the control port; check the others separately if they persist",
+				};
 		}
 		return busy.length === 0
 			? {
@@ -361,15 +379,48 @@ const runfileCheck: DoctorCheck = {
 	name: "runfile",
 	async run(ctx) {
 		const resolved = await resolveRunning(ctx.runDir);
+		// D-032 registry-aware notes: instance records elsewhere, and the
+		// pre-upgrade live-local-runfile-without-pointer case (invisible to
+		// discovery until restarted or managed locally once). Doctor stays
+		// read-only — it reports, never adopts.
+		let elsewhere = 0;
+		try {
+			for (const p of await scanPointers(ctx.stateDir)) {
+				if (p.pointer.host !== hostname()) continue;
+				if (p.pointer.runDir === canonicalPath(ctx.runDir)) continue;
+				const run = await readRunfile(p.pointer.runDir);
+				if (run !== undefined && pidAlive(run.pid)) elsewhere++;
+			}
+		} catch {
+			// an unreadable registry degrades the note, never the check
+		}
+		const elsewhereNote =
+			elsewhere === 0
+				? ""
+				: `; ${elsewhere} other instance record(s) on this machine (\`offbook status\` names the live ones)`;
 		if (resolved === undefined)
-			return { status: "pass", detail: "no runfile (nothing running here)" };
-		return resolved.live
-			? { status: "pass", detail: `live (pid ${resolved.run.pid})` }
-			: {
-					status: "warn",
-					detail: `stale runfile (pid ${resolved.run.pid} not answering)`,
-					hint: "`offbook down` cleans it up",
-				};
+			return {
+				status: "pass",
+				detail: `no runfile (nothing running here)${elsewhereNote}`,
+			};
+		if (resolved.live) {
+			const registered = existsSync(pointerPath(ctx.stateDir, ctx.runDir));
+			return registered
+				? {
+						status: "pass",
+						detail: `live (pid ${resolved.run.pid})${elsewhereNote}`,
+					}
+				: {
+						status: "warn",
+						detail: `live (pid ${resolved.run.pid}) but not yet manageable from other directories`,
+						hint: "started by an older offbook build — restart it, or run any offbook verb here once to register it",
+					};
+		}
+		return {
+			status: "warn",
+			detail: `stale runfile (pid ${resolved.run.pid} not answering)`,
+			hint: "`offbook down` cleans it up",
+		};
 	},
 };
 
@@ -423,6 +474,17 @@ const skillCheck: DoctorCheck = {
 				status: "warn",
 				detail: `installed skill unreadable/degenerate at ${installed} — \`offbook skill install --force\` replaces it`,
 			};
+		}
+		if (!diff.identical) {
+			const installedSkillMd = await Bun.file(join(installed, "SKILL.md"))
+				.text()
+				.catch(() => "");
+			if (installedSkillMd.includes("cd mock && offbook up"))
+				return {
+					status: "warn",
+					detail: M21(),
+					hint: `stale/edited skill — \`offbook skill install --force\` from ${top} refreshes it`,
+				};
 		}
 		return diff.identical
 			? {

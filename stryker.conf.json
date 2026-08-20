@@ -4,7 +4,14 @@
 	"plugins": ["@hughescr/stryker-bun-runner"],
 	"coverageAnalysis": "perTest",
 	"concurrency": 1,
-	"mutate": ["src/engine/**/*.ts", "!src/engine/**/*.test.ts"],
+	"mutate": [
+		"src/engine/**/*.ts",
+		"!src/engine/**/*.test.ts",
+		"src/cli/runfile.ts",
+		"src/cli/registry.ts",
+		"src/cli/resolve.ts",
+		"src/cli/guard.ts"
+	],
 	"reporters": ["clear-text", "progress", "html"],
 	"tempDirName": ".stryker-tmp",
 	"tsconfigFile": "tsconfig.stryker-unused.json",

@@ -9,7 +9,8 @@ off to [wiring your service](wiring-your-service.md).
 - `offbook demo --serve` booted a real MQTT broker (ws `:9001`, tcp `:1883`)
   and a control plane (`:9080`) from a bundled AsyncAPI spec plus bundled
   scenario recipes — detached, exactly like `offbook up` (`offbook status`,
-  `offbook logs`, `offbook down` all work on it).
+  `offbook logs`, `offbook down` all work on it — from any directory on this
+  machine).
 - The webapp connected over WebSockets like any client. Retained state
   painted the dashboard before anything was published; publishing
   `command/thermostat-1/set` made scenarios answer on `state/thermostat-1`.
@@ -42,3 +43,10 @@ offbook init
 `init` scaffolds `services.yaml`, `environments.yaml`, `scenarios/`, and
 `handlers/`. Next: [wiring your service](wiring-your-service.md). Whenever
 something misbehaves along the way: `offbook doctor`.
+
+Management verbs find the running offbook anywhere on this machine; if more
+than one is running, offbook lists them and asks you to pick with
+`--run-dir`. `--run-dir` and `--ctrl-port` always pin exactly. (Instances
+started before this offbook build stay invisible to machine-wide discovery
+until restarted, or managed once from their own directory; `offbook doctor`
+notes them.)
