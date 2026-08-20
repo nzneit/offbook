@@ -32,9 +32,17 @@ test("CLI works from a non-repo cwd (DEMO_SPEC must be module-relative, not cwd-
 	const bin = `${import.meta.dir}/../../bin/offbook`;
 	// a SCRATCH non-repo cwd, not literal /tmp: a stray /tmp/.offbook runfile
 	// (shared machine state) would otherwise feed the D-032 resolver a
-	// reclaim note on stderr and flake the empty-stderr assertion
+	// reclaim note on stderr and flake the empty-stderr assertion.
+	// The state dir is scratch for the same reason one level up: the suite-wide
+	// dir collects every spawning test's pointer, and any of them left dangling
+	// (a server SIGKILLed rather than stopped) prints a reap note here — an
+	// order-dependent flake, observed.
 	const proc = Bun.spawn([bin, "topics"], {
 		cwd: mkdtempSync(join(tmpdir(), "offbook-nonrepo-")),
+		env: {
+			...process.env,
+			OFFBOOK_STATE_DIR: mkdtempSync(join(tmpdir(), "offbook-nonrepo-state-")),
+		},
 		stdout: "pipe",
 		stderr: "pipe",
 	});

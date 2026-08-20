@@ -25,7 +25,13 @@ permissions:
 jobs:
   mutation:
     runs-on: ubuntu-latest
-    timeout-minutes: 15 # backstop against a mispredicted run
+    # Backstop against a mispredicted run. Raised 15 -> 30 with D-033: before
+    # the test-port bands, mutant runs whose tests collided on a fixed port
+    # died instantly with EADDRINUSE and were scored KILLED, so the campaign
+    # was fast for the wrong reason. Honest runs execute their covering tests
+    # to completion — 397 mutants took 5m50s locally at conc-4 and over 15min
+    # on a 4-vCPU runner. This is the true cost, not a regression.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
@@ -44,7 +50,12 @@ jobs:
           MUTATION_GATE_BASE: origin/${{ github.event.pull_request.base.ref }} # the branch, never the payload SHA
           MUTATION_GATE_FORCE: ${{ contains(github.event.pull_request.labels.*.name, 'mutate-force') && '1' || '' }}
           MUTATION_GATE_SKIP: ${{ contains(github.event.pull_request.labels.*.name, 'mutate-skip') && '1' || '' }}
-          MUTATION_GATE_EXTRA_ARGS: "--concurrency 4" # Task 10 measurement: conc-1 exceeded the 15-min job timeout at 409 lines; conc-4 completed in 7.7 min (27.5 mutants/min) with a clean, non-corrupted report
+          # Task 10 measurement: conc-1 exceeded the job timeout at 409 lines;
+          # conc-4 completed in 7.7 min with a clean, non-corrupted report. That
+          # 7.7 min was partly EADDRINUSE crash-kills returning early (D-033);
+          # a runner has 4 vCPUs, so conc-4 remains the right pairing, and the
+          # timeout above now covers an honest run.
+          MUTATION_GATE_EXTRA_ARGS: "--concurrency 4"
         run: node scripts/mutation-gate.mjs
       # Canary for the per-worker test-port bands (test/ports.ts). The gate
       # runs Stryker at --concurrency 4, and concurrent workers only stay off

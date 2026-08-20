@@ -325,29 +325,29 @@ test("probeServer: a silent first answer is retried exactly once, and a good fir
 
 // [utest->R-044]
 test("probeServer: the retry gets a DOUBLED budget, not the first one over again", async () => {
-	// the second attempt waits 2t: an answer that lands between t and 2t must
-	// be caught. Halving or reusing t would abort it, so the delay below sits
-	// deliberately outside the first budget and inside the doubled one.
-	const t = 400;
-	let calls = 0;
-	const server = Bun.serve({
+	// Measured as a RATIO of the two attempts' own durations, never as absolute
+	// milliseconds: a mutation worker shares four cores with three siblings, so
+	// wall-clock thresholds flake there, while both attempts stretch together.
+	// The server never answers, so each attempt runs its full budget: attempt 1
+	// spans t, attempt 2 spans 2t. Halving or reusing t drops the ratio below 1.
+	const t = 60;
+	const entered: number[] = [];
+	const wedged = Bun.serve({
 		port: port(19978),
-		fetch: async () => {
-			calls += 1;
-			// 1.4t: past the first budget, comfortably inside the doubled one
-			await Bun.sleep(calls === 1 ? t * 3 : Math.round(t * 1.4));
-			return Response.json({
-				token: "b".repeat(32),
-				runDir: "/x/.offbook",
-				pid: 7,
-			});
+		fetch: () => {
+			entered.push(Date.now());
+			return new Promise<Response>(() => {}); // never answers
 		},
 	});
 	try {
-		expect((await probeServer(port(19978), t)).kind).toBe("server");
-		expect(calls).toBe(2);
+		expect((await probeServer(port(19978), t)).kind).toBe("silent");
+		const returned = Date.now();
+		expect(entered).toHaveLength(2); // one retry, not zero and not two
+		const first = (entered[1] as number) - (entered[0] as number);
+		const second = returned - (entered[1] as number);
+		expect(second).toBeGreaterThan(first * 1.5);
 	} finally {
-		server.stop(true);
+		wedged.stop(true);
 	}
 });
 
