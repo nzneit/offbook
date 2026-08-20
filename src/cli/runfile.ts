@@ -54,6 +54,7 @@ export async function readRunfile(
 	runDir: string,
 ): Promise<Runfile | undefined> {
 	const path = runfilePath(runDir);
+	// Stryker disable next-line ConditionalExpression: without the guard the read throws ENOENT inside the same try and the catch returns undefined too; identical result, one syscall more
 	if (!existsSync(path)) return undefined;
 	try {
 		const raw = JSON.parse(await Bun.file(path).text()) as Runfile;
@@ -61,7 +62,7 @@ export async function readRunfile(
 			typeof raw.controlPlanePort === "number"
 			? raw
 			: undefined;
-	} catch {
+	} /* Stryker disable next-line BlockStatement: an empty catch falls off the end of the function, which also returns undefined */ catch {
 		return undefined; // corrupt runfile = stale (the caller reclaims it)
 	}
 }

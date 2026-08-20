@@ -75,6 +75,7 @@ async function bootProjectDir(runDir: string): Promise<string> {
 // contains /x/repo-wip
 export function containsOrEqual(ancestor: string, descendant: string): boolean {
 	const rel = relative(ancestor, descendant);
+	// Stryker disable next-line ConditionalExpression,StringLiteral: when rel is the empty string the right clause is already true ("".startsWith("..") and isAbsolute("") are both false), so this readability guard never changes the result
 	return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
@@ -116,6 +117,7 @@ async function examineRunDir(
 		// the runfile must still name the pid judged dead)
 		const acted = await guarded({
 			read: () => readRunfile(runDir),
+			// Stryker disable next-line ConditionalExpression,LogicalOperator: guard site #2 can only differ from true if the runfile changes between the initial read and the guard's re-read, a window holding no test-injectable seam; every way of forcing it is a timing race, and the guard rule itself is pinned in guard.test.ts
 			expect: (cur) => cur !== undefined && cur.pid === run.pid,
 			act: () => clearRunfile(runDir, { stateDir }),
 		});
@@ -214,6 +216,7 @@ export async function resolveInstance(opts: {
 		// reclaimDead: false — the explicit path REPORTS a dead runfile
 		// (stale wording, byte-identical to pre-D-032) instead of deleting it
 		const out = await examineRunDir(runDir, "cwd", stateDir, false);
+		// Stryker disable next-line ConditionalExpression: the explicit --run-dir path calls examineRunDir with reclaimDead false, which returns before the reclaim branch, so out.note is unreachable here
 		if (out.note !== undefined) notes.push(out.note);
 		if (out.skipped !== undefined) skipped.push(out.skipped);
 		return {
@@ -320,11 +323,16 @@ export async function resolveInstance(opts: {
 						read: () =>
 							Bun.file(path)
 								.text()
-								.catch(() => ""),
+								.catch(
+									// Stryker disable next-line ArrowFunction,StringLiteral: raw comes from scanPointers, which only yields entries whose text parsed as a valid pointer, so the cur === raw check below already rejects the empty string and any other fallback value
+									() => "",
+								),
 						expect: (cur) =>
+							// Stryker disable next-line ConditionalExpression,StringLiteral: raw is never the empty string (scanPointers only yields parsed pointers), so the cur === raw clause on the next line already subsumes this one
 							cur !== "" &&
 							cur === raw &&
 							!existsSync(runfilePath(pointer.runDir)),
+						// Stryker disable next-line ObjectLiteral,BooleanLiteral: force only suppresses ENOENT, on a path the guard just re-read byte for byte; a race-window defence the suite cannot force deterministically
 						act: () => rmSync(path, { force: true }),
 					});
 					if (reaped) notes.push(M14missing(dirname(pointer.runDir)));
@@ -345,6 +353,7 @@ export async function resolveInstance(opts: {
 
 	if (candidates.length === 1)
 		return { resolved: candidates[0], candidates, skipped, notes, foreignSeen };
+	// Stryker disable next-line ConditionalExpression: with zero candidates all three tiebreak stages are empty, so falling through returns the identical { candidates, skipped, notes, foreignSeen }
 	if (candidates.length === 0)
 		return { candidates, skipped, notes, foreignSeen };
 

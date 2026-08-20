@@ -105,8 +105,10 @@ export async function scanPointers(
 				typeof pointer.runDir !== "string" ||
 				typeof pointer.host !== "string"
 			)
+				// Stryker disable next-line StringLiteral: the throw is caught two lines below and its message is never read; only the throw's control flow is observable, and the wrong-shape test pins that
 				throw new Error("bad pointer shape");
 		} catch {
+			// Stryker disable next-line ObjectLiteral,BooleanLiteral: force only suppresses ENOENT, on a path readdirSync just listed; a race-window defence the suite cannot force deterministically
 			rmSync(path, { force: true });
 			continue;
 		}
@@ -125,6 +127,7 @@ export async function scanPointers(
 		const canonicalName = `${hashOf(e.pointer.runDir)}.json`;
 		const winner = e.path.endsWith(canonicalName) ? e : keyed;
 		const loser = winner === e ? keyed : e;
+		// Stryker disable next-line ObjectLiteral,BooleanLiteral: force only suppresses ENOENT, on a path the dedupe just observed; a race-window defence the suite cannot force deterministically
 		rmSync(loser.path, { force: true });
 		byRunDir.set(e.pointer.runDir, winner);
 	}
