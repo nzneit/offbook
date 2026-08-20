@@ -32,19 +32,31 @@ import { compose } from "#src/compose/index.ts";
 import { loadConfig } from "#src/config/index.ts";
 import type { Channel, SpecRegistry, TopicInfo } from "#src/model/index.ts";
 import { buildRegistry, mergeRegistries } from "#src/registry/index.ts";
+import { port, portStr } from "./ports.ts";
 import {
 	gitSpecProject,
 	makeSpecRepo,
 	servicesYamlFor,
 } from "./project-fixture.ts";
 
-// 19xxx/129xx: distinct from control-plane (18xxx), ci-settlement (16xxx), m0
-// (this file's other literal ports: 19010-19040/12910-12940, 19045/12945/19845
-// — see each test; kept out of named consts since they're single-use)
-// 19450-19479 + tcp 12496-12499: instance-discovery verb policy
-const WS = 19001;
-const TCP = 12901;
-const CTRL = 19801;
+// PORT BASES, not necessarily the ports that get bound: every literal below
+// is passed through port()/portStr() (./ports.ts), which maps it into this
+// process's band. Band 0 is the identity map, so a normal single-process run
+// really does bind these numbers; a concurrent run gets a relocated window.
+// The bases are allocated to stay clear of control-plane (18xxx),
+// ci-settlement (16xxx) and m0 (177xx-179xx):
+//   19001/12901/19801 — the suite-A composed server (the consts below)
+//   19010/12910/19810, 19022/12922/19822, 19030/12930/19830,
+//     19040/12940/19840 — the real detached servers suite B spawns
+//   19021/12921 and 19031/12931 — preflight-refusal fixtures; nothing binds
+//     them, the refused ctrl port is suite A's own
+//   19045/12945/19845 and 19464/12496/19463 — the same, but with the ctrl
+//     port deliberately held (19845 a foreign listener, 19463 a fake offbook)
+//   19140/19141, 12996/12997, 19896/19897 — the R-036 error-audit pins
+//   19450-19471 — the D-032 verb-policy tests, which live in THIS file
+const WS = port(19001);
+const TCP = port(12901);
+const CTRL = port(19801);
 const CTRL_FLAG = ["--ctrl-port", String(CTRL)];
 const STATE = process.env.OFFBOOK_STATE_DIR ?? "";
 
@@ -959,11 +971,11 @@ test("up spawns the detached server from a local-git project, status/specs/logs 
 		"--run-dir",
 		runDir,
 		"--ws-port",
-		"19010",
+		portStr(19010),
 		"--tcp-port",
-		"12910",
+		portStr(12910),
 		"--ctrl-port",
-		"19810",
+		portStr(19810),
 	];
 	const prevCwd = process.cwd();
 	process.chdir(projectDir);
@@ -973,7 +985,7 @@ test("up spawns the detached server from a local-git project, status/specs/logs 
 		if (upCode !== 0) throw new Error(`up failed:\n${up.err.join("\n")}`);
 		const upText = up.out.join("\n");
 		expect(upText).toContain(
-			"point your MQTT client at ws://localhost:19010 (MQTT 3.1.1)",
+			`point your MQTT client at ws://localhost:${port(19010)} (MQTT 3.1.1)`,
 		);
 		expect(upText).toContain("mode passive · seed 7 (--ci profile)"); // --ci co-sets
 		expect(existsSync(join(projectDir, "specs.lock"))).toBe(true);
@@ -1018,7 +1030,7 @@ test("up spawns the detached server from a local-git project, status/specs/logs 
 		const updCtrl = io();
 		expect(
 			await run(
-				["specs", "update", "--run-dir", runDir, "--ctrl-port", "19810"],
+				["specs", "update", "--run-dir", runDir, "--ctrl-port", portStr(19810)],
 				updCtrl.io,
 			),
 		).toBe(0);
@@ -1098,9 +1110,9 @@ test("up preflights the ports in the foreground (named fix, no detached EADDRINU
 				"--run-dir",
 				dir,
 				"--ws-port",
-				"19021",
+				portStr(19021),
 				"--tcp-port",
-				"12921",
+				portStr(12921),
 				"--ctrl-port",
 				String(CTRL),
 			],
@@ -1146,9 +1158,9 @@ test("up against ports owned by another offbook attributes it instead of 'anothe
 // must fall back to the generic busy message, not claim another offbook.
 // [itest->R-043]
 test("up against a ctrl port held by a foreign listener falls back to the generic busy message", async () => {
-	const FOREIGN_WS = 19045;
-	const FOREIGN_TCP = 12945;
-	const FOREIGN_CTRL = 19845; // not offbook: no `mode` field in the response
+	const FOREIGN_WS = port(19045);
+	const FOREIGN_TCP = port(12945);
+	const FOREIGN_CTRL = port(19845); // not offbook: no `mode` field in the response
 	const foreign = Bun.serve({
 		port: FOREIGN_CTRL,
 		fetch: () => Response.json({ ok: true }),
@@ -1186,7 +1198,7 @@ test("up preflight: an attributable control-port owner is named with the from-an
 	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-owner-"));
 	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
 	await inDiscoveryWorld(cwd, async () => {
-		const inst = await fakeInstance({ port: 19463, projectDir: proj });
+		const inst = await fakeInstance({ port: port(19463), projectDir: proj });
 		try {
 			const x = io();
 			expect(
@@ -1194,11 +1206,11 @@ test("up preflight: an attributable control-port owner is named with the from-an
 					[
 						"up",
 						"--ws-port",
-						"19464",
+						portStr(19464),
 						"--tcp-port",
-						"12496",
+						portStr(12496),
 						"--ctrl-port",
-						"19463",
+						portStr(19463),
 					],
 					x.io,
 				),
@@ -1225,11 +1237,11 @@ test("interactive default boots lenient-loud past a bad scenario (autonomous, st
 		"--run-dir",
 		runDir,
 		"--ws-port",
-		"19022",
+		portStr(19022),
 		"--tcp-port",
-		"12922",
+		portStr(12922),
 		"--ctrl-port",
-		"19822",
+		portStr(19822),
 	];
 	const prevCwd = process.cwd();
 	process.chdir(projectDir);
@@ -1364,9 +1376,9 @@ test("up --ci ignores --watch (EH1 co-set)", async () => {
 				"--run-dir",
 				dir,
 				"--ws-port",
-				"19031",
+				portStr(19031),
 				"--tcp-port",
-				"12931",
+				portStr(12931),
 				"--ctrl-port",
 				String(CTRL), // occupied → preflight fails after the note (cheap)
 			],
@@ -1386,11 +1398,11 @@ test("up --watch restarts the detached server on a handlers/**/*.ts change; the 
 		"--run-dir",
 		runDir,
 		"--ws-port",
-		"19030",
+		portStr(19030),
 		"--tcp-port",
-		"12930",
+		portStr(12930),
 		"--ctrl-port",
-		"19830",
+		portStr(19830),
 	];
 	const prevCwd = process.cwd();
 	process.chdir(projectDir);
@@ -1453,11 +1465,11 @@ test("EI1/EI2: init && <set services> && up reaches a running server; the fresh 
 		"--run-dir",
 		runDir,
 		"--ws-port",
-		"19040",
+		portStr(19040),
 		"--tcp-port",
-		"12940",
+		portStr(12940),
 		"--ctrl-port",
-		"19840",
+		portStr(19840),
 	];
 	const prevCwd = process.cwd();
 	try {
@@ -1502,7 +1514,7 @@ test("EI1/EI2: init && <set services> && up reaches a running server; the fresh 
 }, 90_000);
 
 // --- R-036 first-run error audit: every error names a next step ---
-// ports for these pins: 19140/19141, 12996/12997, 19896/19897
+// port bases for these pins: 19140/19141, 12996/12997, 19896/19897
 
 test("unknown flag points at usage", async () => {
 	const err: string[] = [];
@@ -1521,12 +1533,15 @@ test("bare publish/scenario point at their listing verbs", async () => {
 
 // bind-probe: a leaked detached server holds its ports, and a listening
 // socket releases on process exit (no TIME_WAIT), so binding is the
-// truthful "is it free" check
-function portFree(port: number): boolean {
+// truthful "is it free" check.
+// The parameter is deliberately NOT named `port` — that would shadow the
+// imported band mapper for anything later added to this body (the same care
+// src/cli/resolve.test.ts's identityServer takes, and for the same reason).
+function portFree(candidate: number): boolean {
 	try {
 		const probe = Bun.listen({
 			hostname: "127.0.0.1",
-			port,
+			port: candidate,
 			socket: { data() {} },
 		});
 		probe.stop(true);
@@ -1551,7 +1566,7 @@ test("up: busy port and failed boot both point at doctor", async () => {
 		// busy ws port → preflight fails before any spawn
 		const listener = Bun.listen({
 			hostname: "127.0.0.1",
-			port: 19140,
+			port: port(19140),
 			socket: { data() {} },
 		});
 		try {
@@ -1563,11 +1578,11 @@ test("up: busy port and failed boot both point at doctor", async () => {
 						"--run-dir",
 						join(tmp, "a"),
 						"--ws-port",
-						"19140",
+						portStr(19140),
 						"--tcp-port",
-						"12996",
+						portStr(12996),
 						"--ctrl-port",
-						"19896",
+						portStr(19896),
 					],
 					{ out: () => {}, err: (l) => busyErr.push(l) },
 				),
@@ -1586,11 +1601,11 @@ test("up: busy port and failed boot both point at doctor", async () => {
 					"--run-dir",
 					join(tmp, "b"),
 					"--ws-port",
-					"19141",
+					portStr(19141),
 					"--tcp-port",
-					"12997",
+					portStr(12997),
 					"--ctrl-port",
-					"19897",
+					portStr(19897),
 				],
 				{ out: () => {}, err: (l) => bootErr.push(l) },
 			),
@@ -1607,8 +1622,8 @@ test("up: busy port and failed boot both point at doctor", async () => {
 		// succeeded, or bound-but-never-ready — `up` clears the runfile after
 		// the deadline, so the finally's down can't reach that one) must fail
 		// HERE, not squat silently on the pinned fixture ports
-		for (const port of [19141, 12997, 19897])
-			expect({ port, free: portFree(port) }).toEqual({ port, free: true });
+		for (const p of [port(19141), port(12997), port(19897)])
+			expect({ port: p, free: portFree(p) }).toEqual({ port: p, free: true });
 	} finally {
 		process.chdir(prevCwd);
 		// belt-and-braces: if a regression ever lets the boot succeed, tear
@@ -1701,14 +1716,16 @@ test("read verb, registry-resolved: the M16 header names the instance; cwd-resol
 	const elsewhere = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
 	await inDiscoveryWorld(elsewhere, async () => {
 		const inst = await fakeInstance({
-			port: 19450,
+			port: port(19450),
 			projectDir: proj,
 			routes: { "/v1/state": { state: [] } },
 		});
 		try {
 			const away = io();
 			expect(await run(["state"], away.io)).toBe(0);
-			expect(away.out[0]).toBe(`offbook @ ${proj} (ws 1 · http 19450)`);
+			expect(away.out[0]).toBe(
+				`offbook @ ${proj} (ws 1 · http ${port(19450)})`,
+			);
 			expect(away.out[1]).toBe("(no retained state)");
 			// same verb from the project dir itself: no header, byte-identical
 			process.chdir(proj);
@@ -1733,7 +1750,7 @@ test("object-shaped --json carries the server block on registry resolution only"
 	};
 	await inDiscoveryWorld(elsewhere, async () => {
 		const inst = await fakeInstance({
-			port: 19465,
+			port: port(19465),
 			projectDir: proj,
 			routes: { "/v1/diagnostics": diagnostics },
 		});
@@ -1764,8 +1781,8 @@ test("ambiguity: two live instances refuse with the M8 table (exit 2); --json em
 	const projB = mkdtempSync(join(tmpdir(), "offbook-vp-b-"));
 	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
 	await inDiscoveryWorld(cwd, async () => {
-		const a = await fakeInstance({ port: 19451, projectDir: projA });
-		const b = await fakeInstance({ port: 19452, projectDir: projB });
+		const a = await fakeInstance({ port: port(19451), projectDir: projA });
+		const b = await fakeInstance({ port: port(19452), projectDir: projB });
 		try {
 			const human = io();
 			expect(await run(["scenarios"], human.io)).toBe(2);
@@ -1808,7 +1825,7 @@ test("M12 replaces M11 and M13 when the only skipped instance is cwd's own wedge
 				pid: process.pid,
 				brokerWsPort: 1,
 				brokerTcpPort: 2,
-				controlPlanePort: 19453, // nothing listens here
+				controlPlanePort: port(19453), // nothing listens here
 				startedAt: "t",
 				token: "ab".repeat(16),
 				host: hostname(),
@@ -1848,7 +1865,7 @@ test("mutating verb, registry-resolved: M15 stderr note, never an M16 header", a
 	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
 	await inDiscoveryWorld(cwd, async () => {
 		const inst = await fakeInstance({
-			port: 19454,
+			port: port(19454),
 			projectDir: proj,
 			routes: { "/v1/reset": { reset: true, seed: 7, sinceSeq: 3 } },
 		});
@@ -1875,7 +1892,7 @@ test("specs update reads the RESOLVED instance's boot record for the staleness w
 	await Bun.write(join(proj, "services.yaml"), "services: {}\n"); // current content
 	await inDiscoveryWorld(cwd, async () => {
 		const inst = await fakeInstance({
-			port: 19455,
+			port: port(19455),
 			projectDir: proj,
 			routes: { "/v1/specs/refresh": { specs: [] } },
 		});
@@ -1915,7 +1932,7 @@ test("status, registry-resolved: first line names the instance; --json carries t
 	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
 	await inDiscoveryWorld(cwd, async () => {
 		const inst = await fakeInstance({
-			port: 19456,
+			port: port(19456),
 			projectDir: proj,
 			routes: {
 				"/v1/mode": { mode: "autonomous", seed: 1, lastResetSeq: 0 },
@@ -1936,7 +1953,9 @@ test("status, registry-resolved: first line names the instance; --json carries t
 		try {
 			const human = io();
 			expect(await run(["status"], human.io)).toBe(0);
-			expect(human.out[0]).toBe(`offbook @ ${proj} (ws 1 · http 19456)`);
+			expect(human.out[0]).toBe(
+				`offbook @ ${proj} (ws 1 · http ${port(19456)})`,
+			);
 
 			const json = io();
 			expect(await run(["status", "--json"], json.io)).toBe(0);
@@ -1962,7 +1981,7 @@ test("status, registry-resolved: first line names the instance; --json carries t
 // [itest->R-045]
 test("status --ctrl-port against a pre-upgrade (legacy) server refuses with the older-build message, exit 2", async () => {
 	const legacy = Bun.serve({
-		port: 19457,
+		port: port(19457),
 		fetch: (req) =>
 			new URL(req.url).pathname === "/v1/mode"
 				? Response.json({ mode: "passive" })
@@ -1970,7 +1989,7 @@ test("status --ctrl-port against a pre-upgrade (legacy) server refuses with the 
 	});
 	try {
 		const x = io();
-		expect(await run(["status", "--ctrl-port", "19457"], x.io)).toBe(2);
+		expect(await run(["status", "--ctrl-port", portStr(19457)], x.io)).toBe(2);
 		expect(x.err.join("\n")).toContain("started by an older offbook build");
 	} finally {
 		legacy.stop(true);
@@ -1995,7 +2014,7 @@ test("down, unrelated sole instance: unconditional exit-0 no-op printing the liv
 	const proj = mkdtempSync(join(tmpdir(), "offbook-vp-downsafe-"));
 	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
 	await inDiscoveryWorld(cwd, async () => {
-		const inst = await fakeInstance({ port: 19458, projectDir: proj });
+		const inst = await fakeInstance({ port: port(19458), projectDir: proj });
 		try {
 			const x = io();
 			expect(await run(["down"], x.io)).toBe(0);
@@ -2005,7 +2024,7 @@ test("down, unrelated sole instance: unconditional exit-0 no-op printing the liv
 			);
 			expect(out).toContain(`offbook down --run-dir ${join(proj, ".offbook")}`);
 			// the unrelated instance was NOT signaled: its identity still answers
-			const still = await fetch("http://localhost:19458/v1/server");
+			const still = await fetch(`http://localhost:${port(19458)}/v1/server`);
 			expect(still.status).toBe(200);
 			// and its runfile survives
 			expect(await readRunfile(join(proj, ".offbook"))).toBeDefined();
@@ -2034,7 +2053,7 @@ test("signalInstance, guarded site #3: a repointed runfile aborts with the resta
 			pid: victim.pid,
 			brokerWsPort: 1,
 			brokerTcpPort: 2,
-			controlPlanePort: 19459,
+			controlPlanePort: port(19459),
 			startedAt: "t",
 		},
 		{ stateDir: state },
@@ -2049,7 +2068,7 @@ test("signalInstance, guarded site #3: a repointed runfile aborts with the resta
 					pid: dead.pid ?? 4_193_995,
 					brokerWsPort: 1,
 					brokerTcpPort: 2,
-					controlPlanePort: 19459,
+					controlPlanePort: port(19459),
 					startedAt: "t",
 				},
 				demo: false,
@@ -2090,7 +2109,7 @@ test("down, related descendant instance: signals it and reports where it was sta
 				pid: victim.pid,
 				brokerWsPort: 1,
 				brokerTcpPort: 2,
-				controlPlanePort: 19460,
+				controlPlanePort: port(19460),
 				startedAt: "t",
 				token,
 				host: hostname(),
@@ -2105,10 +2124,14 @@ test("down, related descendant instance: signals it and reports where it was sta
 			runDir,
 			startedAt: "t",
 			demo: false,
-			ports: { brokerWsPort: 1, brokerTcpPort: 2, controlPlanePort: 19460 },
+			ports: {
+				brokerWsPort: 1,
+				brokerTcpPort: 2,
+				controlPlanePort: port(19460),
+			},
 		};
 		const server = Bun.serve({
-			port: 19460,
+			port: port(19460),
 			fetch: (req) =>
 				new URL(req.url).pathname === "/v1/server"
 					? Response.json(identity)
@@ -2143,7 +2166,7 @@ test("down, row 4: a wrong-token cwd runfile is never signaled — naming-both n
 				pid: process.pid, // signaling this would hit the TEST RUNNER
 				brokerWsPort: 1,
 				brokerTcpPort: 2,
-				controlPlanePort: 19466,
+				controlPlanePort: port(19466),
 				startedAt: "t",
 				token: "b1".repeat(16),
 				host: hostname(),
@@ -2158,10 +2181,14 @@ test("down, row 4: a wrong-token cwd runfile is never signaled — naming-both n
 			runDir: "/somewhere/else/.offbook",
 			startedAt: "t",
 			demo: false,
-			ports: { brokerWsPort: 1, brokerTcpPort: 2, controlPlanePort: 19466 },
+			ports: {
+				brokerWsPort: 1,
+				brokerTcpPort: 2,
+				controlPlanePort: port(19466),
+			},
 		};
 		const server = Bun.serve({
-			port: 19466,
+			port: port(19466),
 			fetch: (req) =>
 				new URL(req.url).pathname === "/v1/server"
 					? Response.json(identity)
@@ -2172,7 +2199,7 @@ test("down, row 4: a wrong-token cwd runfile is never signaled — naming-both n
 			expect(await run(["down"], x.io)).toBe(0); // reached = nothing was signaled
 			expect(x.out).toContain("offbook: not running");
 			expect(x.err.join("\n")).toContain(
-				"no longer answers for control port 19466",
+				`no longer answers for control port ${port(19466)}`,
 			);
 			expect(await readRunfile(join(cwd, ".offbook"))).toBeDefined(); // kept
 		} finally {
@@ -2188,7 +2215,10 @@ test("down, one verified unrelated + one silent skipped: refuses with the pick-o
 	const projB = mkdtempSync(join(tmpdir(), "offbook-vp-m9b-"));
 	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
 	await inDiscoveryWorld(cwd, async () => {
-		const verified = await fakeInstance({ port: 19467, projectDir: projA });
+		const verified = await fakeInstance({
+			port: port(19467),
+			projectDir: projA,
+		});
 		// B: live pid, silent port — a skipped candidate down must not ignore
 		await writeRunfile(
 			join(projB, ".offbook"),
@@ -2196,7 +2226,7 @@ test("down, one verified unrelated + one silent skipped: refuses with the pick-o
 				pid: process.pid,
 				brokerWsPort: 1,
 				brokerTcpPort: 2,
-				controlPlanePort: 19468, // nothing listens
+				controlPlanePort: port(19468), // nothing listens
 				startedAt: "t",
 				token: "b3".repeat(16),
 				host: hostname(),
@@ -2214,9 +2244,9 @@ test("down, one verified unrelated + one silent skipped: refuses with the pick-o
 				`offbook down --run-dir ${join(projA, ".offbook")}`,
 			);
 			// the verified instance was NOT auto-killed
-			expect((await fetch("http://localhost:19467/v1/server")).status).toBe(
-				200,
-			);
+			expect(
+				(await fetch(`http://localhost:${port(19467)}/v1/server`)).status,
+			).toBe(200);
 		} finally {
 			verified.stop();
 		}
@@ -2236,7 +2266,7 @@ test("signalInstance, guarded site #2: a successor registered during shutdown su
 		pid: 555555,
 		brokerWsPort: 1,
 		brokerTcpPort: 2,
-		controlPlanePort: 19469,
+		controlPlanePort: port(19469),
 		startedAt: "successor",
 	});
 	// the victim's SIGTERM handler repoints the runfile (a --watch respawn
@@ -2249,7 +2279,7 @@ test("signalInstance, guarded site #2: a successor registered during shutdown su
 			pid: victim.pid,
 			brokerWsPort: 1,
 			brokerTcpPort: 2,
-			controlPlanePort: 19469,
+			controlPlanePort: port(19469),
 			startedAt: "t",
 		},
 		{ stateDir: state },
@@ -2265,7 +2295,7 @@ test("signalInstance, guarded site #2: a successor registered during shutdown su
 						pid: victim.pid,
 						brokerWsPort: 1,
 						brokerTcpPort: 2,
-						controlPlanePort: 19469,
+						controlPlanePort: port(19469),
 						startedAt: "t",
 					},
 					demo: false,
@@ -2301,7 +2331,7 @@ test("signalInstance escalates on a token-less runfile whose current-build serve
 		pid: victim.pid,
 		brokerWsPort: 1,
 		brokerTcpPort: 2,
-		controlPlanePort: 19470,
+		controlPlanePort: port(19470),
 		startedAt: "t",
 	}; // NO token field — pre-D-032/pre-R-044 runfile shape
 	await writeRunfile(runDir, runfile, { stateDir: state });
@@ -2313,10 +2343,10 @@ test("signalInstance escalates on a token-less runfile whose current-build serve
 		runDir,
 		startedAt: "t",
 		demo: false,
-		ports: { brokerWsPort: 1, brokerTcpPort: 2, controlPlanePort: 19470 },
+		ports: { brokerWsPort: 1, brokerTcpPort: 2, controlPlanePort: port(19470) },
 	};
 	const server = Bun.serve({
-		port: 19470,
+		port: port(19470),
 		fetch: (req) =>
 			new URL(req.url).pathname === "/v1/server"
 				? Response.json(identity)
@@ -2351,7 +2381,7 @@ test("logs: a local stopped log wins for output with the divergence banner; with
 	mkdirSync(join(cwd, ".offbook"), { recursive: true });
 	await Bun.write(join(cwd, ".offbook", "offbook.log"), "old local line\n");
 	await inDiscoveryWorld(cwd, async () => {
-		const inst = await fakeInstance({ port: 19461, projectDir: proj });
+		const inst = await fakeInstance({ port: port(19461), projectDir: proj });
 		await Bun.write(join(inst.runDir, "offbook.log"), "live remote line\n");
 		try {
 			// local log exists: printed, with the banner naming the live one
@@ -2369,7 +2399,9 @@ test("logs: a local stopped log wins for output with the divergence banner; with
 			rmSync(join(cwd, ".offbook", "offbook.log"));
 			const remote = io();
 			expect(await run(["logs"], remote.io)).toBe(0);
-			expect(remote.out[0]).toBe(`offbook @ ${proj} (ws 1 · http 19461)`);
+			expect(remote.out[0]).toBe(
+				`offbook @ ${proj} (ws 1 · http ${port(19461)})`,
+			);
 			expect(remote.out).toContain("live remote line");
 		} finally {
 			inst.stop();
@@ -2386,7 +2418,7 @@ test("logs -f: the divergence banner prints before the follow loop starts", asyn
 	mkdirSync(join(cwd, ".offbook"), { recursive: true });
 	await Bun.write(join(cwd, ".offbook", "offbook.log"), "old local line\n");
 	await inDiscoveryWorld(cwd, async () => {
-		const inst = await fakeInstance({ port: 19471, projectDir: proj });
+		const inst = await fakeInstance({ port: port(19471), projectDir: proj });
 		// -f never returns in-process: drive the real bin (same pattern as
 		// the existing follow tests), inheriting the pinned state-dir env
 		const proc = Bun.spawn([BIN, "logs", "-f"], {
@@ -2418,7 +2450,7 @@ test("topics --json: a registry-resolved DEMO refuses with the demo-only envelop
 	const cwd = mkdtempSync(join(tmpdir(), "offbook-vp-cwd-"));
 	await inDiscoveryWorld(cwd, async () => {
 		const inst = await fakeInstance({
-			port: 19462,
+			port: port(19462),
 			projectDir: demoDir,
 			demo: true,
 			routes: { "/v1/topics": { topics: [] } },
@@ -2437,7 +2469,7 @@ test("topics --json: a registry-resolved DEMO refuses with the demo-only envelop
 			const human = io();
 			expect(await run(["topics", "--compact"], human.io)).toBe(0);
 			expect(human.out[0]).toBe(
-				`offbook @ ${demoDir} (ws 1 · http 19462) — the bundled demo`,
+				`offbook @ ${demoDir} (ws 1 · http ${port(19462)}) — the bundled demo`,
 			);
 		} finally {
 			inst.stop();

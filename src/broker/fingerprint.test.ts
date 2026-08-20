@@ -5,12 +5,19 @@ import { MqttClient, connectAsync as mqttConnectAsync } from "mqtt";
 import tcpStreamBuilder from "mqtt/lib/connect/tcp";
 import { loadConfig } from "#src/config/index.ts";
 import type { InboundEvent } from "#src/model/index.ts";
+import { port } from "#test/ports.ts";
 import type { BrokerModule, FingerprintEvent } from "./index.ts";
 import { createBroker, fingerprintLine } from "./index.ts";
 
-// ports unique to this file: ws 19100 / tcp 12990
-const WS = 19100;
-const TCP = 12990;
+// Port BASES for this file (repo convention: unique per file): ws 19100 /
+// tcp 12990, plus ctrl 19898 below, which is config-only — createBroker binds
+// ws and tcp, never the control plane. Those are allocation bases, not
+// necessarily the ports bound at runtime: each goes through port() from
+// test/ports.ts, which maps it into this process's claimed band. Band 0 (a
+// normal local run) is the identity map, so the numbers here are what you will
+// see; a concurrent run claims a higher band and the same bases land elsewhere.
+const WS = port(19100);
+const TCP = port(12990);
 
 // mqtt.js's `connect()` memoizes its protocol->streamBuilder table in a
 // module-level variable, computed once, on the FIRST connect()/connectAsync()
@@ -55,7 +62,7 @@ beforeAll(async () => {
 		loadConfig({
 			brokerWsPort: WS,
 			brokerTcpPort: TCP,
-			controlPlanePort: 19898,
+			controlPlanePort: port(19898),
 		}),
 	);
 	broker.onFingerprint((e) => events.push(e));

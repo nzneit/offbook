@@ -16,10 +16,17 @@ import { join } from "node:path";
 import { bootProject } from "#src/cli/boot.ts";
 import type { Composed } from "#src/compose/index.ts";
 import { loadConfig } from "#src/config/index.ts";
+import { port } from "./ports.ts";
 import { gitSpecProject } from "./project-fixture.ts";
 
-// ports unique to this file (suite-wide collision registry): test 1 — ws
-// 19150 / tcp 12998 / ctrl 19151; test 2 — ws 19152 / tcp 12999 / ctrl 19153
+// Port BASES for this file (repo convention: unique per file): test 1 — ws
+// 19150 / tcp 12998 / ctrl 19151, all three really bound; test 2 — ws 19152 /
+// tcp 12999 / ctrl 19153, never bound, since bootProject rejects the missing
+// services.yaml before compose(). Those are allocation bases, not necessarily
+// the ports bound at runtime: each goes through port() from test/ports.ts,
+// which maps it into this process's claimed band. Band 0 (a normal local run)
+// is the identity map, so the numbers here are what you will see; a concurrent
+// run claims a higher band and the same bases land elsewhere.
 const servers: Composed[] = [];
 afterEach(async () => {
 	while (servers.length) await servers.pop()?.stop();
@@ -33,9 +40,9 @@ test("bootProject: services.yaml + environments.yaml compose a working registry,
 			"environments:\n  default:\n    thermostat: '1.4.0'\n",
 		);
 		const config = loadConfig({
-			brokerWsPort: 19150,
-			brokerTcpPort: 12998,
-			controlPlanePort: 19151,
+			brokerWsPort: port(19150),
+			brokerTcpPort: port(12998),
+			controlPlanePort: port(19151),
 		});
 		const logs: string[] = [];
 		const composed = await bootProject({
@@ -143,9 +150,9 @@ test("bootProject: no services.yaml is a fatal boot error naming `offbook init`"
 	const projectDir = await mkdtemp(join(tmpdir(), "offbook-noservices-"));
 	try {
 		const config = loadConfig({
-			brokerWsPort: 19152,
-			brokerTcpPort: 12999,
-			controlPlanePort: 19153,
+			brokerWsPort: port(19152),
+			brokerTcpPort: port(12999),
+			controlPlanePort: port(19153),
 		});
 		await expect(bootProject({ projectDir, config })).rejects.toThrow(
 			/offbook init/,

@@ -13,6 +13,7 @@ import { type Composed, compose } from "#src/compose/index.ts";
 import { loadConfig } from "#src/config/index.ts";
 import type { StateEntry, Violation } from "#src/model/index.ts";
 import { buildRegistry } from "#src/registry/index.ts";
+import { port } from "./ports.ts";
 
 const servers: Composed[] = [];
 afterEach(async () => {
@@ -36,12 +37,22 @@ const CHAIN = `
         delay: 100-200ms
 `;
 
-// 176xx ports: distinct from control-plane (188xx), m0 (177xx-179xx), broker
+// Port BASES for this file (repo convention: unique per file): ws 16000+n /
+// tcp 12600+n / ctrl 16800+n, n = 1..2, all really bound by compose().start().
+// (An earlier version of this comment claimed a 176xx block the code has never
+// used — the bases below are the record.) Those are allocation bases, not
+// necessarily the ports bound at runtime: every computed base goes through
+// port() from test/ports.ts, which maps it into this process's claimed band.
+// Band 0 (a normal local run) is the identity map, so the numbers here are
+// what you will see; a concurrent run claims a higher band and the same bases
+// land elsewhere. port() is applied per computed value (port(16000 + n)),
+// never to the base alone — in a mapped band, distinct values must stay
+// distinct. The 10_000s further down are timeouts, not ports.
 async function boot(n: number, overrides: Record<string, unknown> = {}) {
 	const config = loadConfig({
-		brokerWsPort: 16000 + n,
-		brokerTcpPort: 12600 + n,
-		controlPlanePort: 16800 + n,
+		brokerWsPort: port(16000 + n),
+		brokerTcpPort: port(12600 + n),
+		controlPlanePort: port(16800 + n),
 		...overrides,
 	});
 	const dir = mkdtempSync(join(tmpdir(), "offbook-ci-"));

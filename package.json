@@ -12,7 +12,8 @@
 	"imports": {
 		"#src/*": "./src/*",
 		"#scripts/*": "./scripts/*",
-		"#demo-app/*": "./demo-app/*"
+		"#demo-app/*": "./demo-app/*",
+		"#test/*": "./test/*"
 	},
 	"scripts": {
 		"test": "bun test",

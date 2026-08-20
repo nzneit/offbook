@@ -13,12 +13,21 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { connectAsync } from "mqtt";
 import { loadConfig } from "#src/config/index.ts";
 import { DEFAULT_CONFIG, type InboundEvent } from "#src/model/index.ts";
+import { port } from "#test/ports.ts";
 import type { BrokerModule, FingerprintEvent } from "./index.ts";
 import { createBroker } from "./index.ts";
 
-// ports unique to this file: ws 19200 / tcp 12950
-const WS = 19200;
-const TCP = 12950;
+// Port BASES for this file (repo convention: unique per file): ws 19200 /
+// tcp 12950, plus ctrl 19201 below, which is config-only — createBroker binds
+// ws and tcp, never the control plane. Those are allocation bases, not
+// necessarily the ports bound at runtime: each goes through port() from
+// test/ports.ts, which maps it into this process's claimed band. Band 0 (a
+// normal local run) is the identity map, so the numbers here are what you will
+// see; a concurrent run claims a higher band and the same bases land elsewhere.
+// The 9001 in the D-026 pin at the bottom is a product default, not a test
+// port — it stays a bare literal.
+const WS = port(19200);
+const TCP = port(12950);
 
 // A stand-in for the real, undisclosed ws path: any non-root path proves the
 // property that makes the redaction affordable — the listener upgrades every
@@ -56,7 +65,7 @@ beforeAll(async () => {
 		loadConfig({
 			brokerWsPort: WS,
 			brokerTcpPort: TCP,
-			controlPlanePort: 19201,
+			controlPlanePort: port(19201),
 		}),
 	);
 	broker.onFingerprint((e) => events.push(e));

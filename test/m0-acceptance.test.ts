@@ -4,6 +4,7 @@ import { compose } from "#src/compose/index.ts";
 import { loadConfig } from "#src/config/index.ts";
 import type { Violation } from "#src/model/index.ts";
 import { buildRegistry } from "#src/registry/index.ts";
+import { port } from "./ports.ts";
 
 // [itest->R-008]
 
@@ -12,14 +13,22 @@ afterEach(async () => {
 	while (cleanups.length) await cleanups.pop()?.();
 });
 
-// 177xx/178xx/179xx: a port range distinct from every other test file's
-// (broker/index.test.ts uses 19000s/11800s/19800s; control-plane/index.test.ts
-// uses 18000s/12800s/18800s), so this file can't collide with either.
+// Port BASES for this file (repo convention: unique per file): ws 17700+n /
+// tcp 17800+n / ctrl 17900+n, n = 1..4, all really bound by compose().start().
+// The bases stay distinct from every other file's blocks — src/broker/
+// index.test.ts allocates 19000s/11800s/19800s and src/control-plane/
+// index.test.ts 18000s/12800s/18800s — but distinctness is now a property of
+// the base allocation, not of the bound ports: every computed base goes
+// through port() from test/ports.ts, which maps it into this process's claimed
+// band (distinct bases stay distinct there too). Band 0 (a normal local run)
+// is the identity map, so the numbers here are what you will see; a concurrent
+// run claims a higher band and the same bases land elsewhere. port() is
+// applied per computed value (port(17700 + n)), never to the base alone.
 function ports(n: number) {
 	return loadConfig({
-		brokerWsPort: 17700 + n,
-		brokerTcpPort: 17800 + n,
-		controlPlanePort: 17900 + n,
+		brokerWsPort: port(17700 + n),
+		brokerTcpPort: port(17800 + n),
+		controlPlanePort: port(17900 + n),
 	});
 }
 

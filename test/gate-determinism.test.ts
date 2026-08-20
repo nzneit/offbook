@@ -12,9 +12,15 @@ import { join } from "node:path";
 import { run } from "#src/cli/index.ts";
 import { readRunfile } from "#src/cli/runfile.ts";
 import type { StateEntry, Violation } from "#src/model/index.ts";
+import { port, portStr } from "./ports.ts";
 import { gitSpecProject } from "./project-fixture.ts";
 
-const CTRL = 19850;
+// Port BASES for this file: ws 19051 / tcp 12951 / ctrl 19850. Base literals,
+// not necessarily the bound ports — test/ports.ts maps each into this process's
+// band (band 0 is the identity map, so a plain local run binds these very
+// numbers). The mapping is fixed for the process lifetime, which is what lets
+// the two sequential `up --ci` boots below reuse one flags array.
+const CTRL = port(19850);
 const BASE = `http://localhost:${CTRL}`;
 
 // seeded ranged delays + a param capture: the scheduler draws and the keyed
@@ -107,9 +113,9 @@ test("same seed ⇒ byte-identical F9 violation stream + final retained state ac
 		"--run-dir",
 		runDir,
 		"--ws-port",
-		"19051",
+		portStr(19051),
 		"--tcp-port",
-		"12951",
+		portStr(12951),
 		"--ctrl-port",
 		String(CTRL),
 	];

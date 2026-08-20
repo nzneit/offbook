@@ -2,6 +2,7 @@
 // code assertions in cli-dispatch build on these exact strings, and the
 // D-032 docs sweep greps them. Two automation anchors are contract.
 import { expect, test } from "bun:test";
+import { port } from "#test/ports.ts";
 import {
 	instanceTable,
 	M3,
@@ -20,7 +21,7 @@ test("the two automation anchors: M11 leads with 'offbook is not running'; notes
 	expect(M11().startsWith("offbook is not running")).toBe(true);
 	expect(M12(7).startsWith("offbook is not running")).toBe(false); // M12 is the wedged variant
 	expect(M12(7).startsWith("offbook is not answering here")).toBe(true);
-	expect(M13("/p", 7, 19801).startsWith("(offbook:")).toBe(true);
+	expect(M13("/p", 7, port(19801)).startsWith("(offbook:")).toBe(true);
 });
 
 test("M23 (`up` on a wedged instance): M12's clause + a paste-ready selector, no machine-wide claim", () => {

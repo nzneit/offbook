@@ -18,6 +18,7 @@ import { type Composed, compose } from "#src/compose/index.ts";
 import { loadConfig, loadServices } from "#src/config/index.ts";
 import type { Direction, StateEntry, Violation } from "#src/model/index.ts";
 import { buildRegistry } from "#src/registry/index.ts";
+import { port } from "./ports.ts";
 
 const FIXTURES = `${import.meta.dir}/../fixtures/asyncapi`;
 
@@ -26,16 +27,24 @@ afterEach(async () => {
 	while (servers.length) await servers.pop()?.stop();
 });
 
-// 197xx/129xx ports: distinct from cli-dispatch (190xx) and the other suites
+// Port BASES: ws 19070+n / tcp 12970+n / ctrl 19870+n, with n = 1..5 (the +0
+// row is never used), so this file consumes fifteen distinct bases — distinct
+// from cli-dispatch's (190xx) and from every other suite's. They are base
+// literals, not necessarily the bound ports: test/ports.ts maps each ONE into
+// this process's band, which is why the arithmetic happens INSIDE the port()
+// call. Mapping the base and then adding n would walk across neighbouring
+// slots in the band and collide with unrelated bases. Band 0 is the identity
+// map, so a plain local run still binds 19071-19075 / 12971-12975 /
+// 19871-19875 exactly as before.
 async function bootFixture(
 	n: number,
 	file: string,
 	serviceConfig?: Awaited<ReturnType<typeof loadServices>>["services"][string],
 ) {
 	const config = loadConfig({
-		brokerWsPort: 19070 + n,
-		brokerTcpPort: 12970 + n,
-		controlPlanePort: 19870 + n,
+		brokerWsPort: port(19070 + n),
+		brokerTcpPort: port(12970 + n),
+		controlPlanePort: port(19870 + n),
 	});
 	const path = `${FIXTURES}/${file}`;
 	const registry = await buildRegistry({

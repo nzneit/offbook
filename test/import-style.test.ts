@@ -24,3 +24,23 @@ test("no parent-relative imports outside the subpath aliases", () => {
 		.filter((p) => PARENT_RELATIVE.test(readFileSync(p, "utf8")));
 	expect(offenders).toEqual([]);
 });
+
+// The `#test/*` alias (added with the port bands, D-033) is a src -> test edge,
+// which the other three aliases are not. It exists for ONE reason: `src/**/
+// *.test.ts` files allocate ports through `#test/ports.ts`. Importing it from
+// anything that ships is a real hazard, not a style point — `test/ports.ts`
+// binds a socket and writes to stderr as an import side effect, and the R-043
+// log parsers are stderr-sensitive (D-030). Assembled from halves so this
+// file's own source never contains the string it forbids.
+const TEST_ALIAS = ["#test", "/"].join("");
+
+test("only *.test.ts files reach into the #test/ alias", () => {
+	const offenders = ["src", "scripts", "bin", "demo-app"]
+		.flatMap(walk)
+		.filter(
+			(p) =>
+				(p.endsWith(".ts") || p.startsWith("bin/")) && !p.endsWith(".test.ts"),
+		)
+		.filter((p) => readFileSync(p, "utf8").includes(TEST_ALIAS));
+	expect(offenders).toEqual([]);
+});

@@ -11,6 +11,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { port } from "#test/ports.ts";
 import { pointerPath } from "./registry.ts";
 import {
 	clearRunfile,
@@ -22,15 +23,20 @@ import {
 	writeRunfile,
 } from "./runfile.ts";
 
-// ports for this file (repo convention: unique per file): 19960-19972
+// Port bases for this file (repo convention: unique per file): 19960-19978.
+// Those are BASE literals, not necessarily the bound ports — every one is
+// band-mapped at runtime by port() (test/ports.ts). Band 0, the single-process
+// local case, is the identity map, so a plain `bun test` still binds exactly
+// the numbers written here; a concurrent process claims another band and its
+// bases land in that band's compact window instead.
 
 test("probeOffbook: a listener answering non-mode JSON is not attributed as offbook", async () => {
 	const server = Bun.serve({
-		port: 19960,
+		port: port(19960),
 		fetch: () => Response.json({ ok: true }),
 	});
 	try {
-		expect(await probeOffbook(19960)).toBe(false);
+		expect(await probeOffbook(port(19960))).toBe(false);
 	} finally {
 		server.stop(true);
 	}
@@ -40,12 +46,12 @@ test("probeOffbook: a listener that never responds fails within the timeout, not
 	// a raw TCP accept, never an HTTP response: fetch() must time out, not hang
 	const listener = Bun.listen({
 		hostname: "127.0.0.1",
-		port: 19961,
+		port: port(19961),
 		socket: { data() {} },
 	});
 	try {
 		const start = Date.now();
-		expect(await probeOffbook(19961, 60)).toBe(false);
+		expect(await probeOffbook(port(19961), 60)).toBe(false);
 		expect(Date.now() - start).toBeLessThan(500); // bounded by timeoutMs, not the default
 	} finally {
 		listener.stop(true);
@@ -54,11 +60,11 @@ test("probeOffbook: a listener that never responds fails within the timeout, not
 
 test("probeOffbook: a {mode: passive} responder is attributed as a live offbook", async () => {
 	const server = Bun.serve({
-		port: 19962,
+		port: port(19962),
 		fetch: () => Response.json({ mode: "passive" }),
 	});
 	try {
-		expect(await probeOffbook(19962)).toBe(true);
+		expect(await probeOffbook(port(19962))).toBe(true);
 	} finally {
 		server.stop(true);
 	}
@@ -66,29 +72,29 @@ test("probeOffbook: a {mode: passive} responder is attributed as a live offbook"
 
 test("probeOffbook: a {mode: autonomous} responder is also attributed as live", async () => {
 	const server = Bun.serve({
-		port: 19963,
+		port: port(19963),
 		fetch: () => Response.json({ mode: "autonomous" }),
 	});
 	try {
-		expect(await probeOffbook(19963)).toBe(true);
+		expect(await probeOffbook(port(19963))).toBe(true);
 	} finally {
 		server.stop(true);
 	}
 });
 
 test("probeOffbook: nothing listening (connection refused) is not attributed as offbook", async () => {
-	expect(await probeOffbook(19964)).toBe(false);
+	expect(await probeOffbook(port(19964))).toBe(false);
 });
 
 test("probeOffbook: a non-2xx answer is not attributed, even when its body is offbook-shaped", async () => {
 	// a server erroring out (or a proxy answering 503 for a dead upstream) may
 	// still echo an offbook-shaped body; only a 2xx proves someone is serving
 	const server = Bun.serve({
-		port: 19969,
+		port: port(19969),
 		fetch: () => Response.json({ mode: "passive" }, { status: 503 }),
 	});
 	try {
-		expect(await probeOffbook(19969)).toBe(false);
+		expect(await probeOffbook(port(19969))).toBe(false);
 	} finally {
 		server.stop(true);
 	}
@@ -153,17 +159,17 @@ test("probeServer: classifies an identity answer, a legacy /v1/mode answer, and 
 		runDir: "/tmp/p/.offbook",
 		startedAt: "2026-08-19T00:00:00.000Z",
 		demo: false,
-		ports: { brokerWsPort: 1, brokerTcpPort: 2, controlPlanePort: 19965 },
+		ports: { brokerWsPort: 1, brokerTcpPort: 2, controlPlanePort: port(19965) },
 	};
 	const server = Bun.serve({
-		port: 19965,
+		port: port(19965),
 		fetch: (req) =>
 			new URL(req.url).pathname === "/v1/server"
 				? Response.json(identity)
 				: new Response("nope", { status: 404 }),
 	});
 	try {
-		const probe = await probeServer(19965);
+		const probe = await probeServer(port(19965));
 		expect(probe.kind).toBe("server");
 		if (probe.kind === "server")
 			expect(probe.identity.token).toBe(identity.token);
@@ -173,29 +179,29 @@ test("probeServer: classifies an identity answer, a legacy /v1/mode answer, and 
 
 	// legacy: /v1/server 404s but /v1/mode answers offbook-shaped
 	const legacy = Bun.serve({
-		port: 19966,
+		port: port(19966),
 		fetch: (req) =>
 			new URL(req.url).pathname === "/v1/mode"
 				? Response.json({ mode: "passive" })
 				: new Response("nope", { status: 404 }),
 	});
 	try {
-		expect((await probeServer(19966)).kind).toBe("legacy");
+		expect((await probeServer(port(19966))).kind).toBe("legacy");
 	} finally {
 		legacy.stop(true);
 	}
 
 	// silence: nothing listens (the internal one-retry-with-longer-timeout
 	// path still concludes silent)
-	expect((await probeServer(19967, 60)).kind).toBe("silent");
+	expect((await probeServer(port(19967), 60)).kind).toBe("silent");
 
 	// a foreign HTTP server that 404s both paths is silent, not legacy
 	const foreign = Bun.serve({
-		port: 19968,
+		port: port(19968),
 		fetch: () => new Response("hello", { status: 200 }),
 	});
 	try {
-		expect((await probeServer(19968, 60)).kind).toBe("silent");
+		expect((await probeServer(port(19968), 60)).kind).toBe("silent");
 	} finally {
 		foreign.stop(true);
 	}
@@ -207,22 +213,22 @@ test("probeServer: a 200 /v1/server body that is not identity-shaped is silent, 
 	// identity — trusting the answer would let a stray dev server claim an
 	// instance's runDir and drive the resolver's heal/skip decisions
 	const shapeless = Bun.serve({
-		port: 19970,
+		port: port(19970),
 		fetch: () => Response.json({ hello: "world" }),
 	});
 	try {
-		expect((await probeServer(19970)).kind).toBe("silent");
+		expect((await probeServer(port(19970))).kind).toBe("silent");
 	} finally {
 		shapeless.stop(true);
 	}
 	// 404 on /v1/server AND on /v1/mode: an unrelated HTTP server on the port,
 	// not a pre-D-032 offbook (which is what "legacy" is reserved for)
 	const notOffbook = Bun.serve({
-		port: 19971,
+		port: port(19971),
 		fetch: () => new Response("nope", { status: 404 }),
 	});
 	try {
-		expect((await probeServer(19971)).kind).toBe("silent");
+		expect((await probeServer(port(19971))).kind).toBe("silent");
 	} finally {
 		notOffbook.stop(true);
 	}
@@ -235,16 +241,113 @@ test("probeServer: a listener that accepts but never answers is silent within th
 	// resolves an instance hangs with it
 	const listener = Bun.listen({
 		hostname: "127.0.0.1",
-		port: 19972,
+		port: port(19972),
 		socket: { data() {} },
 	});
 	try {
 		const start = Date.now();
-		expect((await probeServer(19972, 60)).kind).toBe("silent");
+		expect((await probeServer(port(19972), 60)).kind).toBe("silent");
 		// 60ms + a 120ms retry: bounded by timeoutMs, not by the 500ms default
 		expect(Date.now() - start).toBeLessThan(1000);
 	} finally {
 		listener.stop(true);
+	}
+});
+
+// [utest->R-044]
+test("probeServer: an identity is trusted only when EVERY field is the right type", async () => {
+	// one field wrong per body, the other two right: a shape check that ANDs
+	// its clauses rejects all three, one that ORs them accepts all three. A
+	// stray dev server answering /v1/server must never be read as an offbook
+	// identity — the resolver drives heal/skip decisions off exactly this.
+	const cases = [
+		{ at: port(19973), body: { token: 42, runDir: "/x/.offbook", pid: 7 } },
+		{ at: port(19974), body: { token: "t".repeat(32), runDir: 42, pid: 7 } },
+		{
+			at: port(19975),
+			body: { token: "t".repeat(32), runDir: "/x/.offbook", pid: "7" },
+		},
+	];
+	for (const { at, body } of cases) {
+		const server = Bun.serve({ port: at, fetch: () => Response.json(body) });
+		try {
+			expect((await probeServer(at, 60)).kind).toBe("silent");
+		} finally {
+			server.stop(true);
+		}
+	}
+});
+
+// [utest->R-044]
+test("probeServer: a silent first answer is retried exactly once, and a good first answer is not", async () => {
+	// the retry is D-032's slow-machine allowance: a first answer that times
+	// out must not read as wedged. Pin both halves — that the retry HAPPENS
+	// (or a loaded server is misjudged) and that it does NOT happen after a
+	// good answer (or every probe pays a second round trip).
+	const identity = {
+		token: "a".repeat(32),
+		runDir: "/x/.offbook",
+		pid: 7,
+		ports: { brokerWsPort: 1, brokerTcpPort: 2, controlPlanePort: 3 },
+	};
+	let calls = 0;
+	const slowFirst = Bun.serve({
+		port: port(19976),
+		fetch: async () => {
+			calls += 1;
+			if (calls === 1) await Bun.sleep(400); // aborted by the 60ms budget
+			return Response.json(identity);
+		},
+	});
+	try {
+		const probe = await probeServer(port(19976), 60);
+		expect(probe.kind).toBe("server"); // the retry rescued it
+		expect(calls).toBe(2);
+	} finally {
+		slowFirst.stop(true);
+	}
+
+	let answered = 0;
+	const promptly = Bun.serve({
+		port: port(19977),
+		fetch: () => {
+			answered += 1;
+			return Response.json(identity);
+		},
+	});
+	try {
+		expect((await probeServer(port(19977), 60)).kind).toBe("server");
+		expect(answered).toBe(1); // no retry after a good answer
+	} finally {
+		promptly.stop(true);
+	}
+});
+
+// [utest->R-044]
+test("probeServer: the retry gets a DOUBLED budget, not the first one over again", async () => {
+	// Measured as a RATIO of the two attempts' own durations, never as absolute
+	// milliseconds: a mutation worker shares four cores with three siblings, so
+	// wall-clock thresholds flake there, while both attempts stretch together.
+	// The server never answers, so each attempt runs its full budget: attempt 1
+	// spans t, attempt 2 spans 2t. Halving or reusing t drops the ratio below 1.
+	const t = 60;
+	const entered: number[] = [];
+	const wedged = Bun.serve({
+		port: port(19978),
+		fetch: () => {
+			entered.push(Date.now());
+			return new Promise<Response>(() => {}); // never answers
+		},
+	});
+	try {
+		expect((await probeServer(port(19978), t)).kind).toBe("silent");
+		const returned = Date.now();
+		expect(entered).toHaveLength(2); // one retry, not zero and not two
+		const first = (entered[1] as number) - (entered[0] as number);
+		const second = returned - (entered[1] as number);
+		expect(second).toBeGreaterThan(first * 1.5);
+	} finally {
+		wedged.stop(true);
 	}
 });
 
