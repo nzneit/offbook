@@ -4,7 +4,10 @@
 #      (e.g. drop setup-bun, use actions/setup-node + `npm ci`);
 #   3. tune the MUTATION_GATE_* env knobs (full table in the script header);
 #   4. add the `mutation` check to branch protection; create the
-#      mutate-force / mutate-skip labels.
+#      mutate-force / mutate-skip labels;
+#   5. the `port-band canary` step is offbook-specific (it pins the
+#      per-worker test-port bands in test/ports.ts) — drop it, or keep it if
+#      you adopt the same scheme. The `sweep sandbox orphans` step is generic.
 # Modes: changed (default: mutates the PR's changed files) or incremental
 # (MUTATION_GATE_MODE: incremental; needs a baseline, see the commented-out
 # job at the bottom, plus an actions/cache restore step in this job).
@@ -43,6 +46,68 @@ jobs:
           MUTATION_GATE_SKIP: ${{ contains(github.event.pull_request.labels.*.name, 'mutate-skip') && '1' || '' }}
           MUTATION_GATE_EXTRA_ARGS: "--concurrency 4" # Task 10 measurement: conc-1 exceeded the 15-min job timeout at 409 lines; conc-4 completed in 7.7 min (27.5 mutants/min) with a clean, non-corrupted report
         run: node scripts/mutation-gate.mjs
+      # Canary for the per-worker test-port bands (test/ports.ts). The gate
+      # runs Stryker at --concurrency 4, and concurrent workers only stay off
+      # each other's ports because test/preload.ts claims a band before any
+      # test module loads. That claim reaches the workers through ONE seam:
+      # the bun runner rewrites bunfig.toml into a sanitized temp config for
+      # every child run and forwards only an allowlist of [test] keys. Drop
+      # `preload` from that allowlist in a runner upgrade and nothing fails —
+      # the bands quietly stop happening and the EADDRINUSE flake (which
+      # scores crashed runs as KILLED mutants) comes back.
+      #
+      # Why this reproduces the seam instead of grepping the job log: the
+      # runner spawns `bun test` with stdio ["ignore","pipe","pipe"] and keeps
+      # the child's output in a buffer, printing it only on an error path
+      # (verified in @hughescr/stryker-bun-runner 1.3.8), so the
+      # `[test/ports] band` line never reaches Stryker's console. So ask the
+      # INSTALLED runner for the config it would hand a child, run bun test
+      # under exactly that config, and require the band line. A future runner
+      # that renames or removes ensureSanitizedBunfig fails this step too,
+      # which is the point: the seam must never move silently.
+      - name: port-band canary
+        if: always()
+        run: |
+          CFG="$(bun -e '
+            import { BunTestRunner } from "@hughescr/stryker-bun-runner";
+            const noop = () => {};
+            const logger = { debug: noop, info: noop, warn: noop, error: noop, trace: noop, fatal: noop };
+            console.log(await new BunTestRunner(logger, {}).ensureSanitizedBunfig());
+          ')"
+          echo "runner-sanitized bunfig: $CFG"
+          cat "$CFG"
+          PROBE=test/stryker-tsconfig-noop.test.ts
+          # NEGATIVE CONTROL. The probe must not announce a band on its OWN:
+          # anything in its import graph that reaches test/ports.ts claims a
+          # band (and prints the line) as an import side effect, which would
+          # make the positive check below pass with the preload dropped — the
+          # exact blindness this step exists to prevent, and it already bit
+          # once (the first draft pointed at test/ports.test.ts and was green
+          # either way). Grepping the probe's own text for the import only ever
+          # saw a DIRECT one; running it under a preload-free config measures
+          # the whole graph, however deep, with no resolver of our own.
+          BARE="${RUNNER_TEMP:-.}/band-canary-bare.toml"
+          printf '[test]\ncoverage = false\n' > "$BARE"
+          NEG="${RUNNER_TEMP:-.}/band-canary-neg.log"
+          bun test --config="$BARE" "$PROBE" > "$NEG" 2>&1 || true
+          if ! grep -qE '^ *[1-9][0-9]* pass' "$NEG"; then
+            echo "::error::the preload-free control run of $PROBE did not run any test, so its silence proves nothing. Fix the probe or the bare config."
+            tail -40 "$NEG"
+            exit 1
+          fi
+          if grep -q '^\[test/ports\] band ' "$NEG"; then
+            echo "::error::$PROBE announces a band with NO preload, so something in its import graph reaches test/ports.ts and this canary can no longer detect a dropped preload. Point it at a test file whose graph does not."
+            exit 1
+          fi
+          LOG="${RUNNER_TEMP:-.}/band-canary.log"
+          # Exit code ignored on purpose: only the band line is the signal here.
+          bun test --config="$CFG" "$PROBE" > "$LOG" 2>&1 || true
+          if ! grep -q '^\[test/ports\] band ' "$LOG"; then
+            echo "::error::no '[test/ports] band' line: the mutation runner's bun test children are not preloading test/preload.ts, so every worker is unbanded and the port collisions are back. Check whether the runner still forwards [test].preload when it sanitizes bunfig.toml."
+            tail -40 "$LOG"
+            exit 1
+          fi
+          grep -m1 '^\[test/ports\] band ' "$LOG"
       - name: sticky comment
         if: always() && steps.gate.outputs.decision != ''
         continue-on-error: true # fork PRs get a read-only token; the verdict is the gate step's alone
@@ -72,6 +137,46 @@ jobs:
           path: reports/mutation/
           retention-days: 14
           if-no-files-found: ignore
+      # Post-job sweep of processes a sandbox run left behind (a detached
+      # offbook server whose parent bun test was killed, say): their argv
+      # still names the sandbox they were launched from. Keep this step LAST
+      # and post-job — it must never become an in-run reaper. At concurrency 4
+      # a reaper keyed on presence kills SIBLING workers' live runs, and every
+      # murdered run scores its mutant KILLED: a silent drift toward false
+      # green, strictly worse than the EADDRINUSE it would replace. Here the
+      # gate has already produced its verdict, so nothing swept can be
+      # mistaken for a test result. Two guards, both learned the hard way:
+      # the pattern is assembled at runtime so the script can never match its
+      # own text if it is ever run inline, and this job's own process tree is
+      # excluded so a `pkill -f` cannot take the runner down with it (kill by
+      # collected pid, never a second pattern match).
+      - name: sweep sandbox orphans
+        if: always()
+        run: |
+          SANDBOX="stryker-tmp/sandbox-"
+          PATTERN="[.]$SANDBOX"
+          SELF=""
+          P=$$
+          while [ -n "$P" ] && [ "$P" -gt 1 ]; do
+            SELF="$SELF $P"
+            P="$(ps -o ppid= -p "$P" 2>/dev/null | tr -d ' ')"
+          done
+          VICTIMS=""
+          for PID in $(pgrep -f "$PATTERN" || true); do
+            case " $SELF " in *" $PID "*) continue ;; esac
+            VICTIMS="$VICTIMS $PID"
+          done
+          if [ -z "$VICTIMS" ]; then
+            echo "no .$SANDBOX* processes left behind"
+            exit 0
+          fi
+          echo "leftover sandbox processes:"
+          ps -o pid=,etime=,args= -p "$(echo $VICTIMS | tr ' ' ',')" || true
+          kill -TERM $VICTIMS 2>/dev/null || true
+          sleep 2
+          kill -KILL $VICTIMS 2>/dev/null || true
+          echo "swept:$VICTIMS"
+          exit 0
 #  baseline: # incremental-mode adopters: produce/refresh the baseline on pushes to main
 #    # (also add `push: { branches: [main] }` to `on:` and an `if: github.event_name == 'push'` guard)
 #    runs-on: ubuntu-latest
