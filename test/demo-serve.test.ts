@@ -13,13 +13,17 @@ import { run } from "#src/cli/index.ts";
 import { logPath, readRunfile } from "#src/cli/runfile.ts";
 import { loadConfig } from "#src/config/index.ts";
 import type { StateEntry } from "#src/model/index.ts";
+import { port, portStr } from "./ports.ts";
 
 test("bootDemo composes the bundled spec + chain scenarios; a heat command chains to heating", async () => {
-	// in-process ports: ws 19110 / tcp 12991 / ctrl 19891
+	// in-process port BASES: ws 19110 / tcp 12991 / ctrl 19891. Base literals,
+	// not necessarily the bound ports — test/ports.ts maps each into this
+	// process's band, and band 0 is the identity map, so a plain local run binds
+	// these very numbers.
 	const config = loadConfig({
-		brokerWsPort: 19110,
-		brokerTcpPort: 12991,
-		controlPlanePort: 19891,
+		brokerWsPort: port(19110),
+		brokerTcpPort: port(12991),
+		controlPlanePort: port(19891),
 		mode: "passive", // reactive scenarios still fire; no autonomous ticks
 		wallClock: false, // virtual clock — the 100-900ms delays are instant
 	});
@@ -65,18 +69,21 @@ test("bootDemo composes the bundled spec + chain scenarios; a heat command chain
 }, 30_000);
 
 test("demo --serve: detached boot, fingerprint line in offbook.log, down cleans up", async () => {
-	// spawned ports: ws 19111 / tcp 12992 / ctrl 19892
+	// spawned port BASES: ws 19111 / tcp 12992 / ctrl 19892. Base literals, not
+	// necessarily the bound ports — test/ports.ts maps each into this process's
+	// band (band 0 = identity), and the detached child is handed the mapped
+	// values as flags, so parent and child always agree.
 	const dir = mkdtempSync(join(tmpdir(), "offbook-demo-serve-"));
 	const runDir = join(dir, ".offbook");
 	const flags = [
 		"--run-dir",
 		runDir,
 		"--ws-port",
-		"19111",
+		portStr(19111),
 		"--tcp-port",
-		"12992",
+		portStr(12992),
 		"--ctrl-port",
-		"19892",
+		portStr(19892),
 	];
 	const out: string[] = [];
 	const errs: string[] = [];
@@ -99,16 +106,16 @@ test("demo --serve: detached boot, fingerprint line in offbook.log, down cleans 
 			err: (l) => errs.push(l),
 		});
 		if (code !== 0) throw new Error(`demo --serve failed:\n${errs.join("\n")}`);
-		expect(out.join("\n")).toContain("ws://localhost:19111");
+		expect(out.join("\n")).toContain(`ws://localhost:${portStr(19111)}`);
 
 		// the bundled scenarios are live on the spawned server
 		const scenarios = (await (
-			await fetch("http://localhost:19892/v1/scenarios")
+			await fetch(`http://localhost:${port(19892)}/v1/scenarios`)
 		).json()) as { scenarios: { name: string }[] };
 		expect(scenarios.scenarios.map((s) => s.name)).toContain("set-heat");
 
 		// a real ws client's connect lands as a ws-connect line in offbook.log
-		const client = await connectAsync("ws://localhost:19111", {
+		const client = await connectAsync(`ws://localhost:${port(19111)}`, {
 			forceNativeWebSocket: true,
 			reconnectPeriod: 0,
 			clientId: "demo-serve-probe",

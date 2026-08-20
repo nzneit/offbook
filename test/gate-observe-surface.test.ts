@@ -11,13 +11,23 @@ import { type Composed, compose } from "#src/compose/index.ts";
 import { loadConfig } from "#src/config/index.ts";
 import type { Violation } from "#src/model/index.ts";
 import { buildRegistry } from "#src/registry/index.ts";
+import { port } from "./ports.ts";
 
-// 196xx/129xx ports: distinct from every other suite
-const WS = 19060;
+// Port BASES for this file: ws 19060 / tcp 12960 / ctrl 19860 — distinct from
+// every other suite's bases, which is the invariant that keeps a single-band
+// run collision-free. They are base literals, not necessarily the bound ports:
+// test/ports.ts maps each into whichever band this process claimed (band 0 is
+// the identity map, so a plain local run binds these very numbers), and
+// distinct bases never share a slot inside a band, so the distinctness holds
+// in every band. The mapping resolves at import time, which this file needs:
+// loadConfig runs at MODULE SCOPE. Nothing binds here — compose().start() in
+// beforeAll does the binding — but the band claim still lands first, via
+// test/preload.ts.
+const WS = port(19060);
 const config = loadConfig({
 	brokerWsPort: WS,
-	brokerTcpPort: 12960,
-	controlPlanePort: 19860,
+	brokerTcpPort: port(12960),
+	controlPlanePort: port(19860),
 });
 
 let server: Composed;

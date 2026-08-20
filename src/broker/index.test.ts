@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { connect, connectAsync } from "mqtt";
 import { loadConfig } from "#src/config/index.ts";
 import type { InboundEvent } from "#src/model/index.ts";
+import { port } from "#test/ports.ts";
 import { createBroker } from "./index.ts";
 
 // [utest->R-003]
@@ -15,12 +16,22 @@ afterEach(async () => {
 	while (brokers.length) await brokers.pop()?.stop();
 });
 
-// use per-test ports to avoid collisions across the suite
+// Per-test ports, so the file's own brokers never collide with each other or
+// with the rest of the suite. Port BASES for this file (repo convention:
+// unique per file): ws 19000+n / tcp 11800+n / ctrl 19800+n, n = 1..8; the
+// ctrl base is config-only, since createBroker binds ws and tcp only. Those
+// are allocation bases, not necessarily the ports bound at runtime: every
+// computed base goes through port() from test/ports.ts, which maps it into
+// this process's claimed band. Band 0 (a normal local run) is the identity
+// map, so the numbers here are what you will see; a concurrent run claims a
+// higher band and the same bases land elsewhere. port() is applied per
+// computed value (port(19000 + n)), never to the base alone — in a mapped
+// band, distinct values must stay distinct.
 function ports(n: number) {
 	return loadConfig({
-		brokerWsPort: 19000 + n,
-		brokerTcpPort: 11800 + n,
-		controlPlanePort: 19800 + n,
+		brokerWsPort: port(19000 + n),
+		brokerTcpPort: port(11800 + n),
+		controlPlanePort: port(19800 + n),
 	});
 }
 

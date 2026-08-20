@@ -10,6 +10,7 @@ import Ajv2020 from "ajv/dist/2020";
 import { type Composed, compose } from "#src/compose/index.ts";
 import { loadConfig } from "#src/config/index.ts";
 import type { Channel, SpecRegistry } from "#src/model/index.ts";
+import { port } from "#test/ports.ts";
 
 const servers: Composed[] = [];
 afterEach(async () => {
@@ -60,9 +61,14 @@ test("contradiction warn-log: fires for a flagged channel's initialState handler
 	const logs: string[] = [];
 	const server = await compose({
 		config: loadConfig({
-			brokerWsPort: 18120,
-			brokerTcpPort: 12920,
-			controlPlanePort: 18920,
+			// Port BASES for this file (repo convention: unique per file), all
+			// three really bound by compose().start(). They are allocation bases,
+			// not necessarily the ports bound at runtime: port() (test/ports.ts)
+			// maps each into this process's claimed band, and band 0 (a normal
+			// local run) is the identity map.
+			brokerWsPort: port(18120),
+			brokerTcpPort: port(12920),
+			controlPlanePort: port(18920),
 		}),
 		registry: regOf(chan("alerts/off"), chan("alerts/on")), // unflagged at boot
 		handlersDir: dir,

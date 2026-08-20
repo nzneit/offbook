@@ -10,12 +10,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "#src/cli/index.ts";
 import { readRunfile } from "#src/cli/runfile.ts";
+import { portStr } from "./ports.ts";
 
-// ports for this file: ws 19120 / tcp 12994 / ctrl 19894 / demo-app 19994
-const WS = "19120";
-const TCP = "12994";
-const CTRL = "19894";
-const APP = "19994";
+// Port BASES for this file: ws 19120 / tcp 12994 / ctrl 19894 / demo-app 19994.
+// They are base literals, not necessarily the bound ports: test/ports.ts maps
+// each one into whichever band this process claimed. Band 0 is the identity
+// map, so a plain local run really does bind these numbers; a concurrent worker
+// binds its own band's equivalents. Ports stay confined to the exec closures
+// below — they must never leak into the documented `line` strings.
+const WS = portStr(19120);
+const TCP = portStr(12994);
+const CTRL = portStr(19894);
+const APP = portStr(19994);
 const REPO_ROOT = join(import.meta.dir, "..");
 
 function quickstartFences(text: string): string[] {

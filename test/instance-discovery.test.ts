@@ -1,10 +1,19 @@
 // [itest->R-044] [itest->R-045]
 // Instance discovery integration: serve.ts boot-contract fatals here;
 // the state-table row suite lands in this file in a later task.
-// Ports for this file (repo convention: unique per file): 19430-19449,
-// tcp 12489-12495 (bound by the real `up` runs below; 19440-19445 +
-// tcp 12489 + 12494-12495 belong to the `up`/`demo --serve` refusal
-// tests, which never spawn).
+// Port BASES for this file (repo convention: one unique block per file):
+// 19430-19449 reserved and in use, plus tcp 12487-12495. Every one below goes
+// through port()/portStr() (./ports.ts), so these numbers are the bases the
+// file allocates, not necessarily the ports it binds: each test process maps
+// its bases into the band it claimed at preload time. Band 0 — the ordinary
+// local single-process run — is the identity map, so such a run really does
+// bind exactly these numbers. The four real `up` runs bind a full trio each;
+// the refusal tests (`up` wedged, `up` foreign-host, `demo --serve`
+// foreign-host) bind only their ws squatter and never spawn, so their tcp and
+// ctrl bases stay unbound by design. The two spawnServe fatal-boot fixtures
+// (19446-19447 + tcp 12487, 19448-19449 + tcp 12488) likewise never bind:
+// serve.ts rejects their boot files before compose. They carry ports anyway —
+// see the comment on spawnServe.
 //
 // State-table checklist (spec "The instance state table") — where each row
 // is pinned:
@@ -30,12 +39,39 @@ import { run, shouldClearFailedBoot } from "#src/cli/index.ts";
 import { canonicalPath, pointerPath } from "#src/cli/registry.ts";
 import { resolveInstance } from "#src/cli/resolve.ts";
 import { readRunfile, writeRunfile } from "#src/cli/runfile.ts";
+import { port, portStr } from "./ports.ts";
 import { gitSpecProject } from "./project-fixture.ts";
 
 const SERVE = join(import.meta.dir, "../src/cli/serve.ts");
 
+/**
+ * A boot file for the fatal-boot fixtures below.
+ *
+ * The three ports are REQUIRED, and the requirement is the point. These
+ * fixtures die in serve.ts's boot contract long before compose binds
+ * anything, so their ports look like dead weight — but a mutant that deletes
+ * the very check under test lets the boot run on, and a config with no ports
+ * falls back to loadConfig's defaults: the real, published 9080/9001/1883.
+ * That would bind a developer's live offbook ports from a test process and
+ * poison `offbook doctor`'s verb test, which probes those same defaults and
+ * is concurrency-safe only while nothing in the suite ever binds them. Typing
+ * them as mandatory is the enforcement: a future fixture cannot omit them
+ * without failing `bun run typecheck`.
+ */
+type FatalBootFile = {
+	projectDir: string;
+	config: {
+		runDir: string;
+		brokerWsPort: number;
+		brokerTcpPort: number;
+		controlPlanePort: number;
+	};
+	demo: boolean;
+	token?: string; // omitted on purpose by the missing-token fixture
+};
+
 async function spawnServe(
-	boot: object,
+	boot: FatalBootFile,
 ): Promise<{ code: number; err: string }> {
 	const dir = mkdtempSync(join(tmpdir(), "offbook-serve-fatal-"));
 	const bootPath = join(dir, "offbook.boot.json");
@@ -54,7 +90,12 @@ async function spawnServe(
 test("serve: a relative runDir in the boot file is a fatal boot error (no ports bound)", async () => {
 	const { code, err } = await spawnServe({
 		projectDir: "/tmp/nowhere",
-		config: { runDir: ".offbook" },
+		config: {
+			runDir: ".offbook",
+			brokerWsPort: port(19446),
+			brokerTcpPort: port(12487),
+			controlPlanePort: port(19447),
+		},
 		demo: true,
 		token: "aa".repeat(16),
 	});
@@ -68,7 +109,12 @@ test("serve: a missing launch token is a fatal boot error", async () => {
 	const runDir = mkdtempSync(join(tmpdir(), "offbook-serve-notoken-"));
 	const { code, err } = await spawnServe({
 		projectDir: "/tmp/nowhere",
-		config: { runDir },
+		config: {
+			runDir,
+			brokerWsPort: port(19448),
+			brokerTcpPort: port(12488),
+			controlPlanePort: port(19449),
+		},
 		demo: true,
 	});
 	expect(code).toBe(1);
@@ -99,11 +145,11 @@ test("up bakes identity: boot file token + absolute paths; /v1/server answers it
 					"up",
 					"--ci",
 					"--ws-port",
-					"19430",
+					portStr(19430),
 					"--tcp-port",
-					"12490",
+					portStr(12490),
 					"--ctrl-port",
-					"19431",
+					portStr(19431),
 				],
 				x.io,
 			),
@@ -115,7 +161,7 @@ test("up bakes identity: boot file token + absolute paths; /v1/server answers it
 		expect(boot.projectDir?.startsWith("/")).toBe(true);
 		expect(boot.config?.runDir?.startsWith("/")).toBe(true);
 		const identity = (await (
-			await fetch("http://localhost:19431/v1/server")
+			await fetch(`http://localhost:${port(19431)}/v1/server`)
 		).json()) as {
 			token: string;
 			runDir: string;
@@ -163,11 +209,11 @@ test("up with an unwritable state dir prints the could-not-record note and still
 					"up",
 					"--ci",
 					"--ws-port",
-					"19432",
+					portStr(19432),
 					"--tcp-port",
-					"12491",
+					portStr(12491),
 					"--ctrl-port",
-					"19433",
+					portStr(19433),
 				],
 				x.io,
 			),
@@ -301,11 +347,11 @@ test("up <dir>: projectDir + runDir land under the positional; a later status fr
 					dir,
 					"--ci",
 					"--ws-port",
-					"19434",
+					portStr(19434),
 					"--tcp-port",
-					"12492",
+					portStr(12492),
 					"--ctrl-port",
-					"19435",
+					portStr(19435),
 				],
 				x.io,
 			),
@@ -317,7 +363,7 @@ test("up <dir>: projectDir + runDir land under the positional; a later status fr
 		expect(boot.projectDir).toBe(projectDir);
 		expect(boot.config?.runDir).toBe(runDir);
 		const identity = (await (
-			await fetch("http://localhost:19435/v1/server")
+			await fetch(`http://localhost:${port(19435)}/v1/server`)
 		).json()) as { projectDir: string; runDir: string };
 		expect(identity.projectDir).toBe(projectDir);
 		// status from the parent: the strict-descendant tiebreak names it
@@ -351,7 +397,7 @@ test("row 7: a pointer-found wrong-token instance is skipped and disclosed, neve
 			pid: process.pid,
 			brokerWsPort: 1,
 			brokerTcpPort: 2,
-			controlPlanePort: 19436,
+			controlPlanePort: port(19436),
 			startedAt: "t",
 			token: "e1".repeat(16),
 			host: hostname(),
@@ -367,10 +413,10 @@ test("row 7: a pointer-found wrong-token instance is skipped and disclosed, neve
 		runDir: "/somewhere/else/.offbook",
 		startedAt: "t",
 		demo: false,
-		ports: { brokerWsPort: 1, brokerTcpPort: 2, controlPlanePort: 19436 },
+		ports: { brokerWsPort: 1, brokerTcpPort: 2, controlPlanePort: port(19436) },
 	};
 	const server = Bun.serve({
-		port: 19436,
+		port: port(19436),
 		fetch: (req) =>
 			new URL(req.url).pathname === "/v1/server"
 				? Response.json(identity)
@@ -423,13 +469,13 @@ test("row 2 machine-wide: a legacy instance discovered via pointer surfaces as s
 			pid: process.pid,
 			brokerWsPort: 1,
 			brokerTcpPort: 2,
-			controlPlanePort: 19437,
+			controlPlanePort: port(19437),
 			startedAt: "t",
 		},
 		{ stateDir: state },
 	);
 	const legacy = Bun.serve({
-		port: 19437,
+		port: port(19437),
 		fetch: (req) =>
 			new URL(req.url).pathname === "/v1/mode"
 				? Response.json({ mode: "autonomous" })
@@ -469,11 +515,11 @@ test("--watch respawn with the launch cwd deleted: same token, new pid, correct 
 					projectDir,
 					"--watch",
 					"--ws-port",
-					"19438",
+					portStr(19438),
 					"--tcp-port",
-					"12493",
+					portStr(12493),
 					"--ctrl-port",
-					"19439",
+					portStr(19439),
 				],
 				io().io,
 			),
@@ -504,7 +550,7 @@ test("--watch respawn with the launch cwd deleted: same token, new pid, correct 
 		while (Date.now() < deadline2) {
 			try {
 				const id = (await (
-					await fetch("http://localhost:19439/v1/server")
+					await fetch(`http://localhost:${port(19439)}/v1/server`)
 				).json()) as { token: string; pid: number };
 				if (id.pid === second?.pid) {
 					answered.token = id.token;
@@ -543,21 +589,25 @@ test("up refuses a wedged instance (alive pid, silent control port) instead of r
 	const runDir = join(proj, ".offbook");
 	const prevState = process.env.OFFBOOK_STATE_DIR;
 	process.env.OFFBOOK_STATE_DIR = state;
-	// row 3: process.pid is unmistakably alive; 19441 answers nothing
+	// row 3: process.pid is unmistakably alive; nothing ever answers the
+	// runfile's control port
 	await writeRunfile(
 		runDir,
 		{
 			pid: process.pid,
-			brokerWsPort: 19440,
-			brokerTcpPort: 12494,
-			controlPlanePort: 19441,
+			brokerWsPort: port(19440),
+			brokerTcpPort: port(12494),
+			controlPlanePort: port(19441),
 			startedAt: "t",
 			token: "d1".repeat(16),
 			host: hostname(),
 		},
 		{ stateDir: state },
 	);
-	const squatter = Bun.serve({ port: 19440, fetch: () => new Response("x") });
+	const squatter = Bun.serve({
+		port: port(19440),
+		fetch: () => new Response("x"),
+	});
 	try {
 		const x = io();
 		expect(
@@ -567,11 +617,11 @@ test("up refuses a wedged instance (alive pid, silent control port) instead of r
 					"--run-dir",
 					runDir,
 					"--ws-port",
-					"19440",
+					portStr(19440),
 					"--tcp-port",
-					"12494",
+					portStr(12494),
 					"--ctrl-port",
-					"19441",
+					portStr(19441),
 				],
 				x.io,
 			),
@@ -603,16 +653,19 @@ test("up refuses a foreign-host runfile instead of reclaiming it (row 10, shared
 		runDir,
 		{
 			pid: Bun.spawnSync(["true"]).pid ?? 4_193_996,
-			brokerWsPort: 19442,
-			brokerTcpPort: 12495,
-			controlPlanePort: 19443,
+			brokerWsPort: port(19442),
+			brokerTcpPort: port(12495),
+			controlPlanePort: port(19443),
 			startedAt: "t",
 			token: "d2".repeat(16),
 			host: "some-other-machine",
 		},
 		{ stateDir: state },
 	);
-	const squatter = Bun.serve({ port: 19442, fetch: () => new Response("x") });
+	const squatter = Bun.serve({
+		port: port(19442),
+		fetch: () => new Response("x"),
+	});
 	try {
 		const x = io();
 		expect(
@@ -622,11 +675,11 @@ test("up refuses a foreign-host runfile instead of reclaiming it (row 10, shared
 					"--run-dir",
 					runDir,
 					"--ws-port",
-					"19442",
+					portStr(19442),
 					"--tcp-port",
-					"12495",
+					portStr(12495),
 					"--ctrl-port",
-					"19443",
+					portStr(19443),
 				],
 				x.io,
 			),
@@ -656,9 +709,9 @@ test("demo --serve refuses a foreign-host runfile with M10, exit 2 (row 10)", as
 		runDir,
 		{
 			pid: Bun.spawnSync(["true"]).pid ?? 4_193_996,
-			brokerWsPort: 19444,
-			brokerTcpPort: 12489,
-			controlPlanePort: 19445,
+			brokerWsPort: port(19444),
+			brokerTcpPort: port(12489),
+			controlPlanePort: port(19445),
 			startedAt: "t",
 			token: "d3".repeat(16),
 			host: "some-other-machine",
@@ -666,7 +719,10 @@ test("demo --serve refuses a foreign-host runfile with M10, exit 2 (row 10)", as
 		{ stateDir: state },
 	);
 	// ws squatter: a regression that reclaims cannot also boot the demo
-	const squatter = Bun.serve({ port: 19444, fetch: () => new Response("x") });
+	const squatter = Bun.serve({
+		port: port(19444),
+		fetch: () => new Response("x"),
+	});
 	try {
 		const x = io();
 		expect(
@@ -677,11 +733,11 @@ test("demo --serve refuses a foreign-host runfile with M10, exit 2 (row 10)", as
 					"--run-dir",
 					runDir,
 					"--ws-port",
-					"19444",
+					portStr(19444),
 					"--tcp-port",
-					"12489",
+					portStr(12489),
 					"--ctrl-port",
-					"19445",
+					portStr(19445),
 				],
 				x.io,
 			),

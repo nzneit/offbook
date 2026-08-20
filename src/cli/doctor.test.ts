@@ -11,13 +11,22 @@ import {
 } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { port, portStr } from "#test/ports.ts";
 import type { DoctorCtx, DoctorReport } from "./doctor.ts";
 import { DOCTOR_CHECKS, runDoctor, versionAtLeast } from "./doctor.ts";
 import { run } from "./index.ts";
 import { pointerPath } from "./registry.ts";
 import { writeRunfile } from "./runfile.ts";
 
-// ports for this file (repo convention: unique per file): 19130-19135, 12995
+// Port bases for this file (repo convention: unique per file): 19130-19137
+// plus 12995. Those are BASE literals, not necessarily the bound ports —
+// every one is band-mapped at runtime by port()/portStr() (test/ports.ts).
+// Band 0, the single-process local case, is the identity map, so a plain
+// `bun test` binds exactly the numbers written here; a concurrent process
+// claims another band and its bases land in that band's compact window.
+// (The doctor VERB test below is the exception: with no runfile present it
+// probes the hardwired product defaults ws 9001 / tcp 1883 / ctrl 9080,
+// which are not test ports and are never bound by this suite.)
 
 function ctxWith(over: Partial<DoctorCtx>): DoctorCtx {
 	return {
@@ -26,7 +35,7 @@ function ctxWith(over: Partial<DoctorCtx>): DoctorCtx {
 		runDir: join("/nonexistent", ".offbook"),
 		offline: true,
 		bunVersion: "1.3.14",
-		ports: { ws: 19130, tcp: 12995, ctrl: 19131 },
+		ports: { ws: port(19130), tcp: port(12995), ctrl: port(19131) },
 		stateDir: STATE,
 		...over,
 	};
@@ -322,7 +331,7 @@ test("ports: a busy port fails and names it; free ports pass", async () => {
 	// occupant must contend on the exact same address.
 	const listener = Bun.listen({
 		hostname: "127.0.0.1",
-		port: 19130,
+		port: port(19130),
 		socket: { data() {} },
 	});
 	try {
@@ -330,12 +339,12 @@ test("ports: a busy port fails and names it; free ports pass", async () => {
 			ctxWith({
 				repoRoot: GOOD_REPO_ROOT,
 				projectDir: projectWith({}),
-				ports: { ws: 19130, tcp: 12995, ctrl: 19131 },
+				ports: { ws: port(19130), tcp: port(12995), ctrl: port(19131) },
 			}),
 		);
 		const check = byName(busy, "ports");
 		expect(check.status).toBe("fail");
-		expect(check.detail).toContain("19130");
+		expect(check.detail).toContain(portStr(19130));
 	} finally {
 		listener.stop(true);
 	}
@@ -343,7 +352,7 @@ test("ports: a busy port fails and names it; free ports pass", async () => {
 		ctxWith({
 			repoRoot: GOOD_REPO_ROOT,
 			projectDir: projectWith({}),
-			ports: { ws: 19130, tcp: 12995, ctrl: 19131 },
+			ports: { ws: port(19130), tcp: port(12995), ctrl: port(19131) },
 		}),
 	);
 	expect(byName(free, "ports").status).toBe("pass");
@@ -352,7 +361,7 @@ test("ports: a busy port fails and names it; free ports pass", async () => {
 // [itest->R-043]
 test("ports: a busy ctrl port that answers as offbook attributes it instead of a generic busy detail", async () => {
 	const server = Bun.serve({
-		port: 19134,
+		port: port(19134),
 		fetch: () => Response.json({ mode: "passive" }),
 	});
 	try {
@@ -360,7 +369,7 @@ test("ports: a busy ctrl port that answers as offbook attributes it instead of a
 			ctxWith({
 				repoRoot: GOOD_REPO_ROOT,
 				projectDir: projectWith({}),
-				ports: { ws: 19130, tcp: 12995, ctrl: 19134 },
+				ports: { ws: port(19130), tcp: port(12995), ctrl: port(19134) },
 			}),
 		);
 		const check = byName(attributed, "ports");
@@ -379,7 +388,7 @@ test("ports: a busy ctrl port that answers as offbook attributes it instead of a
 // [itest->R-043]
 test("ports: a busy ctrl port held by a foreign listener falls back to the generic busy detail", async () => {
 	const server = Bun.serve({
-		port: 19135,
+		port: port(19135),
 		fetch: () => Response.json({ ok: true }), // no `mode` field: not offbook
 	});
 	try {
@@ -387,12 +396,12 @@ test("ports: a busy ctrl port held by a foreign listener falls back to the gener
 			ctxWith({
 				repoRoot: GOOD_REPO_ROOT,
 				projectDir: projectWith({}),
-				ports: { ws: 19130, tcp: 12995, ctrl: 19135 },
+				ports: { ws: port(19130), tcp: port(12995), ctrl: port(19135) },
 			}),
 		);
 		const check = byName(foreign, "ports");
 		expect(check.status).toBe("fail");
-		expect(check.detail).toBe("port(s) busy: ctrl 19135");
+		expect(check.detail).toBe(`port(s) busy: ctrl ${port(19135)}`);
 		expect(check.detail).not.toContain("another offbook owns");
 		expect(check.detail).not.toContain("another directory");
 	} finally {
@@ -411,9 +420,9 @@ test("runfile: absent passes; stale (alive pid, dead port) warns with a `down` h
 		staleDir,
 		{
 			pid: process.pid, // alive, but the control port answers nothing → stale
-			brokerWsPort: 19130,
-			brokerTcpPort: 12995,
-			controlPlanePort: 19132,
+			brokerWsPort: port(19130),
+			brokerTcpPort: port(12995),
+			controlPlanePort: port(19132),
 			startedAt: "2026-07-29T00:00:00.000Z",
 		},
 		{ stateDir: STATE },
@@ -431,7 +440,7 @@ test("runfile: absent passes; stale (alive pid, dead port) warns with a `down` h
 
 	// live: a fake control plane answering GET /v1/mode marks the runfile live
 	const server = Bun.serve({
-		port: 19133,
+		port: port(19133),
 		fetch: () => Response.json({ mode: "passive" }),
 	});
 	try {
@@ -440,9 +449,9 @@ test("runfile: absent passes; stale (alive pid, dead port) warns with a `down` h
 			liveDir,
 			{
 				pid: process.pid,
-				brokerWsPort: 19130,
-				brokerTcpPort: 12995,
-				controlPlanePort: 19133,
+				brokerWsPort: port(19130),
+				brokerTcpPort: port(12995),
+				controlPlanePort: port(19133),
 				startedAt: "2026-07-29T00:00:00.000Z",
 			},
 			{ stateDir: STATE },
@@ -624,9 +633,9 @@ test("ports: an attributable owner is NAMED with a paste-ready down command; unv
 		runDir,
 		{
 			pid: process.pid,
-			brokerWsPort: 19130,
-			brokerTcpPort: 12995,
-			controlPlanePort: 19136,
+			brokerWsPort: port(19130),
+			brokerTcpPort: port(12995),
+			controlPlanePort: port(19136),
 			startedAt: "t",
 			token,
 			host: hostname(),
@@ -642,13 +651,13 @@ test("ports: an attributable owner is NAMED with a paste-ready down command; unv
 		startedAt: "t",
 		demo: false,
 		ports: {
-			brokerWsPort: 19130,
-			brokerTcpPort: 12995,
-			controlPlanePort: 19136,
+			brokerWsPort: port(19130),
+			brokerTcpPort: port(12995),
+			controlPlanePort: port(19136),
 		},
 	};
 	const server = Bun.serve({
-		port: 19136,
+		port: port(19136),
 		fetch: (req) =>
 			new URL(req.url).pathname === "/v1/server"
 				? Response.json(identity)
@@ -659,7 +668,7 @@ test("ports: an attributable owner is NAMED with a paste-ready down command; unv
 			ctxWith({
 				repoRoot: GOOD_REPO_ROOT,
 				projectDir: projectWith({}),
-				ports: { ws: 19130, tcp: 12995, ctrl: 19136 },
+				ports: { ws: port(19130), tcp: port(12995), ctrl: port(19136) },
 			}),
 		);
 		const check = byName(report, "ports");
@@ -676,7 +685,7 @@ test("ports: an attributable owner is NAMED with a paste-ready down command; unv
 // [utest->R-045]
 test("runfile: a live local runfile without a pointer warns that it is not yet manageable from elsewhere", async () => {
 	const server = Bun.serve({
-		port: 19137,
+		port: port(19137),
 		fetch: () => Response.json({ mode: "passive" }),
 	});
 	try {
@@ -685,9 +694,9 @@ test("runfile: a live local runfile without a pointer warns that it is not yet m
 			liveDir,
 			{
 				pid: process.pid,
-				brokerWsPort: 19130,
-				brokerTcpPort: 12995,
-				controlPlanePort: 19137,
+				brokerWsPort: port(19130),
+				brokerTcpPort: port(12995),
+				controlPlanePort: port(19137),
 				startedAt: "t",
 			},
 			{ stateDir: STATE },

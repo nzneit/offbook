@@ -22,6 +22,7 @@ import type {
 	Violation,
 } from "#src/model/index.ts";
 import { buildRegistry } from "#src/registry/index.ts";
+import { port } from "#test/ports.ts";
 
 const servers: Composed[] = [];
 afterEach(async () => {
@@ -49,6 +50,30 @@ function scenarioDir(text = SCENARIOS): string {
 	return dir;
 }
 
+// The one definition of boot(n)'s three ports. Port BASES for this file (repo
+// convention: unique per file): ws 18000+n / tcp 12800+n / ctrl 18800+n, and n
+// reaches 92, so this is the suite's widest per-file window. Those are
+// allocation bases, not necessarily the ports bound at runtime: every computed
+// base goes through port() from test/ports.ts, which maps it into this
+// process's claimed band. Band 0 (a normal local run) is the identity map, so
+// the numbers here are what you will see; a concurrent run claims a higher
+// band and the same bases land elsewhere. port() is applied per computed value
+// (port(18000 + n)), never to the base alone — in a mapped band, distinct
+// values must stay distinct. The R-044 identity fixture below reads its ports
+// block from this function so the two can never drift apart: the identity
+// claims the ports its own server really bound, and because that assertion
+// compares the response against the same object, a hand-copied duplicate would
+// desync silently instead of failing.
+function bootPorts(
+	n: number,
+): Pick<Config, "brokerWsPort" | "brokerTcpPort" | "controlPlanePort"> {
+	return {
+		brokerWsPort: port(18000 + n),
+		brokerTcpPort: port(12800 + n),
+		controlPlanePort: port(18800 + n),
+	};
+}
+
 async function boot(
 	n: number,
 	opts: {
@@ -59,9 +84,7 @@ async function boot(
 	} = {},
 ) {
 	const config = loadConfig({
-		brokerWsPort: 18000 + n,
-		brokerTcpPort: 12800 + n,
-		controlPlanePort: 18800 + n,
+		...bootPorts(n),
 		...opts.overrides,
 	});
 	const registry =
@@ -675,16 +698,21 @@ test("GET /v1/server: echoes the injected identity through compose; 404s (plain,
 		runDir: "/tmp/proj/.offbook",
 		startedAt: "2026-08-19T00:00:00.000Z",
 		demo: false,
-		ports: {
-			brokerWsPort: 18091,
-			brokerTcpPort: 12891,
-			controlPlanePort: 18891,
-		},
+		// the ports this very boot binds, read from boot()'s own allocator — a
+		// hand-copied trio would drift silently (the toEqual below compares the
+		// response against this same object, so a one-sided change never fails)
+		ports: bootPorts(91),
 	};
 	const withId = await boot(91, { parts: { server: identity } });
 	const res = await withId.req("/v1/server");
 	expect(res.status).toBe(200);
 	expect(await res.json()).toEqual(identity);
+	// and the identity really does describe the server that answered it
+	expect(identity.ports).toEqual({
+		brokerWsPort: withId.config.brokerWsPort,
+		brokerTcpPort: withId.config.brokerTcpPort,
+		controlPlanePort: withId.config.controlPlanePort,
+	});
 
 	// identity-less (every existing boot): a PLAIN 404 — no §5 error
 	// envelope, the closed ErrorCode union is untouched
