@@ -92,7 +92,11 @@ export async function scanPointers(
 	const dir = instancesDir(stateDir);
 	if (!existsSync(dir)) return [];
 	const entries: { path: string; raw: string; pointer: Pointer }[] = [];
-	for (const name of readdirSync(dir)) {
+	// sorted, so scan order — and everything downstream of it (dedupe
+	// observability, selector-table row order) — is the same on every
+	// filesystem, not readdir's (creation order on ext4, reverse creation
+	// order on tmpfs, name-hash order on btrfs/xfs)
+	for (const name of readdirSync(dir).sort()) {
 		if (!POINTER_NAME.test(name)) continue;
 		const path = join(dir, name);
 		let raw: string;

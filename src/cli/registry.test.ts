@@ -135,24 +135,20 @@ test("scanPointers: the realpath-keyed pointer wins even when the twin is scanne
 	const canonical = canonicalPath(runDir);
 	const goodName = `${createHash("sha256").update(canonical).digest("hex")}.json`;
 	const twinRaw = `${JSON.stringify({ v: 1, runDir: canonical, host: "twin" })}\n`;
-	// Which file the dedupe DELETES is only observable when the twin is scanned
-	// AFTER the canonical pointer, and scan order is the filesystem's (creation
-	// order on ext4, reverse creation order on tmpfs, name-hash order on
-	// btrfs/xfs) — so arrange that order explicitly instead of inheriting
-	// whichever one the filesystem hands this run.
+	// scanPointers sorts its listing, so scan position is a NAME choice, not
+	// the filesystem's: a twin named above the canonical hash is scanned
+	// after it. The twin is deliberately CREATED first — sorted scan order
+	// must beat creation order.
 	const arrange = async (): Promise<string> => {
-		for (const twinFirst of [true, false])
-			for (let i = 0; i < 32; i++) {
-				rmSync(dir, { recursive: true, force: true });
-				mkdirSync(dir, { recursive: true });
-				const candidate = `${i.toString(16).padStart(64, "0")}.json`;
-				if (twinFirst) await Bun.write(join(dir, candidate), twinRaw);
-				await writePointer(state, runDir);
-				if (!twinFirst) await Bun.write(join(dir, candidate), twinRaw);
-				const names = readdirSync(dir);
-				if (names.indexOf(candidate) > names.indexOf(goodName))
-					return candidate;
-			}
+		for (let i = 0; i < 16; i++) {
+			rmSync(dir, { recursive: true, force: true });
+			mkdirSync(dir, { recursive: true });
+			const candidate = `${"f".repeat(63)}${i.toString(16)}.json`;
+			await Bun.write(join(dir, candidate), twinRaw);
+			await writePointer(state, runDir);
+			const names = readdirSync(dir).sort();
+			if (names.indexOf(candidate) > names.indexOf(goodName)) return candidate;
+		}
 		return "";
 	};
 	const twinName = await arrange();
@@ -165,6 +161,61 @@ test("scanPointers: the realpath-keyed pointer wins even when the twin is scanne
 	expect(existsSync(join(dir, twinName))).toBe(false);
 	rmSync(state, { recursive: true, force: true });
 	rmSync(runDir, { recursive: true, force: true });
+});
+
+test("scanPointers: the realpath-keyed pointer wins when the twin is scanned before it", async () => {
+	const state = scratch();
+	const runDir = mkdtempSync(join(tmpdir(), "offbook-rundir-"));
+	const dir = join(state, "instances");
+	const canonical = canonicalPath(runDir);
+	const goodName = `${createHash("sha256").update(canonical).digest("hex")}.json`;
+	const twinRaw = `${JSON.stringify({ v: 1, runDir: canonical, host: "twin" })}\n`;
+	// a twin named below the canonical hash is scanned first, so the dedupe
+	// meets it as the incumbent — the arm where "keep the first seen" and
+	// "keep the realpath-keyed one" disagree
+	const arrange = async (): Promise<string> => {
+		for (let i = 0; i < 16; i++) {
+			rmSync(dir, { recursive: true, force: true });
+			mkdirSync(dir, { recursive: true });
+			const candidate = `${"0".repeat(63)}${i.toString(16)}.json`;
+			await writePointer(state, runDir);
+			await Bun.write(join(dir, candidate), twinRaw);
+			const names = readdirSync(dir).sort();
+			if (names.indexOf(candidate) < names.indexOf(goodName)) return candidate;
+		}
+		return "";
+	};
+	const twinName = await arrange();
+	expect(twinName).not.toBe("");
+	const entries = await scanPointers(state);
+	expect(entries).toHaveLength(1);
+	expect(entries[0].path).toBe(join(dir, goodName));
+	expect(entries[0].pointer.host).not.toBe("twin");
+	expect(existsSync(join(dir, goodName))).toBe(true);
+	expect(existsSync(join(dir, twinName))).toBe(false);
+	rmSync(state, { recursive: true, force: true });
+	rmSync(runDir, { recursive: true, force: true });
+});
+
+test("scanPointers: returns entries in sorted name order regardless of creation order", async () => {
+	const state = scratch();
+	const dir = join(state, "instances");
+	mkdirSync(dir, { recursive: true });
+	// creation order [b, a, d, c] disagrees with sorted order under ext4
+	// (creation order), tmpfs (reverse creation order), and almost every
+	// name-hash order — the return order below is the sort's doing, not
+	// the filesystem's
+	const mk = (ch: string) => `${ch.repeat(64)}.json`;
+	for (const ch of ["b", "a", "d", "c"])
+		await Bun.write(
+			join(dir, mk(ch)),
+			JSON.stringify({ v: 1, runDir: `/x/${ch}`, host: "h" }),
+		);
+	const entries = await scanPointers(state);
+	expect(entries.map((e) => e.path)).toEqual(
+		["a", "b", "c", "d"].map((ch) => join(dir, mk(ch))),
+	);
+	rmSync(state, { recursive: true, force: true });
 });
 
 test("canonicalPath: resolves symlinks so a symlinked runDir hashes to its real subtree", () => {
